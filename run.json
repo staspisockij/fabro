@@ -216,7 +216,7 @@
   "status_updated_at": "2026-05-05T20:50:09.056240Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-05T20:50:30.908766Z",
+    "timestamp": "2026-05-05T20:50:34.509380Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -225,22 +225,22 @@
     "node_retries": {},
     "context_values": {
       "failure_class": "",
-      "last_response": "The README already has a sonnet — it was added in the previous step. No changes are needed.",
-      "outcome": "succeeded",
-      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
-      "internal.work_dir": "/home/daytona/workspace",
-      "internal.thread_id": "start",
-      "internal.fidelity": "compact",
-      "internal.node_visit_count": 1,
-      "current_node": "greet",
-      "internal.run_id": "01KQWYF2ZK2HGQ7GBX725MK2RQ",
-      "response.greet": "The README already has a sonnet — it was added in the previous step. No changes are needed.",
-      "internal.retry_count.start": 0,
       "last_stage": "greet",
+      "response.greet": "The README already has a sonnet — it was added in the previous step. No changes are needed.",
+      "internal.node_visit_count": 1,
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "graph.rankdir": "LR",
+      "internal.work_dir": "/home/daytona/workspace",
+      "internal.run_id": "01KQWYF2ZK2HGQ7GBX725MK2RQ",
+      "outcome": "succeeded",
       "thread.start.current_node": "greet",
+      "internal.fidelity": "compact",
+      "internal.thread_id": "start",
+      "last_response": "The README already has a sonnet — it was added in the previous step. No changes are needed.",
       "internal.retry_count.greet": 0,
+      "internal.retry_count.start": 0,
       "failure_signature": "",
-      "graph.rankdir": "LR"
+      "current_node": "greet"
     },
     "node_outcomes": {
       "start": {
@@ -284,6 +284,7 @@
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "31ab5232cc9917995f190869482736a36a26b656",
     "node_visits": {
       "start": 1,
       "greet": 1
@@ -324,9 +325,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      53,
+      {
+        "timestamp": "2026-05-05T20:50:34.509380Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_class": "",
+          "last_stage": "greet",
+          "response.greet": "The README already has a sonnet — it was added in the previous step. No changes are needed.",
+          "internal.node_visit_count": 1,
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "graph.rankdir": "LR",
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.run_id": "01KQWYF2ZK2HGQ7GBX725MK2RQ",
+          "outcome": "succeeded",
+          "thread.start.current_node": "greet",
+          "internal.fidelity": "compact",
+          "internal.thread_id": "start",
+          "last_response": "The README already has a sonnet — it was added in the previous step. No changes are needed.",
+          "internal.retry_count.greet": 0,
+          "internal.retry_count.start": 0,
+          "failure_signature": "",
+          "current_node": "greet"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "greet": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "greet",
+              "response.greet": "The README already has a sonnet — it was added in the previous step. No changes are needed.",
+              "last_response": "The README already has a sonnet — it was added in the previous step. No changes are needed."
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 5591,
+                    "output_tokens": 766,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 50564,
+                    "cache_write_tokens": 12864
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 12864,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 91672
+            },
+            "files_touched": [
+              "/home/daytona/workspace/README.md"
+            ]
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "31ab5232cc9917995f190869482736a36a26b656",
+        "node_visits": {
+          "start": 1,
+          "greet": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-05T20:50:34.525720Z",
+    "status": "succeeded",
+    "duration_ms": 25453,
+    "final_git_commit_sha": "31ab5232cc9917995f190869482736a36a26b656",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 19680,
+        "billing_usd_micros": 91672,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 5591,
+      "output_tokens": 766,
+      "total_tokens": 69785,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 50564,
+      "cache_write_tokens": 12864,
+      "total_usd_micros": 91672
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -368,7 +477,12 @@
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-05-05T20:50:30.908721Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
@@ -381,7 +495,29 @@
       "stdout": null,
       "stderr": null,
       "started_at": "2026-05-05T20:50:11.227907Z",
-      "state": "running"
+      "duration_ms": 19680,
+      "state": "succeeded"
+    },
+    "exit@1": {
+      "first_event_seq": 56,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-05T20:50:34.509436Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null,
+      "started_at": "2026-05-05T20:50:34.509426Z",
+      "duration_ms": 0,
+      "state": "succeeded"
     }
   }
 }
