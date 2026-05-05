@@ -389,6 +389,15 @@ fn translate_tool_choice(choice: &ToolChoice) -> Option<serde_json::Value> {
     }
 }
 
+fn tool_choice_forces_tool_use(tool_choice: Option<&serde_json::Value>) -> bool {
+    matches!(
+        tool_choice
+            .and_then(|value| value.get("type"))
+            .and_then(serde_json::Value::as_str),
+        Some("any" | "tool")
+    )
+}
+
 // --- Structured output (response_format) helpers ---
 
 const SYNTHETIC_TOOL_NAME: &str = "json_output";
@@ -1148,7 +1157,7 @@ async fn build_api_request(
         .or_else(|| model_info.and_then(|m| m.limits.max_output))
         .unwrap_or(65536);
 
-    let (thinking, output_config) = if let Some(effort) = &request.reasoning_effort {
+    let (mut thinking, mut output_config) = if let Some(effort) = &request.reasoning_effort {
         if supports_effort {
             (
                 explicit_thinking,
@@ -1181,6 +1190,11 @@ async fn build_api_request(
         });
         (thinking, None)
     };
+
+    if tool_choice_forces_tool_use(tool_choice_json.as_ref()) {
+        thinking = None;
+        output_config = None;
+    }
 
     let is_fast = request.speed.as_deref() == Some("fast");
 
@@ -1789,6 +1803,24 @@ mod tests {
     }
 
     #[test]
+    fn tool_choice_forces_tool_use_detects_forced_modes() {
+        assert!(tool_choice_forces_tool_use(Some(
+            &serde_json::json!({"type": "any"})
+        )));
+        assert!(tool_choice_forces_tool_use(Some(
+            &serde_json::json!({"type": "tool", "name": "json_output"})
+        )));
+
+        assert!(!tool_choice_forces_tool_use(Some(
+            &serde_json::json!({"type": "auto"})
+        )));
+        assert!(!tool_choice_forces_tool_use(Some(
+            &serde_json::json!({"type": "none"})
+        )));
+        assert!(!tool_choice_forces_tool_use(None));
+    }
+
+    #[test]
     fn response_format_json_schema_appends_to_existing_tools() {
         let schema = serde_json::json!({"type": "object"});
         let mut request = make_request_with_format(ResponseFormat {
@@ -2190,6 +2222,115 @@ mod tests {
         assert_eq!(
             api_request.output_config,
             Some(serde_json::json!({"effort": "medium"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn build_api_request_uses_adaptive_thinking_for_opus_4_7_without_forced_tools() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            model: "claude-opus-4-7".to_string(),
+            ..make_base_request()
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
+        assert_eq!(
+            api_request.thinking,
+            Some(serde_json::json!({"type": "adaptive"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn build_api_request_omits_thinking_for_opus_4_7_json_schema() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            model: "claude-opus-4-7".to_string(),
+            response_format: Some(ResponseFormat {
+                kind:        ResponseFormatType::JsonSchema,
+                json_schema: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"]
+                })),
+                strict:      true,
+            }),
+            ..make_base_request()
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
+        let tool_choice = api_request
+            .tool_choice
+            .as_ref()
+            .expect("json schema response format should force synthetic tool");
+        assert_eq!(tool_choice["type"], "tool");
+        assert_eq!(tool_choice["name"], SYNTHETIC_TOOL_NAME);
+        assert!(
+            api_request.thinking.is_none(),
+            "forced tool calls must omit thinking"
+        );
+        assert!(
+            api_request.output_config.is_none(),
+            "forced tool calls must omit output_config effort"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_api_request_omits_thinking_for_explicit_named_tool_choice() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            tools: Some(vec![ToolDefinition {
+                name:        "json_output".to_string(),
+                description: "Output JSON".to_string(),
+                parameters:  serde_json::json!({"type": "object"}),
+            }]),
+            tool_choice: Some(ToolChoice::Named {
+                tool_name: "json_output".to_string(),
+            }),
+            provider_options: Some(serde_json::json!({
+                "anthropic": {
+                    "thinking": {"type": "adaptive"}
+                }
+            })),
+            ..make_base_request()
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
+        let tool_choice = api_request
+            .tool_choice
+            .as_ref()
+            .expect("named tool choice should be translated");
+        assert_eq!(tool_choice["type"], "tool");
+        assert_eq!(tool_choice["name"], "json_output");
+        assert!(
+            api_request.thinking.is_none(),
+            "forced named tool choice must omit explicit thinking"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_api_request_omits_effort_for_required_tool_choice() {
+        let adapter = Adapter::new("test-key");
+        let request = Request {
+            model: "claude-opus-4-7".to_string(),
+            tools: Some(vec![ToolDefinition {
+                name:        "json_output".to_string(),
+                description: "Output JSON".to_string(),
+                parameters:  serde_json::json!({"type": "object"}),
+            }]),
+            tool_choice: Some(ToolChoice::Required),
+            reasoning_effort: Some(ReasoningEffort::Medium),
+            ..make_base_request()
+        };
+
+        let (api_request, _req_builder) = build_api_request(&adapter, &request, false).await;
+        let tool_choice = api_request
+            .tool_choice
+            .as_ref()
+            .expect("required tool choice should be translated");
+        assert_eq!(tool_choice["type"], "any");
+        assert!(
+            api_request.output_config.is_none(),
+            "required tool choice must omit output_config effort"
         );
     }
 
