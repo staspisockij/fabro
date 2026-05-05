@@ -216,7 +216,7 @@
   "status_updated_at": "2026-05-05T20:49:24.721424Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-05T20:49:38.596101Z",
+    "timestamp": "2026-05-05T20:49:42.732055Z",
     "current_node": "greet",
     "completed_nodes": [
       "start",
@@ -224,29 +224,25 @@
     ],
     "node_retries": {},
     "context_values": {
-      "internal.node_visit_count": 1,
-      "outcome": "succeeded",
-      "thread.start.current_node": "greet",
-      "current_node": "greet",
-      "internal.fidelity": "compact",
-      "graph.rankdir": "LR",
-      "internal.retry_count.start": 0,
-      "response.greet": "Done! I added a haiku right below the tagline:\n\n> *Agents run the graph*\n> *You review only what matters*\n> *Ship with confidence*\n\nIt captures Fabro's core value proposition — deterministic workflow graphs, human-in-the-loop review, and confident shipping — in the classic 5-7-5 syllable structure.",
-      "internal.thread_id": "start",
-      "internal.work_dir": "/home/daytona/workspace",
+      "failure_class": "",
       "last_stage": "greet",
       "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "internal.thread_id": "start",
+      "internal.run_id": "01KQWYDQMTG46WWA2P9FKMQCPQ",
+      "internal.retry_count.start": 0,
+      "thread.start.current_node": "greet",
+      "internal.work_dir": "/home/daytona/workspace",
+      "outcome": "succeeded",
+      "response.greet": "Done! I added a haiku right below the tagline:\n\n> *Agents run the graph*\n> *You review only what matters*\n> *Ship with confidence*\n\nIt captures Fabro's core value proposition — deterministic workflow graphs, human-in-the-loop review, and confident shipping — in the classic 5-7-5 syllable structure.",
+      "internal.node_visit_count": 1,
       "failure_signature": "",
       "last_response": "Done! I added a haiku right below the tagline:\n\n> *Agents run the graph*\n> *You review only what matters*\n> *Ship with confidence*\n\nIt captures Fabro's core value proposition — deterministic workflo",
-      "failure_class": "",
+      "internal.fidelity": "compact",
+      "graph.rankdir": "LR",
       "internal.retry_count.greet": 0,
-      "internal.run_id": "01KQWYDQMTG46WWA2P9FKMQCPQ"
+      "current_node": "greet"
     },
     "node_outcomes": {
-      "start": {
-        "status": "succeeded",
-        "usage": null
-      },
       "greet": {
         "status": "succeeded",
         "context_updates": {
@@ -281,12 +277,17 @@
         "files_touched": [
           "/home/daytona/workspace/README.md"
         ]
+      },
+      "start": {
+        "status": "succeeded",
+        "usage": null
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "cb05be9e70bb90e2fcd2d61ce41556eb60cd8d01",
     "node_visits": {
-      "greet": 1,
-      "start": 1
+      "start": 1,
+      "greet": 1
     }
   },
   "checkpoints": [
@@ -324,9 +325,117 @@
           "start": 1
         }
       }
+    ],
+    [
+      42,
+      {
+        "timestamp": "2026-05-05T20:49:42.732055Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_class": "",
+          "last_stage": "greet",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "internal.thread_id": "start",
+          "internal.run_id": "01KQWYDQMTG46WWA2P9FKMQCPQ",
+          "internal.retry_count.start": 0,
+          "thread.start.current_node": "greet",
+          "internal.work_dir": "/home/daytona/workspace",
+          "outcome": "succeeded",
+          "response.greet": "Done! I added a haiku right below the tagline:\n\n> *Agents run the graph*\n> *You review only what matters*\n> *Ship with confidence*\n\nIt captures Fabro's core value proposition — deterministic workflow graphs, human-in-the-loop review, and confident shipping — in the classic 5-7-5 syllable structure.",
+          "internal.node_visit_count": 1,
+          "failure_signature": "",
+          "last_response": "Done! I added a haiku right below the tagline:\n\n> *Agents run the graph*\n> *You review only what matters*\n> *Ship with confidence*\n\nIt captures Fabro's core value proposition — deterministic workflo",
+          "internal.fidelity": "compact",
+          "graph.rankdir": "LR",
+          "internal.retry_count.greet": 0,
+          "current_node": "greet"
+        },
+        "node_outcomes": {
+          "greet": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.greet": "Done! I added a haiku right below the tagline:\n\n> *Agents run the graph*\n> *You review only what matters*\n> *Ship with confidence*\n\nIt captures Fabro's core value proposition — deterministic workflow graphs, human-in-the-loop review, and confident shipping — in the classic 5-7-5 syllable structure.",
+              "last_stage": "greet",
+              "last_response": "Done! I added a haiku right below the tagline:\n\n> *Agents run the graph*\n> *You review only what matters*\n> *Ship with confidence*\n\nIt captures Fabro's core value proposition — deterministic workflo"
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4676,
+                    "output_tokens": 423,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 25185,
+                    "cache_write_tokens": 12478
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 12478,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 74720
+            },
+            "files_touched": [
+              "/home/daytona/workspace/README.md"
+            ]
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "cb05be9e70bb90e2fcd2d61ce41556eb60cd8d01",
+        "node_visits": {
+          "start": 1,
+          "greet": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-05T20:49:42.745982Z",
+    "status": "succeeded",
+    "duration_ms": 18010,
+    "final_git_commit_sha": "cb05be9e70bb90e2fcd2d61ce41556eb60cd8d01",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "greet",
+        "stage_label": "greet",
+        "duration_ms": 11865,
+        "billing_usd_micros": 74720,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4676,
+      "output_tokens": 423,
+      "total_tokens": 42762,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 25185,
+      "cache_write_tokens": 12478,
+      "total_usd_micros": 74720
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -343,11 +452,37 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
+    "exit@1": {
+      "first_event_seq": 45,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-05T20:49:42.732144Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null,
+      "started_at": "2026-05-05T20:49:42.732131Z",
+      "duration_ms": 0,
+      "state": "succeeded"
+    },
     "greet@1": {
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: greet",
+        "failure_reason": null,
+        "timestamp": "2026-05-05T20:49:38.596043Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
@@ -360,7 +495,8 @@
       "stdout": null,
       "stderr": null,
       "started_at": "2026-05-05T20:49:26.730101Z",
-      "state": "running"
+      "duration_ms": 11865,
+      "state": "succeeded"
     },
     "start@1": {
       "first_event_seq": 16,
