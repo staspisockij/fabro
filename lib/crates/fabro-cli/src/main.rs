@@ -48,6 +48,9 @@ async fn main() {
     let raw_args: Vec<String> = std::env::args().collect();
     let subcommand = raw_args.get(1).map(String::as_str);
     let subcommand_arg = raw_args.get(2).map(String::as_str);
+    if subcommand == Some("__cli-reference") && !matches!(subcommand_arg, Some("--help" | "-h")) {
+        std::process::exit(commands::cli_reference::execute());
+    }
     if subcommand == Some("__render-graph") && !matches!(subcommand_arg, Some("--help" | "-h")) {
         std::process::exit(commands::render_graph::execute());
     }
@@ -386,6 +389,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
                 let result = tel_panic::capture(&path);
                 let _ = std::fs::remove_file(&path);
                 result?;
+            }
+            Commands::CliReference => {
+                unreachable!("__cli-reference handled before CLI bootstrap")
             }
             Commands::RenderGraph => unreachable!("__render-graph handled before CLI bootstrap"),
             #[cfg(debug_assertions)]
@@ -1271,6 +1277,15 @@ destination = "{destination}"
         let cli = Cli::try_parse_from(["fabro", "__render-graph"]).expect("should parse");
         match *cli.command.unwrap() {
             Commands::RenderGraph => {}
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_cli_reference_command() {
+        let cli = Cli::try_parse_from(["fabro", "__cli-reference"]).expect("should parse");
+        match *cli.command.unwrap() {
+            Commands::CliReference => {}
             _ => panic!("unexpected command variant"),
         }
     }

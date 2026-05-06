@@ -3,6 +3,7 @@ mod artifact_cp;
 mod artifact_list;
 mod attach;
 mod auth;
+mod cli_reference;
 mod config;
 mod create;
 mod diff;
