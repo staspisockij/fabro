@@ -102,12 +102,6 @@ impl Combine for Option<HashMap<String, toml::Value>> {
     }
 }
 
-impl Combine for Option<HashMap<String, InterpString>> {
-    fn combine(self, other: Self) -> Self {
-        self.or(other)
-    }
-}
-
 macro_rules! impl_combine_self {
     ($($ty:ty),+ $(,)?) => {
         $(

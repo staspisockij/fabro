@@ -379,16 +379,6 @@ fn main() {
         ("PreRunPushOutcome", "fabro_types::PreRunPushOutcome", &[]),
         ("DirtyStatus", "fabro_types::DirtyStatus", &[]),
         ("GitContext", "fabro_types::GitContext", &[]),
-        (
-            "RunIntegrationsSettings",
-            "fabro_types::settings::run::RunIntegrationsSettings",
-            &[],
-        ),
-        (
-            "RunIntegrationsGithubSettings",
-            "fabro_types::settings::run::RunIntegrationsGithubSettings",
-            &[],
-        ),
     ];
     for (name, path, impls) in replacements {
         settings.with_replacement(*name, *path, impls.iter().copied());
