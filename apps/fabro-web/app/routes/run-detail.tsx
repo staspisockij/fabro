@@ -236,22 +236,22 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       >
         <div className="min-w-0 flex-1">
           <h2 className="text-xl font-semibold text-fg">{run.title}</h2>
-          <div className="mt-2 flex items-center gap-3 text-sm">
+          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
             <span className="flex items-center gap-1.5">
               <span className={`size-2 rounded-full ${run.statusDot}`} />
               <span className={`font-medium ${run.statusText}`}>{run.statusLabel}</span>
             </span>
-            <span className="flex items-center gap-1 font-mono text-xs text-fg-muted">
-              <FolderIcon className="size-3" aria-hidden="true" />
+            <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
+              <FolderIcon className="size-3.5" aria-hidden="true" />
               {run.repo}
             </span>
-            <span className="flex items-center gap-1 font-mono text-xs text-fg-muted">
-              <RectangleStackIcon className="size-3" aria-hidden="true" />
+            <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
+              <RectangleStackIcon className="size-3.5" aria-hidden="true" />
               {run.workflow}
             </span>
             {run.elapsed && (
-              <span className="flex items-center gap-1 font-mono text-xs text-fg-muted">
-                <ClockIcon className="size-3" aria-hidden="true" />
+              <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
+                <ClockIcon className="size-3.5" aria-hidden="true" />
                 {run.elapsed}
               </span>
             )}
