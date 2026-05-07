@@ -37,6 +37,7 @@ export interface RunItem {
   sandboxId?: string;
   sandboxWorkingDirectory?: string;
   sourceDirectory?: string;
+  createdAt?: string;
 }
 
 export type ColumnStatus = ApiBoardColumn;
@@ -99,6 +100,7 @@ export function mapRunListItem(item: RunListItem): RunItem {
     sandboxId: item.sandbox?.id ?? undefined,
     sandboxWorkingDirectory: item.sandbox?.working_directory ?? undefined,
     sourceDirectory: item.source_directory ?? undefined,
+    createdAt: item.created_at,
   };
 }
 

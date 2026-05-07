@@ -583,6 +583,38 @@ function BoardColumn({ column }: { column: Column }) {
 
 type ViewMode = "columns" | "list";
 
+type CreatedFilter = "all" | "today" | "1h" | "1d" | "7d" | "30d";
+
+const createdFilterOptions: { value: CreatedFilter; label: string }[] = [
+  { value: "all", label: "All time" },
+  { value: "today", label: "Today" },
+  { value: "1h", label: "Last hour" },
+  { value: "1d", label: "Last day" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+];
+
+function createdCutoffMsFor(filter: CreatedFilter): number | null {
+  const now = Date.now();
+  switch (filter) {
+    case "all":
+      return null;
+    case "today": {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    }
+    case "1h":
+      return now - 60 * 60 * 1000;
+    case "1d":
+      return now - 24 * 60 * 60 * 1000;
+    case "7d":
+      return now - 7 * 24 * 60 * 60 * 1000;
+    case "30d":
+      return now - 30 * 24 * 60 * 60 * 1000;
+  }
+}
+
 function RunRow({ run }: { run: RunWithStatus }) {
   const lifecycleLabel = listLifecycleStatusLabel(run);
   const statusDisplay = columnStatusDisplay[run.status];
@@ -777,6 +809,7 @@ export default function Runs() {
   ].sort();
   const [query, setQuery] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
+  const [createdFilter, setCreatedFilter] = useState<CreatedFilter>("all");
   const [view, setView] = useState<ViewMode>("columns");
   const [columns, setColumns] = useState(initialColumns);
   const lowerQuery = query.toLowerCase();
@@ -807,11 +840,14 @@ export default function Runs() {
 
   const totalRuns = columns.reduce((sum, col) => sum + col.items.length, 0);
 
+  const createdCutoffMs = createdCutoffMsFor(createdFilter);
   const filteredColumns = columns.map((col) => ({
     ...col,
     items: col.items.filter(
       (item) =>
         (repoFilter === "all" || item.repo === repoFilter) &&
+        (createdCutoffMs == null ||
+          (item.createdAt != null && Date.parse(item.createdAt) >= createdCutoffMs)) &&
         (!query ||
           item.title.toLowerCase().includes(lowerQuery) ||
           item.repo.toLowerCase().includes(lowerQuery) ||
@@ -842,6 +878,20 @@ export default function Runs() {
               onChange={(e) => setQuery(e.target.value)}
               className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
             />
+          </div>
+          <div className="relative">
+            <select
+              name="created"
+              aria-label="Filter by created time"
+              value={createdFilter}
+              onChange={(e) => setCreatedFilter(e.target.value as CreatedFilter)}
+              className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
+            >
+              {createdFilterOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
           </div>
           <div className="relative">
             <select
