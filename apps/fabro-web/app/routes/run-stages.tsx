@@ -363,7 +363,7 @@ function EventRow({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`grid w-full grid-cols-[5rem_1fr_auto_auto] items-center gap-4 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 ${
+      className={`grid w-full grid-cols-[5rem_1fr_auto_auto] items-center gap-4 py-1.5 pl-5 pr-6 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 sm:pr-8 lg:pr-10 ${
         selected ? "bg-overlay" : ""
       }`}
     >
@@ -836,7 +836,7 @@ export default function RunStages() {
             />
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pb-6 pl-3 pr-4 pt-2 sm:pr-6 lg:pr-8">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-6 pt-2">
           {tab === "transcript" ? (
             turns.length > 0 && filteredTurns.length === 0 ? (
               <div className="px-2 py-6 text-sm text-fg-muted">
