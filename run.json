@@ -204,15 +204,101 @@
     "in_place": false
   },
   "graph_source": "digraph Hello {\n    graph [goal=\"Say hello and demonstrate a basic Fabro workflow\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    greet [label=\"Greet\", prompt=\"Add a haiku to the README\"]\n\n    start -> greet -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KR0CW48YMQG29XT0WZ71C941",
+    "start_time": "2026-05-07T04:59:41.185151Z",
+    "run_branch": "fabro/run/01KR0CW48YMQG29XT0WZ71C941",
+    "base_sha": "5ab3e3f132c088fd107a92afa20f03180e2b2e6c"
   },
-  "status_updated_at": "2026-05-07T04:59:25.381138Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-07T04:59:41.185188Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
-  "conclusion": null,
+  "checkpoint": {
+    "timestamp": "2026-05-07T04:59:44.867550Z",
+    "current_node": "start",
+    "completed_nodes": [
+      "start"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "failure_signature": "",
+      "graph.rankdir": "LR",
+      "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+      "internal.retry_count.start": 0,
+      "internal.run_id": "01KR0CW48YMQG29XT0WZ71C941",
+      "internal.thread_id": null,
+      "outcome": "succeeded",
+      "internal.fidelity": "compact",
+      "internal.work_dir": "/home/daytona/workspace",
+      "current_node": "start",
+      "internal.node_visit_count": 1,
+      "failure_class": ""
+    },
+    "node_outcomes": {
+      "start": {
+        "status": "succeeded",
+        "usage": null
+      }
+    },
+    "next_node_id": "greet",
+    "node_visits": {
+      "start": 1
+    }
+  },
+  "checkpoints": [
+    [
+      18,
+      {
+        "timestamp": "2026-05-07T04:59:44.867550Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_signature": "",
+          "graph.rankdir": "LR",
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KR0CW48YMQG29XT0WZ71C941",
+          "internal.thread_id": null,
+          "outcome": "succeeded",
+          "internal.fidelity": "compact",
+          "internal.work_dir": "/home/daytona/workspace",
+          "current_node": "start",
+          "internal.node_visit_count": 1,
+          "failure_class": ""
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "greet",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
+  "conclusion": {
+    "timestamp": "2026-05-07T04:59:54.791254Z",
+    "status": "failed",
+    "duration_ms": 13599,
+    "failure_reason": "Cancelled",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      }
+    ],
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -228,5 +314,46 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 15,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-07T04:59:44.867382Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null,
+      "started_at": "2026-05-07T04:59:44.866690Z",
+      "duration_ms": 0,
+      "state": "succeeded"
+    },
+    "greet@1": {
+      "first_event_seq": 19,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "stdout": null,
+      "stderr": null,
+      "started_at": "2026-05-07T04:59:44.867630Z",
+      "state": "running"
+    }
+  }
 }
