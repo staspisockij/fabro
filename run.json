@@ -212,15 +212,126 @@
     "in_place": false
   },
   "graph_source": "digraph Sleeper {\n    graph [goal=\"Sleep long enough for a human to practice interrupts and steering\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    nap [label=\"Nap\", timeout=\"360s\", prompt=\"Run exactly one shell command using the Bash tool: `sleep 300`, with the tool `timeout_ms` parameter set to 310000 or higher. Wait for it to return. Do not run any other commands, do not read or edit any files, do not check the environment first. After `sleep 300` returns, reply with the single word 'done' and stop.\"]\n\n    start -> nap -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KR42WX84WMQJBNNWJS07AQ33",
+    "start_time": "2026-05-08T15:22:19.852644Z",
+    "run_branch": "fabro/run/01KR42WX84WMQJBNNWJS07AQ33",
+    "base_sha": "e47e738e8bdd6c54eec95c0ad2ac1ca982d5a455"
   },
-  "status_updated_at": "2026-05-08T15:22:02.927509Z",
-  "last_event_at": "2026-05-08T15:22:18.457390Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-08T15:22:19.852727Z",
+  "last_event_at": "2026-05-08T15:23:17.255935Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
+  "checkpoint": {
+    "timestamp": "2026-05-08T15:23:17.554273Z",
+    "current_node": "nap",
+    "completed_nodes": [
+      "start",
+      "nap"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "internal.node_visit_count": 1,
+      "graph.rankdir": "LR",
+      "internal.thread_id": "start",
+      "graph.goal": "Sleep long enough for a human to practice interrupts and steering",
+      "internal.retry_count.start": 0,
+      "current_node": "nap",
+      "internal.fidelity": "compact",
+      "outcome": "succeeded",
+      "last_stage": "nap",
+      "internal.run_id": "01KR42WX84WMQJBNNWJS07AQ33",
+      "last_response": "Hello!",
+      "internal.retry_count.nap": 0,
+      "failure_class": "",
+      "response.nap": "Hello!",
+      "thread.start.current_node": "nap",
+      "failure_signature": "",
+      "internal.work_dir": "/home/daytona/workspace"
+    },
+    "node_outcomes": {
+      "nap": {
+        "status": "succeeded",
+        "context_updates": {
+          "last_response": "Hello!",
+          "last_stage": "nap",
+          "response.nap": "Hello!"
+        },
+        "notes": "Stage completed: nap",
+        "usage": {
+          "input": {
+            "usage": {
+              "model": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-6"
+              },
+              "tokens": {
+                "input_tokens": 111,
+                "output_tokens": 79,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 8450,
+                "cache_write_tokens": 8458
+              }
+            },
+            "facts": {
+              "provider": "anthropic",
+              "cache_write_5m_tokens": 8458,
+              "cache_write_1h_tokens": 0
+            }
+          },
+          "total_usd_micros": 35770
+        }
+      },
+      "start": {
+        "status": "succeeded",
+        "usage": null
+      }
+    },
+    "next_node_id": "exit",
+    "node_visits": {
+      "nap": 1,
+      "start": 1
+    }
+  },
+  "checkpoints": [
+    [
+      19,
+      {
+        "timestamp": "2026-05-08T15:22:23.254956Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_class": "",
+          "graph.rankdir": "LR",
+          "current_node": "start",
+          "graph.goal": "Sleep long enough for a human to practice interrupts and steering",
+          "internal.node_visit_count": 1,
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.fidelity": "compact",
+          "internal.thread_id": null,
+          "outcome": "succeeded",
+          "internal.run_id": "01KR42WX84WMQJBNNWJS07AQ33",
+          "internal.retry_count.start": 0,
+          "failure_signature": ""
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "nap",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
   "conclusion": null,
   "retro": null,
   "retro_prompt": null,
@@ -237,5 +348,44 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "nap@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T15:22:23.255105Z",
+      "state": "running"
+    },
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T15:22:23.254265Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T15:22:23.252785Z",
+      "duration_ms": 0,
+      "state": "succeeded"
+    }
+  }
 }
