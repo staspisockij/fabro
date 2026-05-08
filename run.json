@@ -407,10 +407,10 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-08T18:42:54.228039Z",
-  "last_event_at": "2026-05-08T18:43:02.472333Z",
+  "last_event_at": "2026-05-08T18:43:19.962007Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-08T18:43:13.501261Z",
+    "timestamp": "2026-05-08T18:43:19.958230Z",
     "current_node": "summarize",
     "completed_nodes": [
       "start",
@@ -423,51 +423,51 @@
     ],
     "node_retries": {},
     "context_values": {
-      "last_response": "# Interview Summary\n\n## Questions & Answers (in order)\n\n| # | Stage | Question | Answer |\n|---|-------|----------|--------|\n| 1 | **yes_no** | Is this interview workflow easy to follow so far? | **Yes",
-      "internal.fidelity": "summary:high",
-      "human.gate.label": "Explain the moon landing",
-      "human.gate.multiple_choice.label": "[G] Goals",
-      "thread.multi_select.current_node": "freeform",
-      "thread.freeform.current_node": "summarize",
-      "human.gate.yes_no.label": "[Y] Yes",
-      "thread.confirmation.current_node": "multiple_choice",
-      "current_node": "summarize",
-      "thread.start.current_node": "yes_no",
-      "thread.multiple_choice.current_node": "multi_select",
-      "human.gate.selected": "freeform",
-      "preferred_label": "[S] Success criteria, [B] Blockers",
-      "last_stage": "summarize",
-      "internal.retry_count.freeform": 0,
-      "thread.yes_no.current_node": "confirmation",
-      "human.gate.multiple_choice.answer": "G",
-      "internal.retry_count.confirmation": 0,
       "failure_signature": "",
-      "internal.run_id": "01KR4E6RHFVXY0CT4QEGET0Z93",
+      "human.gate.freeform.question": "Add any final context, constraints, or nuance for the summary.",
+      "human.gate.label": "Explain the moon landing",
+      "internal.retry_count.multi_select": 0,
+      "internal.retry_count.yes_no": 0,
       "internal.thread_id": "freeform",
       "internal.work_dir": "/home/daytona/workspace",
-      "internal.node_visit_count": 1,
-      "graph.rankdir": "LR",
-      "internal.retry_count.start": 0,
-      "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
-      "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
+      "last_response": "# Interview Summary\n\n## Questions & Answers (in order)\n\n| # | Stage | Question | Answer |\n|---|-------|----------|--------|\n| 1 | **yes_no** | Is this interview workflow easy to follow so far? | **Yes",
+      "thread.start.current_node": "yes_no",
       "failure_class": "",
+      "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
+      "internal.node_visit_count": 1,
+      "human.gate.text": "Explain the moon landing",
       "human.gate.multiple_choice.question": "Which theme should be the center of the final summary?",
       "internal.retry_count.multiple_choice": 0,
-      "human.gate.multi_select.label": "[S] Success criteria, [B] Blockers",
-      "human.gate.yes_no.answer": "yes",
-      "internal.retry_count.yes_no": 0,
-      "human.gate.confirmation.label": "[Y] Continue",
-      "human.gate.multi_select.answer": "S, B",
-      "internal.retry_count.multi_select": 0,
-      "human.gate.text": "Explain the moon landing",
-      "graph.goal": "Run a progressive human interview and summarize the answers",
+      "internal.retry_count.freeform": 0,
+      "internal.run_id": "01KR4E6RHFVXY0CT4QEGET0Z93",
       "outcome": "succeeded",
-      "human.gate.freeform.answer": "Explain the moon landing",
       "response.summarize": "# Interview Summary\n\n## Questions & Answers (in order)\n\n| # | Stage | Question | Answer |\n|---|-------|----------|--------|\n| 1 | **yes_no** | Is this interview workflow easy to follow so far? | **Yes** |\n| 2 | **confirmation** | Confirm that you want to continue into more structured questions. | **Yes – Continue** |\n| 3 | **multiple_choice** | Which theme should be the center of the final summary? | **Goals** |\n| 4 | **multi_select** | Which supporting areas should the final summary emphasize? | **Success Criteria, Blockers** |\n| 5 | **freeform** | Add any final context, constraints, or nuance for the summary. | **\"Explain the moon landing\"** |\n\n---\n\n## Synthesis\n\n### Primary Focus\nThe user wants the summary centered on **Goals** — what the subject is trying to achieve, not background or process.\n\n### Supporting Emphasis\nTwo complementary lenses were selected to frame the summary:\n- **Success Criteria** — what \"done well\" looks like\n- **Blockers** — what obstacles, risks, or dependencies stand in the way\n\n### Constraints & Nuance\nThe freeform prompt indicates the **subject matter is the moon landing**. The user wants it explained — implying clarity and accessibility are valued over technical depth or exhaustive detail.\n\n### Open Questions\n- No explicit audience was specified (general public vs. technical readers).\n- No length or format constraint was provided.\n- \"Explain\" is open-ended — it's unclear whether historical narrative, scientific mechanics, or political significance should dominate.\n\n---\n\n## Recommended Summary Approach\n\nProduce a **goal-oriented explanation of the moon landing** that:\n1. States the **goal** clearly (land humans on the moon and return them safely)\n2. Defines **success criteria** (Apollo 11, July 1969; safe crew return; scientific objectives met)\n3. Acknowledges **blockers** overcome along the way (technical unknowns, the Apollo 1 tragedy, Soviet competition, computational limits)\n4. Remains concise and accessible given no contrary constraints were stated",
+      "internal.retry_count.start": 0,
+      "last_stage": "summarize",
+      "thread.multiple_choice.current_node": "multi_select",
+      "human.gate.freeform.answer": "Explain the moon landing",
+      "internal.fidelity": "summary:high",
+      "internal.retry_count.confirmation": 0,
+      "thread.yes_no.current_node": "confirmation",
       "human.gate.multi_select.question": "Which supporting areas should the final summary emphasize?",
-      "internal.retry_count.summarize": 0,
+      "thread.freeform.current_node": "summarize",
+      "human.gate.multi_select.label": "[S] Success criteria, [B] Blockers",
       "human.gate.confirmation.answer": "yes",
-      "human.gate.freeform.question": "Add any final context, constraints, or nuance for the summary."
+      "preferred_label": "[S] Success criteria, [B] Blockers",
+      "human.gate.multi_select.answer": "S, B",
+      "internal.retry_count.summarize": 0,
+      "thread.multi_select.current_node": "freeform",
+      "human.gate.yes_no.answer": "yes",
+      "human.gate.multiple_choice.label": "[G] Goals",
+      "human.gate.yes_no.label": "[Y] Yes",
+      "human.gate.multiple_choice.answer": "G",
+      "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+      "thread.confirmation.current_node": "multiple_choice",
+      "graph.goal": "Run a progressive human interview and summarize the answers",
+      "graph.rankdir": "LR",
+      "human.gate.selected": "freeform",
+      "current_node": "summarize",
+      "human.gate.confirmation.label": "[Y] Continue"
     },
     "node_outcomes": {
       "yes_no": {
@@ -483,6 +483,25 @@
           "human.gate.yes_no.answer": "yes",
           "human.gate.yes_no.label": "[Y] Yes"
         },
+        "usage": null
+      },
+      "confirmation": {
+        "status": "succeeded",
+        "preferred_label": "[Y] Continue",
+        "suggested_next_ids": [
+          "multiple_choice"
+        ],
+        "context_updates": {
+          "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
+          "human.gate.confirmation.label": "[Y] Continue",
+          "human.gate.label": "[Y] Continue",
+          "human.gate.confirmation.answer": "yes",
+          "human.gate.selected": "Y"
+        },
+        "usage": null
+      },
+      "start": {
+        "status": "succeeded",
         "usage": null
       },
       "summarize": {
@@ -517,37 +536,17 @@
           "total_usd_micros": 29214
         }
       },
-      "start": {
+      "freeform": {
         "status": "succeeded",
-        "usage": null
-      },
-      "confirmation": {
-        "status": "succeeded",
-        "preferred_label": "[Y] Continue",
         "suggested_next_ids": [
-          "multiple_choice"
+          "summarize"
         ],
         "context_updates": {
-          "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
-          "human.gate.confirmation.label": "[Y] Continue",
-          "human.gate.label": "[Y] Continue",
-          "human.gate.confirmation.answer": "yes",
-          "human.gate.selected": "Y"
-        },
-        "usage": null
-      },
-      "multiple_choice": {
-        "status": "succeeded",
-        "preferred_label": "[G] Goals",
-        "suggested_next_ids": [
-          "multi_select"
-        ],
-        "context_updates": {
-          "human.gate.multiple_choice.question": "Which theme should be the center of the final summary?",
-          "human.gate.selected": "G",
-          "human.gate.multiple_choice.label": "[G] Goals",
-          "human.gate.multiple_choice.answer": "G",
-          "human.gate.label": "[G] Goals"
+          "human.gate.selected": "freeform",
+          "human.gate.text": "Explain the moon landing",
+          "human.gate.freeform.question": "Add any final context, constraints, or nuance for the summary.",
+          "human.gate.label": "Explain the moon landing",
+          "human.gate.freeform.answer": "Explain the moon landing"
         },
         "usage": null
       },
@@ -566,30 +565,32 @@
         },
         "usage": null
       },
-      "freeform": {
+      "multiple_choice": {
         "status": "succeeded",
+        "preferred_label": "[G] Goals",
         "suggested_next_ids": [
-          "summarize"
+          "multi_select"
         ],
         "context_updates": {
-          "human.gate.selected": "freeform",
-          "human.gate.text": "Explain the moon landing",
-          "human.gate.freeform.question": "Add any final context, constraints, or nuance for the summary.",
-          "human.gate.label": "Explain the moon landing",
-          "human.gate.freeform.answer": "Explain the moon landing"
+          "human.gate.multiple_choice.question": "Which theme should be the center of the final summary?",
+          "human.gate.selected": "G",
+          "human.gate.multiple_choice.label": "[G] Goals",
+          "human.gate.multiple_choice.answer": "G",
+          "human.gate.label": "[G] Goals"
         },
         "usage": null
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "9603f9c52b45050874904e10db025a89c215514c",
     "node_visits": {
       "start": 1,
-      "multiple_choice": 1,
-      "summarize": 1,
       "yes_no": 1,
-      "confirmation": 1,
+      "freeform": 1,
       "multi_select": 1,
-      "freeform": 1
+      "summarize": 1,
+      "multiple_choice": 1,
+      "confirmation": 1
     }
   },
   "checkpoints": [
@@ -1151,9 +1152,256 @@
           "start": 1
         }
       }
+    ],
+    [
+      86,
+      {
+        "timestamp": "2026-05-08T18:43:19.958230Z",
+        "current_node": "summarize",
+        "completed_nodes": [
+          "start",
+          "yes_no",
+          "confirmation",
+          "multiple_choice",
+          "multi_select",
+          "freeform",
+          "summarize"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_signature": "",
+          "human.gate.freeform.question": "Add any final context, constraints, or nuance for the summary.",
+          "human.gate.label": "Explain the moon landing",
+          "internal.retry_count.multi_select": 0,
+          "internal.retry_count.yes_no": 0,
+          "internal.thread_id": "freeform",
+          "internal.work_dir": "/home/daytona/workspace",
+          "last_response": "# Interview Summary\n\n## Questions & Answers (in order)\n\n| # | Stage | Question | Answer |\n|---|-------|----------|--------|\n| 1 | **yes_no** | Is this interview workflow easy to follow so far? | **Yes",
+          "thread.start.current_node": "yes_no",
+          "failure_class": "",
+          "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
+          "internal.node_visit_count": 1,
+          "human.gate.text": "Explain the moon landing",
+          "human.gate.multiple_choice.question": "Which theme should be the center of the final summary?",
+          "internal.retry_count.multiple_choice": 0,
+          "internal.retry_count.freeform": 0,
+          "internal.run_id": "01KR4E6RHFVXY0CT4QEGET0Z93",
+          "outcome": "succeeded",
+          "response.summarize": "# Interview Summary\n\n## Questions & Answers (in order)\n\n| # | Stage | Question | Answer |\n|---|-------|----------|--------|\n| 1 | **yes_no** | Is this interview workflow easy to follow so far? | **Yes** |\n| 2 | **confirmation** | Confirm that you want to continue into more structured questions. | **Yes – Continue** |\n| 3 | **multiple_choice** | Which theme should be the center of the final summary? | **Goals** |\n| 4 | **multi_select** | Which supporting areas should the final summary emphasize? | **Success Criteria, Blockers** |\n| 5 | **freeform** | Add any final context, constraints, or nuance for the summary. | **\"Explain the moon landing\"** |\n\n---\n\n## Synthesis\n\n### Primary Focus\nThe user wants the summary centered on **Goals** — what the subject is trying to achieve, not background or process.\n\n### Supporting Emphasis\nTwo complementary lenses were selected to frame the summary:\n- **Success Criteria** — what \"done well\" looks like\n- **Blockers** — what obstacles, risks, or dependencies stand in the way\n\n### Constraints & Nuance\nThe freeform prompt indicates the **subject matter is the moon landing**. The user wants it explained — implying clarity and accessibility are valued over technical depth or exhaustive detail.\n\n### Open Questions\n- No explicit audience was specified (general public vs. technical readers).\n- No length or format constraint was provided.\n- \"Explain\" is open-ended — it's unclear whether historical narrative, scientific mechanics, or political significance should dominate.\n\n---\n\n## Recommended Summary Approach\n\nProduce a **goal-oriented explanation of the moon landing** that:\n1. States the **goal** clearly (land humans on the moon and return them safely)\n2. Defines **success criteria** (Apollo 11, July 1969; safe crew return; scientific objectives met)\n3. Acknowledges **blockers** overcome along the way (technical unknowns, the Apollo 1 tragedy, Soviet competition, computational limits)\n4. Remains concise and accessible given no contrary constraints were stated",
+          "internal.retry_count.start": 0,
+          "last_stage": "summarize",
+          "thread.multiple_choice.current_node": "multi_select",
+          "human.gate.freeform.answer": "Explain the moon landing",
+          "internal.fidelity": "summary:high",
+          "internal.retry_count.confirmation": 0,
+          "thread.yes_no.current_node": "confirmation",
+          "human.gate.multi_select.question": "Which supporting areas should the final summary emphasize?",
+          "thread.freeform.current_node": "summarize",
+          "human.gate.multi_select.label": "[S] Success criteria, [B] Blockers",
+          "human.gate.confirmation.answer": "yes",
+          "preferred_label": "[S] Success criteria, [B] Blockers",
+          "human.gate.multi_select.answer": "S, B",
+          "internal.retry_count.summarize": 0,
+          "thread.multi_select.current_node": "freeform",
+          "human.gate.yes_no.answer": "yes",
+          "human.gate.multiple_choice.label": "[G] Goals",
+          "human.gate.yes_no.label": "[Y] Yes",
+          "human.gate.multiple_choice.answer": "G",
+          "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+          "thread.confirmation.current_node": "multiple_choice",
+          "graph.goal": "Run a progressive human interview and summarize the answers",
+          "graph.rankdir": "LR",
+          "human.gate.selected": "freeform",
+          "current_node": "summarize",
+          "human.gate.confirmation.label": "[Y] Continue"
+        },
+        "node_outcomes": {
+          "yes_no": {
+            "status": "succeeded",
+            "preferred_label": "[Y] Yes",
+            "suggested_next_ids": [
+              "confirmation"
+            ],
+            "context_updates": {
+              "human.gate.selected": "Y",
+              "human.gate.label": "[Y] Yes",
+              "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+              "human.gate.yes_no.answer": "yes",
+              "human.gate.yes_no.label": "[Y] Yes"
+            },
+            "usage": null
+          },
+          "confirmation": {
+            "status": "succeeded",
+            "preferred_label": "[Y] Continue",
+            "suggested_next_ids": [
+              "multiple_choice"
+            ],
+            "context_updates": {
+              "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
+              "human.gate.confirmation.label": "[Y] Continue",
+              "human.gate.label": "[Y] Continue",
+              "human.gate.confirmation.answer": "yes",
+              "human.gate.selected": "Y"
+            },
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "summarize": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.summarize": "# Interview Summary\n\n## Questions & Answers (in order)\n\n| # | Stage | Question | Answer |\n|---|-------|----------|--------|\n| 1 | **yes_no** | Is this interview workflow easy to follow so far? | **Yes** |\n| 2 | **confirmation** | Confirm that you want to continue into more structured questions. | **Yes – Continue** |\n| 3 | **multiple_choice** | Which theme should be the center of the final summary? | **Goals** |\n| 4 | **multi_select** | Which supporting areas should the final summary emphasize? | **Success Criteria, Blockers** |\n| 5 | **freeform** | Add any final context, constraints, or nuance for the summary. | **\"Explain the moon landing\"** |\n\n---\n\n## Synthesis\n\n### Primary Focus\nThe user wants the summary centered on **Goals** — what the subject is trying to achieve, not background or process.\n\n### Supporting Emphasis\nTwo complementary lenses were selected to frame the summary:\n- **Success Criteria** — what \"done well\" looks like\n- **Blockers** — what obstacles, risks, or dependencies stand in the way\n\n### Constraints & Nuance\nThe freeform prompt indicates the **subject matter is the moon landing**. The user wants it explained — implying clarity and accessibility are valued over technical depth or exhaustive detail.\n\n### Open Questions\n- No explicit audience was specified (general public vs. technical readers).\n- No length or format constraint was provided.\n- \"Explain\" is open-ended — it's unclear whether historical narrative, scientific mechanics, or political significance should dominate.\n\n---\n\n## Recommended Summary Approach\n\nProduce a **goal-oriented explanation of the moon landing** that:\n1. States the **goal** clearly (land humans on the moon and return them safely)\n2. Defines **success criteria** (Apollo 11, July 1969; safe crew return; scientific objectives met)\n3. Acknowledges **blockers** overcome along the way (technical unknowns, the Apollo 1 tragedy, Soviet competition, computational limits)\n4. Remains concise and accessible given no contrary constraints were stated",
+              "last_response": "# Interview Summary\n\n## Questions & Answers (in order)\n\n| # | Stage | Question | Answer |\n|---|-------|----------|--------|\n| 1 | **yes_no** | Is this interview workflow easy to follow so far? | **Yes",
+              "last_stage": "summarize"
+            },
+            "notes": "Stage completed: summarize",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 523,
+                    "output_tokens": 499,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 5376
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 5376,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 29214
+            }
+          },
+          "freeform": {
+            "status": "succeeded",
+            "suggested_next_ids": [
+              "summarize"
+            ],
+            "context_updates": {
+              "human.gate.selected": "freeform",
+              "human.gate.text": "Explain the moon landing",
+              "human.gate.freeform.question": "Add any final context, constraints, or nuance for the summary.",
+              "human.gate.label": "Explain the moon landing",
+              "human.gate.freeform.answer": "Explain the moon landing"
+            },
+            "usage": null
+          },
+          "multi_select": {
+            "status": "succeeded",
+            "preferred_label": "[S] Success criteria, [B] Blockers",
+            "suggested_next_ids": [
+              "freeform"
+            ],
+            "context_updates": {
+              "human.gate.multi_select.answer": "S, B",
+              "human.gate.multi_select.label": "[S] Success criteria, [B] Blockers",
+              "human.gate.label": "[S] Success criteria, [B] Blockers",
+              "human.gate.multi_select.question": "Which supporting areas should the final summary emphasize?",
+              "human.gate.selected": "S,B"
+            },
+            "usage": null
+          },
+          "multiple_choice": {
+            "status": "succeeded",
+            "preferred_label": "[G] Goals",
+            "suggested_next_ids": [
+              "multi_select"
+            ],
+            "context_updates": {
+              "human.gate.multiple_choice.question": "Which theme should be the center of the final summary?",
+              "human.gate.selected": "G",
+              "human.gate.multiple_choice.label": "[G] Goals",
+              "human.gate.multiple_choice.answer": "G",
+              "human.gate.label": "[G] Goals"
+            },
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "9603f9c52b45050874904e10db025a89c215514c",
+        "node_visits": {
+          "start": 1,
+          "yes_no": 1,
+          "freeform": 1,
+          "multi_select": 1,
+          "summarize": 1,
+          "multiple_choice": 1,
+          "confirmation": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-08T18:43:19.993394Z",
+    "status": "succeeded",
+    "duration_ms": 202703,
+    "final_git_commit_sha": "9603f9c52b45050874904e10db025a89c215514c",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "yes_no",
+        "stage_label": "yes_no",
+        "duration_ms": 100011,
+        "retries": 0
+      },
+      {
+        "stage_id": "confirmation",
+        "stage_label": "confirmation",
+        "duration_ms": 13721,
+        "retries": 0
+      },
+      {
+        "stage_id": "multiple_choice",
+        "stage_label": "multiple_choice",
+        "duration_ms": 12085,
+        "retries": 0
+      },
+      {
+        "stage_id": "multi_select",
+        "stage_label": "multi_select",
+        "duration_ms": 7190,
+        "retries": 0
+      },
+      {
+        "stage_id": "freeform",
+        "stage_label": "freeform",
+        "duration_ms": 10303,
+        "retries": 0
+      },
+      {
+        "stage_id": "summarize",
+        "stage_label": "summarize",
+        "duration_ms": 11509,
+        "billing_usd_micros": 29214,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 523,
+      "output_tokens": 499,
+      "total_tokens": 6398,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 5376,
+      "total_usd_micros": 29214
+    },
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -1175,6 +1423,106 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
+    "multiple_choice@1": {
+      "first_event_seq": 43,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T18:42:22.160585Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T18:42:10.074942Z",
+      "duration_ms": 12085,
+      "state": "succeeded"
+    },
+    "start@1": {
+      "first_event_seq": 15,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T18:40:01.549452Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T18:40:01.548598Z",
+      "duration_ms": 0,
+      "state": "succeeded"
+    },
+    "confirmation@1": {
+      "first_event_seq": 31,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T18:42:03.222492Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T18:41:49.497025Z",
+      "duration_ms": 13721,
+      "state": "succeeded"
+    },
+    "exit@1": {
+      "first_event_seq": 89,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T18:43:19.962007Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T18:43:19.961965Z",
+      "duration_ms": 0,
+      "state": "succeeded"
+    },
+    "yes_no@1": {
+      "first_event_seq": 19,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T18:41:41.561775Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T18:40:01.550553Z",
+      "duration_ms": 100011,
+      "state": "succeeded"
+    },
     "multi_select@1": {
       "first_event_seq": 55,
       "prompt": null,
@@ -1215,31 +1563,16 @@
       "duration_ms": 10303,
       "state": "succeeded"
     },
-    "confirmation@1": {
-      "first_event_seq": 31,
-      "prompt": null,
-      "response": null,
-      "completion": {
-        "outcome": "succeeded",
-        "notes": null,
-        "failure_reason": null,
-        "timestamp": "2026-05-08T18:42:03.222492Z"
-      },
-      "provider_used": null,
-      "diff": null,
-      "script_invocation": null,
-      "script_timing": null,
-      "parallel_results": null,
-      "output": null,
-      "started_at": "2026-05-08T18:41:49.497025Z",
-      "duration_ms": 13721,
-      "state": "succeeded"
-    },
     "summarize@1": {
       "first_event_seq": 79,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: summarize",
+        "failure_reason": null,
+        "timestamp": "2026-05-08T18:43:13.501095Z"
+      },
       "provider_used": {
         "mode": "prompt",
         "provider": "anthropic"
@@ -1250,66 +1583,7 @@
       "parallel_results": null,
       "output": null,
       "started_at": "2026-05-08T18:43:01.991714Z",
-      "state": "running"
-    },
-    "multiple_choice@1": {
-      "first_event_seq": 43,
-      "prompt": null,
-      "response": null,
-      "completion": {
-        "outcome": "succeeded",
-        "notes": null,
-        "failure_reason": null,
-        "timestamp": "2026-05-08T18:42:22.160585Z"
-      },
-      "provider_used": null,
-      "diff": null,
-      "script_invocation": null,
-      "script_timing": null,
-      "parallel_results": null,
-      "output": null,
-      "started_at": "2026-05-08T18:42:10.074942Z",
-      "duration_ms": 12085,
-      "state": "succeeded"
-    },
-    "yes_no@1": {
-      "first_event_seq": 19,
-      "prompt": null,
-      "response": null,
-      "completion": {
-        "outcome": "succeeded",
-        "notes": null,
-        "failure_reason": null,
-        "timestamp": "2026-05-08T18:41:41.561775Z"
-      },
-      "provider_used": null,
-      "diff": null,
-      "script_invocation": null,
-      "script_timing": null,
-      "parallel_results": null,
-      "output": null,
-      "started_at": "2026-05-08T18:40:01.550553Z",
-      "duration_ms": 100011,
-      "state": "succeeded"
-    },
-    "start@1": {
-      "first_event_seq": 15,
-      "prompt": null,
-      "response": null,
-      "completion": {
-        "outcome": "succeeded",
-        "notes": null,
-        "failure_reason": null,
-        "timestamp": "2026-05-08T18:40:01.549452Z"
-      },
-      "provider_used": null,
-      "diff": null,
-      "script_invocation": null,
-      "script_timing": null,
-      "parallel_results": null,
-      "output": null,
-      "started_at": "2026-05-08T18:40:01.548598Z",
-      "duration_ms": 0,
+      "duration_ms": 11509,
       "state": "succeeded"
     }
   }
