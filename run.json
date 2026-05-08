@@ -220,10 +220,10 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-08T13:07:15.170568Z",
-  "last_event_at": "2026-05-08T13:08:03.446867Z",
+  "last_event_at": "2026-05-08T13:13:24.294390Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-08T13:13:18.429260Z",
+    "timestamp": "2026-05-08T13:13:24.290945Z",
     "current_node": "nap",
     "completed_nodes": [
       "start",
@@ -232,25 +232,21 @@
     "node_retries": {},
     "context_values": {
       "current_node": "nap",
-      "thread.start.current_node": "nap",
-      "internal.retry_count.nap": 0,
-      "failure_class": "transient_infra",
-      "graph.rankdir": "LR",
-      "internal.retry_count.start": 0,
-      "internal.thread_id": "start",
-      "internal.fidelity": "compact",
-      "internal.work_dir": "/home/daytona/workspace",
       "failure_signature": "nap|transient_infra|handler timed out after 360000ms",
       "graph.goal": "Sleep long enough for a human to practice interrupts and steering",
+      "failure_class": "transient_infra",
+      "graph.rankdir": "LR",
+      "internal.retry_count.nap": 0,
+      "internal.fidelity": "compact",
+      "internal.retry_count.start": 0,
+      "internal.run_id": "01KR3V5KPSQBFPS2BVFQFADJRH",
       "internal.node_visit_count": 1,
+      "internal.thread_id": "start",
+      "internal.work_dir": "/home/daytona/workspace",
       "outcome": "failed",
-      "internal.run_id": "01KR3V5KPSQBFPS2BVFQFADJRH"
+      "thread.start.current_node": "nap"
     },
     "node_outcomes": {
-      "start": {
-        "status": "succeeded",
-        "usage": null
-      },
       "nap": {
         "status": "failed",
         "failure": {
@@ -259,12 +255,17 @@
           "system_actor": "timeout"
         },
         "usage": null
+      },
+      "start": {
+        "status": "succeeded",
+        "usage": null
       }
     },
     "next_node_id": "exit",
+    "git_commit_sha": "0e49bb2768eada43724c6ba028706e0ca99e3a45",
     "node_visits": {
-      "nap": 1,
-      "start": 1
+      "start": 1,
+      "nap": 1
     }
   },
   "checkpoints": [
@@ -302,9 +303,78 @@
           "start": 1
         }
       }
+    ],
+    [
+      32,
+      {
+        "timestamp": "2026-05-08T13:13:24.290945Z",
+        "current_node": "nap",
+        "completed_nodes": [
+          "start",
+          "nap"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "current_node": "nap",
+          "failure_signature": "nap|transient_infra|handler timed out after 360000ms",
+          "graph.goal": "Sleep long enough for a human to practice interrupts and steering",
+          "failure_class": "transient_infra",
+          "graph.rankdir": "LR",
+          "internal.retry_count.nap": 0,
+          "internal.fidelity": "compact",
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KR3V5KPSQBFPS2BVFQFADJRH",
+          "internal.node_visit_count": 1,
+          "internal.thread_id": "start",
+          "internal.work_dir": "/home/daytona/workspace",
+          "outcome": "failed",
+          "thread.start.current_node": "nap"
+        },
+        "node_outcomes": {
+          "nap": {
+            "status": "failed",
+            "failure": {
+              "message": "handler timed out after 360000ms",
+              "failure_class": "transient_infra",
+              "system_actor": "timeout"
+            },
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "git_commit_sha": "0e49bb2768eada43724c6ba028706e0ca99e3a45",
+        "node_visits": {
+          "start": 1,
+          "nap": 1
+        }
+      }
     ]
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-08T13:13:24.312888Z",
+    "status": "succeeded",
+    "duration_ms": 369125,
+    "final_git_commit_sha": "0e49bb2768eada43724c6ba028706e0ca99e3a45",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "nap",
+        "stage_label": "nap",
+        "duration_ms": 360005,
+        "retries": 0
+      }
+    ],
+    "total_retries": 0
+  },
   "retro": null,
   "retro_prompt": null,
   "retro_response": null,
@@ -317,6 +387,11 @@
     "clone_branch": "main"
   },
   "final_patch": null,
+  "diff_summary": {
+    "files_changed": 0,
+    "additions": 0,
+    "deletions": 0
+  },
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
@@ -341,11 +416,36 @@
       "duration_ms": 0,
       "state": "succeeded"
     },
+    "exit@1": {
+      "first_event_seq": 35,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T13:13:24.294390Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T13:13:24.294348Z",
+      "duration_ms": 0,
+      "state": "succeeded"
+    },
     "nap@1": {
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "failed",
+        "notes": null,
+        "failure_reason": "handler timed out after 360000ms",
+        "timestamp": "2026-05-08T13:13:18.429180Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
@@ -357,7 +457,8 @@
       "parallel_results": null,
       "output": null,
       "started_at": "2026-05-08T13:07:18.422259Z",
-      "state": "running"
+      "duration_ms": 360005,
+      "state": "failed"
     }
   }
 }
