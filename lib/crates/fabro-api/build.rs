@@ -179,6 +179,7 @@ fn main() {
             &[],
         ),
         ("RunSummary", "fabro_types::RunSummary", &[]),
+        ("DiffSummary", "fabro_types::DiffSummary", &[]),
         (
             "RepositoryReference",
             "fabro_types::RepositoryReference",

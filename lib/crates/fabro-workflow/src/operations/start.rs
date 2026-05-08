@@ -274,6 +274,7 @@ async fn persist_terminal_engine_failure(
         reason,
         git_commit_sha: None,
         final_patch: None,
+        diff_summary: None,
     })
     .await
     {
@@ -899,6 +900,7 @@ impl Drop for DetachedRunBootstrapGuard {
                         reason,
                         git_commit_sha: None,
                         final_patch: None,
+                        diff_summary: None,
                     })
                     .await;
                 });
@@ -964,6 +966,7 @@ impl Drop for DetachedRunCompletionGuard {
                     reason,
                     git_commit_sha: None,
                     final_patch: None,
+                    diff_summary: None,
                 })
                 .await;
                 let _ = append_event_to_sink(&event_sink, &run_id, &Event::RunNotice {
@@ -994,6 +997,7 @@ async fn persist_detached_failure(
         reason,
         git_commit_sha: None,
         final_patch: None,
+        diff_summary: None,
     })
     .await
     {
@@ -1177,6 +1181,7 @@ mod tests {
                         restart_failure_signatures: HashMap::new().into_iter().collect(),
                         node_visits: HashMap::new().into_iter().collect(),
                         diff: None,
+                        diff_summary: None,
                     });
                 }
             });
@@ -1389,6 +1394,7 @@ mod tests {
                     .collect(),
                 node_visits: checkpoint.node_visits.clone().into_iter().collect(),
                 diff: None,
+                diff_summary: None,
             },
         )
         .await
@@ -1479,6 +1485,7 @@ mod tests {
                 .collect(),
             node_visits: checkpoint.node_visits.clone().into_iter().collect(),
             diff: None,
+            diff_summary: None,
         })
         .await
         .unwrap();
@@ -1496,6 +1503,7 @@ mod tests {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         })
         .await

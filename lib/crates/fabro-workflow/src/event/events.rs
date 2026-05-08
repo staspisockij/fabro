@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use ::fabro_types::{
-    BilledTokenCounts, BlockedReason, CommandTermination, FailureReason, ForkSourceRef, GitContext,
-    ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunId, RunNoticeLevel,
-    RunProvenance, StageId, SuccessReason, run_event as fabro_types,
+    BilledTokenCounts, BlockedReason, CommandTermination, DiffSummary, FailureReason,
+    ForkSourceRef, GitContext, ParallelBranchId, Principal, PullRequestRecord, RunBlobId, RunId,
+    RunNoticeLevel, RunProvenance, StageId, SuccessReason, run_event as fabro_types,
 };
 use fabro_agent::{AgentEvent, SandboxEvent};
 use serde::{Deserialize, Serialize};
@@ -123,6 +123,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_patch:          Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff_summary:         Option<DiffSummary>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         billing:              Option<BilledTokenCounts>,
     },
     WorkflowRunFailed {
@@ -133,6 +135,8 @@ pub enum Event {
         git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_patch:    Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff_summary:   Option<DiffSummary>,
     },
     RunNotice {
         level:            RunNoticeLevel,
@@ -321,6 +325,8 @@ pub enum Event {
         node_visits: BTreeMap<String, usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         diff: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff_summary: Option<DiffSummary>,
     },
     CheckpointFailed {
         node_id:          String,

@@ -65,6 +65,7 @@ models/diagnostics-report.ts
 models/diagnostics-section.ts
 models/diff-file.ts
 models/diff-stats.ts
+models/diff-summary.ts
 models/dirty-status.ts
 models/discord-integration-settings.ts
 models/disk-usage-response.ts

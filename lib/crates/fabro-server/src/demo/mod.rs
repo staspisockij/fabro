@@ -889,6 +889,7 @@ mod runs {
             elapsed_secs.and_then(duration_ms_from_secs),
             total_usd_micros,
             None,
+            None,
         )
     }
 

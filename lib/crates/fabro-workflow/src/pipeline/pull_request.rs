@@ -1709,6 +1709,7 @@ mod tests {
             final_patch:          Some(
                 "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
             ),
+            diff_summary:         None,
             billing:              None,
         })
         .await
@@ -1997,6 +1998,7 @@ mod tests {
             final_patch:          Some(
                 "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
             ),
+            diff_summary:         None,
             billing:              None,
         })
         .await

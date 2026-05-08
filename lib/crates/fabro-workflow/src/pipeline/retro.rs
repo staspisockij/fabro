@@ -294,6 +294,7 @@ mod tests {
                 .collect(),
             node_visits: checkpoint.node_visits.clone().into_iter().collect(),
             diff: None,
+            diff_summary: None,
         })
         .await
         .unwrap();

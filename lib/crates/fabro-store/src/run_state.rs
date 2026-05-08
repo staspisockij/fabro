@@ -155,6 +155,7 @@ impl RunProjectionReducer for RunProjection {
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_completed(props, ts)?);
                 self.final_patch.clone_from(&props.final_patch);
+                self.diff_summary = props.diff_summary.or(self.diff_summary);
                 self.pending_interviews.clear();
             }
             EventBody::RunFailed(props) => {
@@ -167,6 +168,7 @@ impl RunProjectionReducer for RunProjection {
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_failed(props, ts));
                 self.final_patch.clone_from(&props.final_patch);
+                self.diff_summary = props.diff_summary.or(self.diff_summary);
                 self.pending_interviews.clear();
             }
             EventBody::RunSupersededBy(props) => {
@@ -196,6 +198,7 @@ impl RunProjectionReducer for RunProjection {
             }
             EventBody::CheckpointCompleted(props) => {
                 let checkpoint = checkpoint_from_props(props, ts);
+                self.diff_summary = props.diff_summary.or(self.diff_summary);
                 if let Some(node_id) = stored.node_id.as_deref() {
                     let visit = checkpoint
                         .node_visits
@@ -562,6 +565,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
             .and_then(|conclusion| conclusion.billing.as_ref())
             .and_then(|billing| billing.total_usd_micros),
         state.superseded_by,
+        state.diff_summary,
     )
 }
 
@@ -1416,6 +1420,7 @@ mod tests {
                     restart_failure_signatures: BTreeMap::new(),
                     node_visits: BTreeMap::from([("skip_me".to_string(), 1usize)]),
                     diff: None,
+                    diff_summary: None,
                 }),
                 None,
             ))
@@ -1750,12 +1755,116 @@ mod tests {
                     reason:         FailureReason::WorkflowError,
                     git_commit_sha: Some("abc123".to_string()),
                     final_patch:    Some(patch.to_string()),
+                    diff_summary:   None,
                 }),
                 None,
             ))
             .unwrap();
 
         assert_eq!(state.final_patch.as_deref(), Some(patch));
+    }
+
+    #[test]
+    fn patch_bearing_events_roll_up_diff_summary_without_blanking_prior_value() {
+        let mut state = RunProjection::default();
+
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "checkpoint.completed",
+                &json!({
+                    "status": "running",
+                    "current_node": "build",
+                    "completed_nodes": ["build"],
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+                Some("build"),
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            json!({
+                "files_changed": 2,
+                "additions": 10,
+                "deletions": 3
+            })
+        );
+
+        state
+            .apply_event(&test_raw_event(
+                2,
+                "checkpoint.completed",
+                &json!({
+                    "status": "running",
+                    "current_node": "review",
+                    "completed_nodes": ["build", "review"]
+                }),
+                Some("review"),
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"]
+                ["files_changed"],
+            2
+        );
+
+        state
+            .apply_event(&test_raw_event(
+                3,
+                "run.completed",
+                &json!({
+                    "duration_ms": 42,
+                    "artifact_count": 0,
+                    "status": "succeeded",
+                    "reason": "completed",
+                    "diff_summary": {
+                        "files_changed": 4,
+                        "additions": 18,
+                        "deletions": 7
+                    }
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            json!({
+                "files_changed": 4,
+                "additions": 18,
+                "deletions": 7
+            })
+        );
+
+        let mut failed_state = RunProjection::default();
+        failed_state
+            .apply_event(&test_raw_event(
+                1,
+                "run.failed",
+                &json!({
+                    "error": "boom",
+                    "duration_ms": 42,
+                    "reason": "workflow_error",
+                    "diff_summary": {
+                        "files_changed": 5,
+                        "additions": 20,
+                        "deletions": 8
+                    }
+                }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(build_summary(&failed_state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            json!({
+                "files_changed": 5,
+                "additions": 20,
+                "deletions": 8
+            })
+        );
     }
 
     #[test]
@@ -1774,6 +1883,7 @@ mod tests {
                     reason:         FailureReason::WorkflowError,
                     git_commit_sha: None,
                     final_patch:    None,
+                    diff_summary:   None,
                 }),
                 None,
             ))
@@ -1803,6 +1913,7 @@ mod tests {
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
                     final_patch:          None,
+                    diff_summary:         None,
                     billing:              None,
                 }),
                 None,
@@ -1866,6 +1977,7 @@ mod tests {
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
                     final_patch:          None,
+                    diff_summary:         None,
                     billing:              None,
                 }),
                 None,
@@ -1996,6 +2108,7 @@ mod tests {
                     total_usd_micros:     None,
                     final_git_commit_sha: None,
                     final_patch:          None,
+                    diff_summary:         None,
                     billing:              None,
                 }),
                 None,

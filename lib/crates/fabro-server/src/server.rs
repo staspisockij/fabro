@@ -1983,6 +1983,7 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
                 reason,
                 git_commit_sha: None,
                 final_patch: None,
+                diff_summary: None,
             },
         )
         .await?;
@@ -2036,6 +2037,7 @@ async fn persist_shutdown_run_failures(
                 reason,
                 git_commit_sha: None,
                 final_patch: None,
+                diff_summary: None,
             },
         )
         .await?;
@@ -2110,6 +2112,7 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
             reason:         FailureReason::Cancelled,
             git_commit_sha: None,
             final_patch:    None,
+            diff_summary:   None,
         },
     )
     .await
@@ -2148,6 +2151,7 @@ async fn fail_run_before_execution(
                     reason,
                     git_commit_sha: None,
                     final_patch: None,
+                    diff_summary: None,
                 },
             )
             .await
@@ -2425,6 +2429,7 @@ async fn append_worker_exit_failure(
             reason,
             git_commit_sha: None,
             final_patch: None,
+            diff_summary: None,
         },
     )
     .await
@@ -3085,6 +3090,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                     reason:         FailureReason::LaunchFailed,
                     git_commit_sha: None,
                     final_patch:    None,
+                    diff_summary:   None,
                 },
             )
             .await;
@@ -3112,6 +3118,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 reason:         FailureReason::LaunchFailed,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             },
         )
         .await;
@@ -3142,6 +3149,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 reason:         FailureReason::LaunchFailed,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             },
         )
         .await;
@@ -3163,6 +3171,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                 reason:         FailureReason::LaunchFailed,
                 git_commit_sha: None,
                 final_patch:    None,
+                diff_summary:   None,
             },
         )
         .await;
@@ -3196,6 +3205,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
                     reason:         FailureReason::Terminated,
                     git_commit_sha: None,
                     final_patch:    None,
+                    diff_summary:   None,
                 },
             )
             .await;

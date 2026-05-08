@@ -6,7 +6,7 @@ use fabro_api::types::{
     RepositoryReference as ApiRepositoryReference, RunSummary as ApiRunSummary,
 };
 use fabro_types::status::{RunStatus, SuccessReason, TerminalStatus};
-use fabro_types::{RepositoryReference, RunId, RunSummary};
+use fabro_types::{DiffSummary, RepositoryReference, RunId, RunSummary};
 use serde_json::json;
 
 #[test]
@@ -41,6 +41,11 @@ fn run_summary_json_matches_openapi_shape() {
         Some(42_000),
         Some(123),
         Some(superseded_by),
+        Some(DiffSummary {
+            files_changed: 3,
+            additions:     12,
+            deletions:     4,
+        }),
     );
 
     assert_eq!(
@@ -74,7 +79,12 @@ fn run_summary_json_matches_openapi_shape() {
             "duration_ms": 42000,
             "elapsed_secs": 42.0,
             "total_usd_micros": 123,
-            "superseded_by": superseded_by.to_string()
+            "superseded_by": superseded_by.to_string(),
+            "diff_summary": {
+                "files_changed": 3,
+                "additions": 12,
+                "deletions": 4
+            }
         })
     );
 }
@@ -117,6 +127,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.elapsed_secs, None);
     assert_eq!(summary.total_usd_micros, None);
     assert_eq!(summary.superseded_by, None);
+    assert_eq!(summary.diff_summary, None);
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

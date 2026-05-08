@@ -5652,6 +5652,10 @@ components:
           additionalProperties: true
         final_patch:
           type: ["string", "null"]
+        diff_summary:
+          oneOf:
+            - $ref: "#/components/schemas/DiffSummary"
+            - type: "null"
         pull_request:
           type: ["object", "null"]
           additionalProperties: true
@@ -5727,6 +5731,10 @@ components:
           format: int64
         superseded_by:
           type: ["string", "null"]
+        diff_summary:
+          oneOf:
+            - $ref: "#/components/schemas/DiffSummary"
+            - type: "null"
 
     ForkRequest:
       description: Request body for creating a new run from a source run checkpoint.
@@ -6613,6 +6621,27 @@ components:
         deletions:
           type: integer
           description: Total lines deleted.
+          example: 234
+
+    DiffSummary:
+      description: Cheap aggregate file and line counts for a run diff.
+      type: object
+      required:
+        - files_changed
+        - additions
+        - deletions
+      properties:
+        files_changed:
+          type: integer
+          description: Total number of changed files, including binary files.
+          example: 42
+        additions:
+          type: integer
+          description: Total lines added across text files.
+          example: 567
+        deletions:
+          type: integer
+          description: Total lines deleted across text files.
           example: 234
 
     RunFilesMeta:

@@ -982,6 +982,74 @@ mod tests {
     }
 
     #[test]
+    fn patch_bearing_events_round_trip_diff_summary() {
+        for (event_name, properties) in [
+            (
+                "checkpoint.completed",
+                json!({
+                    "status": "running",
+                    "current_node": "build",
+                    "completed_nodes": ["build"],
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+            ),
+            (
+                "run.completed",
+                json!({
+                    "duration_ms": 42,
+                    "artifact_count": 0,
+                    "status": "succeeded",
+                    "reason": "completed",
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+            ),
+            (
+                "run.failed",
+                json!({
+                    "error": "boom",
+                    "duration_ms": 42,
+                    "reason": "workflow_error",
+                    "diff_summary": {
+                        "files_changed": 2,
+                        "additions": 10,
+                        "deletions": 3
+                    }
+                }),
+            ),
+        ] {
+            let line = json!({
+                "id": format!("evt_{event_name}"),
+                "ts": "2026-04-04T12:00:00Z",
+                "run_id": fixtures::RUN_1,
+                "event": event_name,
+                "node_id": "build",
+                "properties": properties
+            });
+
+            let parsed = RunEvent::from_value(line).unwrap();
+            let serialized = parsed.to_value().unwrap();
+
+            assert_eq!(
+                serialized["properties"]["diff_summary"],
+                json!({
+                    "files_changed": 2,
+                    "additions": 10,
+                    "deletions": 3
+                }),
+                "{event_name} should preserve diff_summary"
+            );
+        }
+    }
+
+    #[test]
     fn run_submitted_round_trip_preserves_definition_blob() {
         let line = json!({
             "id": "evt_submitted_blob",

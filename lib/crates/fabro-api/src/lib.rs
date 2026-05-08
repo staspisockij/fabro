@@ -30,7 +30,7 @@ pub mod types {
     };
     pub use fabro_types::{
         AuthMethod, BilledTokenCounts, CommandOutputStream, CommandTermination, DiffStats,
-        DirtyStatus, EventEnvelope, GitContext, IdpIdentity, InterviewOption,
+        DiffSummary, DirtyStatus, EventEnvelope, GitContext, IdpIdentity, InterviewOption,
         InterviewQuestionRecord, PendingInterviewRecord, PreRunPushOutcome, Principal,
         QuestionType, RepositoryReference, RunClientProvenance, RunEvent, RunProjection,
         RunProvenance, RunServerProvenance, RunSummary, SecretMetadata, SecretType, ServerSettings,

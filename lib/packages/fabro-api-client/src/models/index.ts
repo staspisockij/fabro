@@ -45,6 +45,7 @@ export * from './diagnostics-report';
 export * from './diagnostics-section';
 export * from './diff-file';
 export * from './diff-stats';
+export * from './diff-summary';
 export * from './dirty-status';
 export * from './discord-integration-settings';
 export * from './disk-usage-response';

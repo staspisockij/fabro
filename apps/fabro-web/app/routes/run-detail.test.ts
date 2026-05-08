@@ -69,7 +69,7 @@ type RunDetailActionResult = import("./run-detail").RunDetailActionResult;
 
 const h = createElement;
 
-function makeRunSummary(status = "succeeded") {
+function makeRunSummary(status = "succeeded", diffSummary: any = null) {
   return {
     run_id:          "run_1",
     title:           "Run 1",
@@ -80,6 +80,7 @@ function makeRunSummary(status = "succeeded") {
     duration_ms:     null,
     elapsed_secs:    null,
     source_directory: null,
+    diff_summary:    diffSummary,
   };
 }
 
@@ -105,12 +106,14 @@ async function renderRunDetail({
   initialEntry,
   status = "succeeded",
   questions = [],
+  diffSummary = null,
 }: {
   initialEntry: string;
   status?: string;
   questions?: any[];
+  diffSummary?: any;
 }) {
-  currentRunSummary = makeRunSummary(status);
+  currentRunSummary = makeRunSummary(status, diffSummary);
   currentQuestions = questions;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -152,6 +155,12 @@ async function renderRunDetail({
 function hasClasses(value: unknown, classes: string[]) {
   const tokens = String(value ?? "").split(/\s+/);
   return classes.every((className) => tokens.includes(className));
+}
+
+function tabCountBadges(renderer: TestRenderer.ReactTestRenderer) {
+  return renderer.root.findAll(
+    (node) => node.type === "span" && hasClasses(node.props.className, ["tabular-nums"]),
+  );
 }
 
 describe("lifecycleActionVisibility", () => {
@@ -328,6 +337,28 @@ describe("RunDetail full-height child routes", () => {
         hasClasses(node.props.className, ["mt-6", "min-h-0", "flex-1"]),
     );
     expect(outletWrappers).toHaveLength(1);
+  });
+
+  test("shows the Files Changed tab badge from run summary diff stats", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1/files",
+      diffSummary:  {
+        files_changed: 7,
+        additions:     30,
+        deletions:     11,
+      },
+    });
+
+    const badges = tabCountBadges(renderer);
+    expect(badges.map((badge) => badge.children.join(""))).toContain("7");
+  });
+
+  test("hides the Files Changed tab badge when diff stats are absent", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1/files",
+    });
+
+    expect(tabCountBadges(renderer)).toHaveLength(0);
   });
 
   test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {

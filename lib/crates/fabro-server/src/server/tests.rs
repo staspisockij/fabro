@@ -2668,6 +2668,7 @@ async fn run_billing_dedups_retried_nodes_and_sums_their_durations() {
             restart_failure_signatures: std::collections::BTreeMap::new(),
             node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
             diff: None,
+            diff_summary: None,
         },
     )
     .await
@@ -2796,6 +2797,7 @@ async fn run_billing_sums_usage_across_retry_visits_and_uses_latest_model() {
             restart_failure_signatures: std::collections::BTreeMap::new(),
             node_visits: std::collections::BTreeMap::from([("verify".to_string(), 2usize)]),
             diff: None,
+            diff_summary: None,
         },
     )
     .await
@@ -3407,6 +3409,7 @@ async fn create_completed_run_ready_for_pull_request(
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          Some(final_patch.to_string()),
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -6964,6 +6967,7 @@ async fn archive_and_unarchive_updates_listing_visibility() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -8304,6 +8308,7 @@ async fn boards_runs_excludes_archived_by_default() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
         workflow_event::Event::RunArchived { actor: None },
@@ -8352,6 +8357,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
         workflow_event::Event::RunArchived { actor: None },
@@ -8371,6 +8377,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -8440,6 +8447,7 @@ async fn get_run_exposes_canonical_operator_statuses() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])
@@ -8521,6 +8529,7 @@ async fn boards_runs_maps_statuses_to_columns() {
             total_usd_micros:     None,
             final_git_commit_sha: None,
             final_patch:          None,
+            diff_summary:         None,
             billing:              None,
         },
     ])

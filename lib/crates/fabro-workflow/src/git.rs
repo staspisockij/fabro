@@ -545,6 +545,7 @@ mod tests {
             restart_failure_signatures: std::collections::BTreeMap::new(),
             node_visits: std::collections::BTreeMap::from([("work".into(), 2)]),
             diff: Some("diff --git a/story.txt b/story.txt".into()),
+            diff_summary: None,
         })
         .await
         .unwrap();

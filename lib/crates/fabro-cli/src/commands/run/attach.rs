@@ -106,7 +106,7 @@ pub(crate) async fn attach_run_with_client(
     }
 
     let stream = client.attach_run_events(run_id, Some(next_seq)).await?;
-    attach_live_run_with_client(
+    Box::pin(attach_live_run_with_client(
         client,
         run_id,
         replay_events,
@@ -119,7 +119,7 @@ pub(crate) async fn attach_run_with_client(
             json_output,
         },
         printer,
-    )
+    ))
     .await
 }
 

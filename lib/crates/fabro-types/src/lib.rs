@@ -45,7 +45,7 @@ pub use checkpoint::Checkpoint;
 pub use command_output::{CommandOutputStream, CommandTermination};
 pub use conclusion::{Conclusion, StageSummary};
 pub use dense::{ServerSettings, UserSettings, WorkflowSettings};
-pub use diff::DiffStats;
+pub use diff::{DiffStats, DiffSummary};
 pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
 pub use graph::{

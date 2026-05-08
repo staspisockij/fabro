@@ -149,7 +149,12 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const unarchiveMutation = useUnarchiveRun(params.id);
   const interruptMutation = useInterruptRun(params.id);
   const { push, dismiss } = useToast();
-  const tabs = allTabs.filter((t) => !t.demoOnly || demoMode);
+  const filesCount = runQuery.data?.diff_summary?.files_changed ?? null;
+  const tabs = allTabs
+    .map((tab) =>
+      tab.name === "Files Changed" ? { ...tab, count: filesCount } : tab,
+    )
+    .filter((t) => !t.demoOnly || demoMode);
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
   const steerBarRef = useRef<SteerBarHandle | null>(null);
   const [steerOpen, setSteerOpen] = useState(false);

@@ -4,9 +4,9 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    BilledModelUsage, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus, SandboxRecord,
-    StageCompletion, StageId, StageState, StartRecord,
+    BilledModelUsage, Checkpoint, Conclusion, DiffSummary, InterviewQuestionRecord,
+    InvalidTransition, PullRequestRecord, Retro, RunControlAction, RunId, RunSpec, RunStatus,
+    SandboxRecord, StageCompletion, StageId, StageState, StartRecord,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -27,6 +27,8 @@ pub struct RunProjection {
     pub retro_response:     Option<String>,
     pub sandbox:            Option<SandboxRecord>,
     pub final_patch:        Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_summary:       Option<DiffSummary>,
     pub pull_request:       Option<PullRequestRecord>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,

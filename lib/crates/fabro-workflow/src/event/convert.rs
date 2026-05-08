@@ -159,6 +159,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             total_usd_micros,
             final_git_commit_sha,
             final_patch,
+            diff_summary,
             billing,
         } => EventBody::RunCompleted(fabro_types::RunCompletedProps {
             duration_ms:          *duration_ms,
@@ -168,6 +169,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             total_usd_micros:     *total_usd_micros,
             final_git_commit_sha: final_git_commit_sha.clone(),
             final_patch:          final_patch.clone(),
+            diff_summary:         *diff_summary,
             billing:              billing.clone(),
         }),
         Event::WorkflowRunFailed {
@@ -176,6 +178,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             reason,
             git_commit_sha,
             final_patch,
+            diff_summary,
         } => EventBody::RunFailed(fabro_types::RunFailedProps {
             error:          error.to_string(),
             causes:         error.causes(),
@@ -183,6 +186,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             reason:         *reason,
             git_commit_sha: git_commit_sha.clone(),
             final_patch:    final_patch.clone(),
+            diff_summary:   *diff_summary,
         }),
         Event::RunNotice {
             level,
@@ -428,6 +432,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             restart_failure_signatures,
             node_visits,
             diff,
+            diff_summary,
             ..
         } => EventBody::CheckpointCompleted(fabro_types::CheckpointCompletedProps {
             status: status.clone(),
@@ -442,6 +447,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             restart_failure_signatures: restart_failure_signatures.clone(),
             node_visits: node_visits.clone(),
             diff: diff.clone(),
+            diff_summary: *diff_summary,
         }),
         Event::CheckpointFailed {
             error,
@@ -1458,6 +1464,7 @@ mod tests {
             reason:         FailureReason::WorkflowError,
             git_commit_sha: Some("abc123".to_string()),
             final_patch:    None,
+            diff_summary:   None,
         });
 
         assert_eq!(stored.event_name(), "run.failed");
@@ -1475,6 +1482,7 @@ mod tests {
             reason:         FailureReason::WorkflowError,
             git_commit_sha: None,
             final_patch:    None,
+            diff_summary:   None,
         });
 
         let properties = stored.properties().unwrap();
