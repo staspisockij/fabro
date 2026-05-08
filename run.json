@@ -399,15 +399,113 @@
     "in_place": false
   },
   "graph_source": "digraph Interview {\n    graph [goal=\"Run a progressive human interview and summarize the answers\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    yes_no [\n        shape=hexagon,\n        label=\"Is this interview workflow easy to follow so far?\",\n        question_type=\"yes_no\"\n    ]\n    confirmation [\n        shape=hexagon,\n        label=\"Confirm that you want to continue into more structured questions.\",\n        question_type=\"confirmation\"\n    ]\n    multiple_choice [\n        shape=hexagon,\n        label=\"Which theme should be the center of the final summary?\",\n        question_type=\"multiple_choice\"\n    ]\n    multi_select [\n        shape=hexagon,\n        label=\"Which supporting areas should the final summary emphasize?\",\n        question_type=\"multi_select\"\n    ]\n    freeform [\n        shape=hexagon,\n        label=\"Add any final context, constraints, or nuance for the summary.\",\n        question_type=\"freeform\"\n    ]\n    summarize [\n        shape=tab,\n        label=\"Summarize Interview\",\n        fidelity=\"summary:high\",\n        prompt=\"Summarize the full human interview. Include each question and answer in order, then synthesize the user's priorities, constraints, and open questions. Use the human.gate.<node>.question and human.gate.<node>.answer context keys when present. Do not invent missing answers.\"\n    ]\n\n    start -> yes_no\n\n    yes_no -> confirmation [label=\"[Y] Yes\"]\n    yes_no -> confirmation [label=\"[N] No\"]\n\n    confirmation -> multiple_choice [label=\"[Y] Continue\"]\n    confirmation -> multiple_choice [label=\"[N] Stop after this, but still summarize\"]\n\n    multiple_choice -> multi_select [label=\"[G] Goals\"]\n    multiple_choice -> multi_select [label=\"[R] Risks\"]\n    multiple_choice -> multi_select [label=\"[T] Tradeoffs\"]\n    multiple_choice -> multi_select [label=\"[Q] Open questions\"]\n\n    multi_select -> freeform [label=\"[S] Success criteria\"]\n    multi_select -> freeform [label=\"[B] Blockers\"]\n    multi_select -> freeform [label=\"[D] Decisions needed\"]\n    multi_select -> freeform [label=\"[N] Next steps\"]\n\n    freeform -> summarize [freeform=true]\n    summarize -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KR45XFAK1EBJH26VMZ9C0DDG",
+    "start_time": "2026-05-08T16:15:02.791684Z",
+    "run_branch": "fabro/run/01KR45XFAK1EBJH26VMZ9C0DDG",
+    "base_sha": "025f41dddd908d37b24bdd30abd251ca85ed7cf7"
   },
-  "status_updated_at": "2026-05-08T16:14:47.164982Z",
-  "last_event_at": "2026-05-08T16:15:02.309559Z",
+  "status": {
+    "kind": "blocked",
+    "blocked_reason": "human_input_required"
+  },
+  "status_updated_at": "2026-05-08T16:15:05.777860Z",
+  "last_event_at": "2026-05-08T16:15:05.777860Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
+  "checkpoint": {
+    "timestamp": "2026-05-08T16:16:20.038025Z",
+    "current_node": "yes_no",
+    "completed_nodes": [
+      "start",
+      "yes_no"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "internal.retry_count.yes_no": 0,
+      "human.gate.label": "[Y] Yes",
+      "outcome": "succeeded",
+      "internal.thread_id": "start",
+      "failure_class": "",
+      "internal.node_visit_count": 1,
+      "graph.rankdir": "LR",
+      "internal.retry_count.start": 0,
+      "thread.start.current_node": "yes_no",
+      "internal.run_id": "01KR45XFAK1EBJH26VMZ9C0DDG",
+      "human.gate.yes_no.answer": "yes",
+      "graph.goal": "Run a progressive human interview and summarize the answers",
+      "current_node": "yes_no",
+      "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+      "internal.work_dir": "/home/daytona/workspace",
+      "human.gate.yes_no.label": "[Y] Yes",
+      "failure_signature": "",
+      "internal.fidelity": "compact",
+      "preferred_label": "[Y] Yes",
+      "human.gate.selected": "Y"
+    },
+    "node_outcomes": {
+      "start": {
+        "status": "succeeded",
+        "usage": null
+      },
+      "yes_no": {
+        "status": "succeeded",
+        "preferred_label": "[Y] Yes",
+        "suggested_next_ids": [
+          "confirmation"
+        ],
+        "context_updates": {
+          "human.gate.selected": "Y",
+          "human.gate.label": "[Y] Yes",
+          "human.gate.yes_no.answer": "yes",
+          "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+          "human.gate.yes_no.label": "[Y] Yes"
+        },
+        "usage": null
+      }
+    },
+    "next_node_id": "confirmation",
+    "node_visits": {
+      "yes_no": 1,
+      "start": 1
+    }
+  },
+  "checkpoints": [
+    [
+      19,
+      {
+        "timestamp": "2026-05-08T16:15:05.777315Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.rankdir": "LR",
+          "failure_signature": "",
+          "internal.node_visit_count": 1,
+          "internal.thread_id": null,
+          "outcome": "succeeded",
+          "graph.goal": "Run a progressive human interview and summarize the answers",
+          "internal.fidelity": "compact",
+          "failure_class": "",
+          "current_node": "start",
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KR45XFAK1EBJH26VMZ9C0DDG",
+          "internal.work_dir": "/home/daytona/workspace"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "yes_no",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
   "conclusion": null,
   "retro": null,
   "retro_prompt": null,
@@ -423,6 +521,62 @@
   "final_patch": null,
   "pull_request": null,
   "superseded_by": null,
-  "pending_interviews": {},
-  "stages": {}
+  "pending_interviews": {
+    "01KR45Y1HHS2JEPZ5PNGSSP81Z": {
+      "question": {
+        "id": "01KR45Y1HHS2JEPZ5PNGSSP81Z",
+        "text": "Is this interview workflow easy to follow so far?",
+        "stage": "yes_no",
+        "question_type": "yes_no",
+        "options": [
+          {
+            "key": "Y",
+            "label": "[Y] Yes"
+          },
+          {
+            "key": "N",
+            "label": "[N] No"
+          }
+        ],
+        "allow_freeform": false
+      },
+      "started_at": "2026-05-08T16:15:05.777656Z"
+    }
+  },
+  "stages": {
+    "yes_no@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T16:15:05.777474Z",
+      "state": "running"
+    },
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-08T16:15:05.776741Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-08T16:15:05.775460Z",
+      "duration_ms": 0,
+      "state": "succeeded"
+    }
+  }
 }
