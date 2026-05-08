@@ -79,7 +79,7 @@ type EventsTab = (typeof EVENTS_TABS)[number];
 
 function eventsTabLabel(tab: EventsTab, stageKind: StageKind): string {
   if (tab === "debug") return "Debug";
-  return stageKind === "command" ? "Logs" : "Transcript";
+  return stageKind === "command" ? "Logs" : "Thread";
 }
 
 function stageHasExplicitRenderer(stageKind: StageKind): stageKind is "agent" | "command" {
