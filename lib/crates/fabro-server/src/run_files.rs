@@ -18,7 +18,6 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::path::Component;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -463,11 +462,10 @@ async fn materialize_working_tree_sandbox_path(
     )
     .await?;
 
-    let mut entries: Vec<PatchBackedEntry> = split_patch_sections(&patch)
+    let entries: Vec<String> = split_patch_sections(&patch)
         .into_iter()
-        .map(|section| PatchBackedEntry::Section(section.text.to_string()))
+        .map(|section| section.text.to_string())
         .collect();
-    entries.extend(untracked_patch_entries(sandbox).await?);
 
     Ok(build_patch_backed_response(
         &entries,
@@ -501,164 +499,6 @@ async fn sandbox_git_stdout(
     Ok(res.stdout)
 }
 
-async fn sandbox_command_success(
-    sandbox: &dyn Sandbox,
-    command: &str,
-    op: &str,
-) -> std::result::Result<bool, ApiError> {
-    let res = sandbox
-        .exec_command(command, SANDBOX_GIT_TIMEOUT_MS, None, None, None)
-        .await
-        .map_err(|err| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.display_with_causes()))?;
-    if res.is_timed_out() {
-        return Err(transient_503(op, "command timed out"));
-    }
-    Ok(res.is_success())
-}
-
-async fn untracked_patch_entries(
-    sandbox: &dyn Sandbox,
-) -> std::result::Result<Vec<PatchBackedEntry>, ApiError> {
-    let stdout = sandbox_git_stdout(
-        sandbox,
-        "git -c maintenance.auto=0 -c gc.auto=0 -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.quotePath=false ls-files --others --exclude-standard -z",
-        "git ls-files --others",
-    )
-    .await?;
-    let paths: Vec<String> = stdout
-        .split('\0')
-        .filter(|path| !path.is_empty())
-        .filter(|path| is_safe_repo_relative_path(path))
-        .map(str::to_string)
-        .collect();
-
-    let mut entries = Vec::new();
-    for path in &paths {
-        entries.push(untracked_path_entry(sandbox, path).await?);
-    }
-    Ok(entries)
-}
-
-async fn untracked_path_entry(
-    sandbox: &dyn Sandbox,
-    path: &str,
-) -> std::result::Result<PatchBackedEntry, ApiError> {
-    if is_sensitive(path) {
-        return Ok(PatchBackedEntry::Prebuilt {
-            diff:  patch_placeholder_file_diff(path, PlaceholderKind::Sensitive),
-            stats: DiffStats::default(),
-        });
-    }
-
-    let path_q = shell_quote(path);
-    if sandbox_command_success(sandbox, &format!("test -L {path_q}"), "test symlink").await? {
-        return Ok(PatchBackedEntry::Prebuilt {
-            diff:  patch_placeholder_file_diff(path, PlaceholderKind::Symlink),
-            stats: DiffStats::default(),
-        });
-    }
-
-    let Ok(bytes) = sandbox_git_stdout(
-        sandbox,
-        &format!("wc -c < {path_q}"),
-        "wc -c untracked file",
-    )
-    .await
-    .and_then(|stdout| {
-        stdout.trim().parse::<u64>().map_err(|_| {
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Failed to parse untracked file size.",
-            )
-        })
-    }) else {
-        return Ok(PatchBackedEntry::Prebuilt {
-            diff:  unreadable_untracked_placeholder(path),
-            stats: DiffStats::default(),
-        });
-    };
-    if bytes > PER_FILE_BYTES_CAP {
-        return Ok(PatchBackedEntry::Prebuilt {
-            diff:  truncated_untracked_placeholder(path),
-            stats: DiffStats::default(),
-        });
-    }
-
-    let Ok(contents) = sandbox.read_file(path, None, None).await else {
-        return Ok(PatchBackedEntry::Prebuilt {
-            diff:  unreadable_untracked_placeholder(path),
-            stats: DiffStats::default(),
-        });
-    };
-    if contents.contains('\0') {
-        return Ok(PatchBackedEntry::Prebuilt {
-            diff:  patch_placeholder_file_diff(path, PlaceholderKind::Binary),
-            stats: DiffStats::default(),
-        });
-    }
-    if contents.lines().count() > PER_FILE_LINES_CAP {
-        return Ok(PatchBackedEntry::Prebuilt {
-            diff:  truncated_untracked_placeholder(path),
-            stats: DiffStats::default(),
-        });
-    }
-
-    Ok(PatchBackedEntry::Section(added_file_patch_section(
-        path, &contents,
-    )))
-}
-
-fn is_safe_repo_relative_path(path: &str) -> bool {
-    if path.is_empty() || path.chars().any(char::is_control) {
-        return false;
-    }
-    std::path::Path::new(path)
-        .components()
-        .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
-}
-
-fn added_file_patch_section(path: &str, contents: &str) -> String {
-    let line_count = contents.lines().count();
-    let mut patch = format!(
-        "diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{line_count} @@\n"
-    );
-    for line in contents.split_inclusive('\n') {
-        patch.push('+');
-        patch.push_str(line);
-    }
-    if !patch.ends_with('\n') {
-        patch.push('\n');
-    }
-    patch
-}
-
-fn patch_placeholder_file_diff(path: &str, kind: PlaceholderKind) -> FileDiff {
-    let mut diff = match kind {
-        PlaceholderKind::Symlink => {
-            degraded_file_diff(String::new(), path.to_string(), FileDiffChangeKind::Symlink)
-        }
-        _ => degraded_file_diff(String::new(), path.to_string(), FileDiffChangeKind::Added),
-    };
-    match kind {
-        PlaceholderKind::Sensitive => diff.sensitive = Some(true),
-        PlaceholderKind::Binary => diff.binary = Some(true),
-        PlaceholderKind::Symlink => {}
-        PlaceholderKind::Submodule => diff.change_kind = Some(FileDiffChangeKind::Submodule),
-    }
-    diff
-}
-
-fn truncated_untracked_placeholder(path: &str) -> FileDiff {
-    let mut diff = degraded_file_diff(String::new(), path.to_string(), FileDiffChangeKind::Added);
-    diff.truncated = Some(true);
-    diff.truncation_reason = Some(FileDiffTruncationReason::FileTooLarge);
-    diff
-}
-
-fn unreadable_untracked_placeholder(path: &str) -> FileDiff {
-    truncated_untracked_placeholder(path)
-}
-
 /// Build the degraded response from the stored `final_patch`.
 /// When `final_patch` is `None`, returns the empty envelope (UI maps this to
 /// R4(c)). Keeps the same `FileDiff[]` shape as live responses, but leaves
@@ -673,9 +513,9 @@ fn build_fallback_response(
         return empty_envelope(PaginatedRunFileListSource::FinalPatch);
     };
 
-    let entries: Vec<PatchBackedEntry> = split_patch_sections(patch)
+    let entries: Vec<String> = split_patch_sections(patch)
         .into_iter()
-        .map(|section| PatchBackedEntry::Section(section.text.to_string()))
+        .map(|section| section.text.to_string())
         .collect();
 
     let to_sha = projection
@@ -703,11 +543,6 @@ fn build_fallback_response(
     )
 }
 
-enum PatchBackedEntry {
-    Section(String),
-    Prebuilt { diff: FileDiff, stats: DiffStats },
-}
-
 struct PatchBackedResponseMeta {
     source:              PaginatedRunFileListSource,
     degraded:            bool,
@@ -717,23 +552,18 @@ struct PatchBackedResponseMeta {
 }
 
 fn build_patch_backed_response(
-    entries: &[PatchBackedEntry],
+    entries: &[String],
     meta_input: PatchBackedResponseMeta,
     run_id: &RunId,
     start: Instant,
 ) -> PaginatedRunFileList {
     let original_section_count = entries.len();
-    let stats = entries.iter().fold(DiffStats::default(), |mut acc, entry| {
-        let stats = match entry {
-            PatchBackedEntry::Section(text) => {
-                let sections = split_patch_sections(text);
-                sections
-                    .first()
-                    .map(|section| section_to_stats(section, is_sensitive))
-                    .unwrap_or_default()
-            }
-            PatchBackedEntry::Prebuilt { stats, .. } => *stats,
-        };
+    let stats = entries.iter().fold(DiffStats::default(), |mut acc, text| {
+        let sections = split_patch_sections(text);
+        let stats = sections
+            .first()
+            .map(|section| section_to_stats(section, is_sensitive))
+            .unwrap_or_default();
         acc.additions = acc.additions.saturating_add(stats.additions);
         acc.deletions = acc.deletions.saturating_add(stats.deletions);
         acc
@@ -746,13 +576,7 @@ fn build_patch_backed_response(
     let mut response_data: Vec<FileDiff> =
         Vec::with_capacity(original_section_count.min(FILE_COUNT_CAP));
 
-    for entry in entries.iter().take(FILE_COUNT_CAP) {
-        let PatchBackedEntry::Section(text) = entry else {
-            if let PatchBackedEntry::Prebuilt { diff, .. } = entry {
-                response_data.push(diff.clone());
-            }
-            continue;
-        };
+    for text in entries.iter().take(FILE_COUNT_CAP) {
         let Some(section) = split_patch_sections(text).pop() else {
             continue;
         };
@@ -1620,6 +1444,142 @@ mod tests {
         }
     }
 
+    struct ScriptedWorkingTreeSandbox {
+        commands: StdMutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl fabro_agent::Sandbox for ScriptedWorkingTreeSandbox {
+        async fn exec_command(
+            &self,
+            command: &str,
+            _timeout_ms: u64,
+            _working_dir: Option<&str>,
+            _env_vars: Option<&std::collections::HashMap<String, String>>,
+            _cancel_token: Option<tokio_util::sync::CancellationToken>,
+        ) -> fabro_sandbox::Result<fabro_sandbox::ExecResult> {
+            self.commands
+                .lock()
+                .expect("commands lock poisoned")
+                .push(command.to_string());
+
+            let stdout = if command.contains(" show -s --format=") {
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 2026-05-09T17:12:40Z\n".to_string()
+            } else if command.contains(" diff --patch --find-renames=50% ") {
+                "\
+diff --git a/src/live.rs b/src/live.rs
+--- a/src/live.rs
++++ b/src/live.rs
+@@ -1 +1,2 @@
+ old
++new
+"
+                .to_string()
+            } else {
+                return Err(fabro_sandbox::Error::message(format!(
+                    "unexpected command: {command}"
+                )));
+            };
+
+            Ok(fabro_sandbox::ExecResult {
+                stdout,
+                stderr: String::new(),
+                exit_code: Some(0),
+                termination: CommandTermination::Exited,
+                duration_ms: 0,
+            })
+        }
+
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<usize>,
+            _limit: Option<usize>,
+        ) -> fabro_sandbox::Result<String> {
+            unimplemented!()
+        }
+        async fn write_file(&self, _: &str, _: &str) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn delete_file(&self, _: &str) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn file_exists(&self, _: &str) -> fabro_sandbox::Result<bool> {
+            unimplemented!()
+        }
+        async fn list_directory(
+            &self,
+            _path: &str,
+            _depth: Option<usize>,
+        ) -> fabro_sandbox::Result<Vec<fabro_sandbox::DirEntry>> {
+            unimplemented!()
+        }
+        async fn grep(
+            &self,
+            _pattern: &str,
+            _path: &str,
+            _options: &fabro_sandbox::GrepOptions,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            unimplemented!()
+        }
+        async fn glob(
+            &self,
+            _pattern: &str,
+            _path: Option<&str>,
+        ) -> fabro_sandbox::Result<Vec<String>> {
+            unimplemented!()
+        }
+        async fn download_file_to_local(
+            &self,
+            _remote: &str,
+            _local: &std::path::Path,
+        ) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn upload_file_from_local(
+            &self,
+            _local: &std::path::Path,
+            _remote: &str,
+        ) -> fabro_sandbox::Result<()> {
+            unimplemented!()
+        }
+        async fn initialize(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        async fn cleanup(&self) -> fabro_sandbox::Result<()> {
+            Ok(())
+        }
+        fn working_directory(&self) -> &'static str {
+            "/tmp"
+        }
+        fn platform(&self) -> &'static str {
+            "linux"
+        }
+        fn os_version(&self) -> String {
+            "test".to_string()
+        }
+    }
+
+    #[tokio::test]
+    async fn working_tree_scope_uses_one_git_diff_and_excludes_untracked_files() {
+        let sandbox = ScriptedWorkingTreeSandbox {
+            commands: StdMutex::new(Vec::new()),
+        };
+
+        let body =
+            materialize_working_tree_sandbox_path(&sandbox, "HEAD", &RunId::new(), Instant::now())
+                .await
+                .expect("working tree materialization should succeed");
+
+        assert_eq!(body.source, PaginatedRunFileListSource::Sandbox);
+        assert_eq!(body.data.len(), 1);
+        let commands = sandbox.commands.lock().expect("commands lock poisoned");
+        assert_eq!(commands.len(), 2);
+        assert!(commands[0].contains(" show -s --format="));
+        assert!(commands[1].contains(" diff --patch --find-renames=50% HEAD"));
+        assert!(!commands.iter().any(|command| command.contains("ls-files")));
+    }
+
     #[tokio::test]
     async fn concurrent_calls_for_same_run_share_one_materialization() {
         let inflight = new_registry();
@@ -2091,7 +2051,7 @@ index 1111111..2222222 160000
         .expect("fallback response should serialize")
     }
 
-    fn sandbox_patch_response_json(entries: &[PatchBackedEntry]) -> serde_json::Value {
+    fn sandbox_patch_response_json(entries: &[String]) -> serde_json::Value {
         serde_json::to_value(build_patch_backed_response(
             entries,
             PatchBackedResponseMeta {
@@ -2123,30 +2083,8 @@ diff --git a/{path} b/{path}
     }
 
     #[test]
-    fn safe_repo_relative_path_rejects_absolute_parent_and_empty_paths() {
-        assert!(is_safe_repo_relative_path("src/main.rs"));
-        assert!(is_safe_repo_relative_path("./src/main.rs"));
-        assert!(!is_safe_repo_relative_path(""));
-        assert!(!is_safe_repo_relative_path("/src/main.rs"));
-        assert!(!is_safe_repo_relative_path("../secrets.env"));
-        assert!(!is_safe_repo_relative_path("src/../../secrets.env"));
-        assert!(!is_safe_repo_relative_path("src/main.rs\0.env"));
-        assert!(!is_safe_repo_relative_path("src/main.rs\n.env"));
-    }
-
-    #[test]
-    fn added_file_patch_section_renders_untracked_text_as_added_patch() {
-        let patch = added_file_patch_section("notes/todo.md", "one\ntwo\n");
-
-        assert!(patch.starts_with("diff --git a/notes/todo.md b/notes/todo.md\n"));
-        assert!(patch.contains("new file mode 100644\n"));
-        assert!(patch.contains("--- /dev/null\n+++ b/notes/todo.md\n"));
-        assert!(patch.contains("@@ -0,0 +1,2 @@\n+one\n+two\n"));
-    }
-
-    #[test]
     fn sandbox_patch_response_keeps_source_sandbox_and_not_degraded() {
-        let entries = vec![PatchBackedEntry::Section(simple_patch("src/live.rs"))];
+        let entries = vec![simple_patch("src/live.rs")];
         let body = sandbox_patch_response_json(&entries);
 
         assert_eq!(body["source"].as_str(), Some("sandbox"));

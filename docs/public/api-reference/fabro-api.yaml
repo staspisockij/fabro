@@ -2244,7 +2244,7 @@ paths:
         - name: scope
           in: query
           required: false
-          description: Diff scope to return. Defaults to committed changes only. Sandbox-backed responses honor all scopes; final-patch fallback responses always represent the stored committed/final diff.
+          description: Diff scope to return. Defaults to committed changes only. Sandbox-backed responses honor all scopes for tracked files; untracked files are excluded. Final-patch fallback responses always represent the stored committed/final diff.
           schema:
             type: string
             default: committed
