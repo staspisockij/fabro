@@ -235,18 +235,20 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-09T17:42:23.254505Z",
-  "last_event_at": "2026-05-09T17:42:28.011863Z",
+  "last_event_at": "2026-05-09T17:47:34.563086Z",
   "pending_control": null,
   "checkpoint": {
-    "timestamp": "2026-05-09T17:42:28.064371Z",
-    "current_node": "committed",
+    "timestamp": "2026-05-09T17:47:34.622110Z",
+    "current_node": "uncommitted",
     "completed_nodes": [
       "start",
-      "committed"
+      "committed",
+      "uncommitted"
     ],
     "node_retries": {},
     "context_values": {
       "internal.retry_count.committed": 0,
+      "thread.committed.current_node": "uncommitted",
       "internal.run_id": "01KR6XA5QV0EREBTSCY9JV6RVE",
       "response.committed": "done",
       "thread.start.current_node": "committed",
@@ -257,11 +259,13 @@
       "failure_signature": "",
       "graph.goal": "Exercise run file scopes with committed and uncommitted sandbox changes",
       "graph.rankdir": "LR",
-      "current_node": "committed",
+      "current_node": "uncommitted",
       "internal.retry_count.start": 0,
-      "last_stage": "committed",
-      "internal.thread_id": "start",
+      "response.uncommitted": "done",
+      "last_stage": "uncommitted",
+      "internal.thread_id": "committed",
       "internal.fidelity": "compact",
+      "internal.retry_count.uncommitted": 0,
       "outcome": "succeeded"
     },
     "node_outcomes": {
@@ -297,14 +301,47 @@
           "total_usd_micros": 37585
         }
       },
+      "uncommitted": {
+        "status": "succeeded",
+        "context_updates": {
+          "last_response": "done",
+          "response.uncommitted": "done",
+          "last_stage": "uncommitted"
+        },
+        "notes": "Stage completed: uncommitted",
+        "usage": {
+          "input": {
+            "usage": {
+              "model": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-6"
+              },
+              "tokens": {
+                "input_tokens": 633,
+                "output_tokens": 130,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 8022,
+                "cache_write_tokens": 8502
+              }
+            },
+            "facts": {
+              "provider": "anthropic",
+              "cache_write_5m_tokens": 8502,
+              "cache_write_1h_tokens": 0
+            }
+          },
+          "total_usd_micros": 38137
+        }
+      },
       "start": {
         "status": "succeeded",
         "usage": null
       }
     },
-    "next_node_id": "uncommitted",
+    "next_node_id": "exit",
     "node_visits": {
       "committed": 1,
+      "uncommitted": 1,
       "start": 1
     }
   },
@@ -343,6 +380,81 @@
           "start": 1
         }
       }
+    ],
+    [
+      36,
+      {
+        "timestamp": "2026-05-09T17:42:31.439199Z",
+        "current_node": "committed",
+        "completed_nodes": [
+          "start",
+          "committed"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.goal": "Exercise run file scopes with committed and uncommitted sandbox changes",
+          "failure_class": "",
+          "internal.fidelity": "compact",
+          "internal.thread_id": "start",
+          "outcome": "succeeded",
+          "internal.retry_count.committed": 0,
+          "failure_signature": "",
+          "internal.node_visit_count": 1,
+          "last_response": "done",
+          "internal.work_dir": "/home/daytona/workspace",
+          "graph.rankdir": "LR",
+          "last_stage": "committed",
+          "current_node": "committed",
+          "thread.start.current_node": "committed",
+          "internal.run_id": "01KR6XA5QV0EREBTSCY9JV6RVE",
+          "internal.retry_count.start": 0,
+          "response.committed": "done"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "committed": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "committed",
+              "last_response": "done",
+              "response.committed": "done"
+            },
+            "notes": "Stage completed: committed",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 582,
+                    "output_tokens": 118,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 8004,
+                    "cache_write_tokens": 8445
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 8445,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 37585
+            }
+          }
+        },
+        "next_node_id": "uncommitted",
+        "git_commit_sha": "a2c3fd39bf17f0a89ef439004674976aec070730",
+        "node_visits": {
+          "committed": 1,
+          "start": 1
+        }
+      }
     ]
   ],
   "conclusion": null,
@@ -355,12 +467,17 @@
     "clone_branch": "main"
   },
   "final_patch": null,
+  "diff_summary": {
+    "files_changed": 1,
+    "additions": 3,
+    "deletions": 0
+  },
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
-    "committed@1": {
-      "first_event_seq": 20,
+    "uncommitted@1": {
+      "first_event_seq": 39,
       "prompt": null,
       "response": null,
       "completion": null,
@@ -374,9 +491,34 @@
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-09T17:42:25.043372Z",
+      "started_at": "2026-05-09T17:42:31.439341Z",
       "handler": "agent",
       "state": "running"
+    },
+    "committed@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: committed",
+        "failure_reason": null,
+        "timestamp": "2026-05-09T17:42:28.064179Z"
+      },
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-09T17:42:25.043372Z",
+      "handler": "agent",
+      "duration_ms": 3020,
+      "state": "succeeded"
     },
     "start@1": {
       "first_event_seq": 16,
