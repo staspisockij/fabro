@@ -225,15 +225,126 @@
     }
   },
   "graph_source": "digraph RunFilesLiveTest {\n    graph [goal=\"Exercise run file scopes with committed and uncommitted sandbox changes\"]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    committed [label=\"Committed edit\", prompt=\"Run exactly one Bash tool command: mkdir -p docs/internal && printf 'Live run files scope test\\n\\nCommitted agent node completed at %s\\n' \\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\" > docs/internal/live-run-files-scope-committed.md. Wait for it to return. Do not run any other commands, do not read files, and do not edit anything else. Then reply with the single word done and stop.\"]\n\n    uncommitted [label=\"Uncommitted edit then sleep\", timeout=\"360s\", prompt=\"Run exactly one Bash tool command with timeout_ms set to 310000 or higher: mkdir -p docs/internal && printf 'Live run files scope test\\n\\nUncommitted while second node sleeps at %s\\n' \\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\" > docs/internal/live-run-files-scope-uncommitted.md && sleep 300. Wait for it to return. Do not run any other commands, do not read files, and do not edit anything else. Then reply with the single word done and stop.\"]\n\n    start -> committed -> uncommitted -> exit\n}\n",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "run_id": "01KR6VKFSZHNJ6GFXJ92M0X846",
+    "start_time": "2026-05-09T17:12:32.359978Z",
+    "run_branch": "fabro/run/01KR6VKFSZHNJ6GFXJ92M0X846",
+    "base_sha": "eb2d9fae29749e8f1dc61d7a69ebdaa42551892b"
   },
-  "status_updated_at": "2026-05-09T17:12:17.519618Z",
-  "last_event_at": "2026-05-09T17:12:32.146936Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-09T17:12:32.360021Z",
+  "last_event_at": "2026-05-09T17:12:38.243642Z",
   "pending_control": null,
-  "checkpoint": null,
-  "checkpoints": [],
+  "checkpoint": {
+    "timestamp": "2026-05-09T17:12:38.272491Z",
+    "current_node": "committed",
+    "completed_nodes": [
+      "start",
+      "committed"
+    ],
+    "node_retries": {},
+    "context_values": {
+      "outcome": "succeeded",
+      "internal.run_id": "01KR6VKFSZHNJ6GFXJ92M0X846",
+      "internal.fidelity": "compact",
+      "internal.node_visit_count": 1,
+      "failure_class": "",
+      "thread.start.current_node": "committed",
+      "graph.goal": "Exercise run file scopes with committed and uncommitted sandbox changes",
+      "internal.work_dir": "/home/daytona/workspace",
+      "internal.thread_id": "start",
+      "response.committed": "done",
+      "current_node": "committed",
+      "internal.retry_count.committed": 0,
+      "last_response": "done",
+      "failure_signature": "",
+      "graph.rankdir": "LR",
+      "last_stage": "committed",
+      "internal.retry_count.start": 0
+    },
+    "node_outcomes": {
+      "start": {
+        "status": "succeeded",
+        "usage": null
+      },
+      "committed": {
+        "status": "succeeded",
+        "context_updates": {
+          "last_stage": "committed",
+          "last_response": "done",
+          "response.committed": "done"
+        },
+        "notes": "Stage completed: committed",
+        "usage": {
+          "input": {
+            "usage": {
+              "model": {
+                "provider": "anthropic",
+                "model_id": "claude-sonnet-4-6"
+              },
+              "tokens": {
+                "input_tokens": 586,
+                "output_tokens": 122,
+                "reasoning_tokens": 0,
+                "cache_read_tokens": 7991,
+                "cache_write_tokens": 8432
+              }
+            },
+            "facts": {
+              "provider": "anthropic",
+              "cache_write_5m_tokens": 8432,
+              "cache_write_1h_tokens": 0
+            }
+          },
+          "total_usd_micros": 37605
+        }
+      }
+    },
+    "next_node_id": "uncommitted",
+    "node_visits": {
+      "start": 1,
+      "committed": 1
+    }
+  },
+  "checkpoints": [
+    [
+      19,
+      {
+        "timestamp": "2026-05-09T17:12:34.476501Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.retry_count.start": 0,
+          "internal.thread_id": null,
+          "graph.rankdir": "LR",
+          "outcome": "succeeded",
+          "current_node": "start",
+          "failure_class": "",
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.node_visit_count": 1,
+          "failure_signature": "",
+          "graph.goal": "Exercise run file scopes with committed and uncommitted sandbox changes",
+          "internal.run_id": "01KR6VKFSZHNJ6GFXJ92M0X846",
+          "internal.fidelity": "compact"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "committed",
+        "node_visits": {
+          "start": 1
+        }
+      }
+    ]
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -247,5 +358,46 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-09T17:12:34.476248Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-09T17:12:34.475369Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "state": "succeeded"
+    },
+    "committed@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-09T17:12:34.476651Z",
+      "handler": "agent",
+      "state": "running"
+    }
+  }
 }
