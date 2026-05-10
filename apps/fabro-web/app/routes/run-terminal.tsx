@@ -13,6 +13,7 @@ import {
 } from "@heroicons/react/20/solid";
 
 import { SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
+import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
 import { apiData, humanInTheLoopApi } from "../lib/api-client";
 import { useRunState } from "../lib/queries";
@@ -206,6 +207,8 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
   );
 
   const reconnect = useCallback(() => {
+    setError(null);
+    setStatus("connecting");
     setConnectionKey((key) => key + 1);
   }, []);
 
@@ -367,16 +370,21 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
         </div>
       </div>
       {error ? (
-        <p className="mb-2 shrink-0 text-xs text-coral" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <div
-        className="min-h-0 flex-1 overflow-hidden rounded border border-line pb-3"
-        style={{ backgroundColor: TERMINAL_BACKGROUND }}
-      >
-        <div ref={terminalEl} className="h-full min-h-0 p-3" />
-      </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center" role="alert">
+          <ErrorState
+            title="Terminal unavailable"
+            description={error}
+            onRetry={reconnect}
+          />
+        </div>
+      ) : (
+        <div
+          className="min-h-0 flex-1 overflow-hidden rounded border border-line pb-3"
+          style={{ backgroundColor: TERMINAL_BACKGROUND }}
+        >
+          <div ref={terminalEl} className="h-full min-h-0 p-3" />
+        </div>
+      )}
     </main>
   );
 }
