@@ -9,6 +9,7 @@ import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import type { FitAddon as XtermFitAddon } from "@xterm/addon-fit";
 import {
   ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
   ClipboardDocumentIcon,
 } from "@heroicons/react/20/solid";
 
@@ -69,6 +70,10 @@ const TERMINAL_THEME = {
 export function buildTerminalWebSocketUrl(location: Location, runId: string): string {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${location.host}/api/v1/runs/${encodeURIComponent(runId)}/terminal`;
+}
+
+export function buildFullScreenTerminalUrl(runId: string): string {
+  return `/runs/${encodeURIComponent(runId)}/terminal`;
 }
 
 export function parseTerminalServerMessage(data: string): TerminalServerMessage | null {
@@ -359,6 +364,20 @@ export default function TerminalView({
           {leading}
           <StatusPill status={status} detail={sandboxDetail} />
           <div className="ml-auto flex items-center gap-2">
+            <Tooltip label="Open in new tab">
+              <a
+                href={buildFullScreenTerminalUrl(runId)}
+                target="_blank"
+                rel="noreferrer"
+                className={ICON_BUTTON_CLASS}
+                aria-label="Open terminal in new tab"
+              >
+                <ArrowTopRightOnSquareIcon
+                  className="size-4"
+                  aria-hidden="true"
+                />
+              </a>
+            </Tooltip>
             <Tooltip label="Reconnect">
               <button
                 type="button"
