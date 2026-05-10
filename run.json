@@ -185,15 +185,80 @@
       }
     }
   },
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-10T14:04:16.385187Z",
+    "run_branch": "fabro/run/01KR937GB0C99ETJDXHSFKCGB0",
+    "base_sha": "f58f23a5451bc551072e874b00ac9599e13d4cbc"
   },
-  "status_updated_at": "2026-05-10T14:04:02.312734Z",
-  "last_event_at": "2026-05-10T14:04:16.106182Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-10T14:04:16.385246Z",
+  "last_event_at": "2026-05-10T14:04:20.640807Z",
   "pending_control": null,
-  "checkpoints": [],
-  "conclusion": null,
+  "checkpoints": [
+    {
+      "seq": 18,
+      "checkpoint": {
+        "timestamp": "2026-05-10T14:04:18.183026Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "failure_class": "",
+          "internal.thread_id": null,
+          "internal.run_id": "01KR937GB0C99ETJDXHSFKCGB0",
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.node_visit_count": 1,
+          "graph.rankdir": "LR",
+          "current_node": "start",
+          "graph.goal": "Keep a Daytona sandbox alive long enough to verify VNC.",
+          "failure_signature": "",
+          "internal.fidelity": "compact"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "nap",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
+  "conclusion": {
+    "timestamp": "2026-05-10T14:10:37.196285Z",
+    "status": "failed",
+    "duration_ms": 379588,
+    "failure_reason": "Cancelled",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 422,
+      "output_tokens": 74,
+      "total_tokens": 8474,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 7978,
+      "total_usd_micros": 32293
+    },
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "working_directory": "/home/daytona/workspace",
@@ -205,5 +270,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 15,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-10T14:04:18.182890Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-10T14:04:18.182395Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "nap@1": {
+      "first_event_seq": 19,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-10T14:04:18.183098Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 422,
+        "output_tokens": 74,
+        "total_tokens": 8474,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 7978,
+        "total_usd_micros": 32293
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-sonnet-4-6"
+      },
+      "state": "running"
+    }
+  }
 }
