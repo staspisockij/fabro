@@ -267,6 +267,8 @@ export * from './sandbox-details';
 export * from './sandbox-file-entry';
 export * from './sandbox-file-list-response';
 export * from './sandbox-resources';
+export * from './sandbox-service';
+export * from './sandbox-service-list-response';
 export * from './sandbox-state';
 export * from './sandbox-timestamps';
 export * from './save-query-request';

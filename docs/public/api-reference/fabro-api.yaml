@@ -2653,6 +2653,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/sandbox/services:
+    get:
+      operationId: listSandboxServices
+      tags: [Human-in-the-Loop]
+      summary: List Sandbox Services
+      description: Lists listening TCP services discovered inside the run sandbox.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Listening TCP services
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxServiceListResponse"
+        "404":
+          description: Run not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run has no active sandbox or service discovery failed
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/sandbox/vnc:
     post:
       operationId: createSandboxVncPreview
@@ -7952,6 +7986,49 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SandboxFileEntry"
+
+    SandboxService:
+      description: A listening TCP service discovered inside a run sandbox.
+      type: object
+      required:
+        - port
+        - addresses
+        - processes
+        - preview_supported
+      properties:
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Listening TCP port.
+          example: 3000
+        addresses:
+          type: array
+          description: Local bind addresses reported by `ss`.
+          items:
+            type: string
+          example: ["127.0.0.1:3000", "[::]:3000"]
+        processes:
+          type: array
+          description: Visible process summaries reported by `ss`.
+          items:
+            type: string
+          example: ['users:(("node",pid=42,fd=23))']
+        preview_supported:
+          type: boolean
+          description: Whether the provider supports an external preview URL for this port.
+          example: true
+
+    SandboxServiceListResponse:
+      description: Non-paginated list of listening TCP services in a run sandbox.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SandboxService"
 
     VncPreviewResponse:
       description: Response containing a signed noVNC preview URL for a Daytona sandbox.

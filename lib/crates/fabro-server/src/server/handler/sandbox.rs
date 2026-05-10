@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
@@ -10,14 +11,17 @@ use super::super::{
     ApiError, AppState, Bytes, DaytonaSandbox, EnvVars, HeaderMap, IntoResponse, Json,
     NamedTempFile, Path, PreviewUrlRequest, PreviewUrlResponse, Query, RequiredUser, Response,
     Router, RunId, Sandbox, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
-    SandboxProvider, SshAccessRequest, SshAccessResponse, State, StatusCode, VncPreviewResponse,
-    collect_causes, fs, get, octet_stream_response, parse_run_id_path, post, reconnect_for_run,
-    reject_if_archived, render_with_causes, sandbox_details,
+    SandboxProvider, SandboxService, SandboxServiceListResponse, SshAccessRequest,
+    SshAccessResponse, State, StatusCode, VncPreviewResponse, collect_causes, fs, get,
+    octet_stream_response, parse_run_id_path, post, reconnect_for_run, reject_if_archived,
+    render_with_causes, sandbox_details,
 };
 
 const MAX_TERMINAL_CONTROL_BYTES: usize = 4096;
 const DEFAULT_VNC_NO_VNC_PORT: u16 = 6080;
 const DEFAULT_VNC_TTL_SECS: i32 = 3600;
+const LIST_SANDBOX_SERVICES_COMMAND: &str = "ss -H -ltnp";
+const LIST_SANDBOX_SERVICES_TIMEOUT_MS: u64 = 5_000;
 // Daytona's signed preview points at the noVNC service root, which serves a
 // directory listing. Force the iframe to the actual viewer page with
 // autoconnect+scale so the user lands on the desktop, not a file index.
@@ -68,6 +72,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/terminal", get(run_terminal))
         .route("/runs/{id}/sandbox", get(retrieve_run_sandbox))
         .route("/runs/{id}/sandbox/vnc", post(create_sandbox_vnc_preview))
+        .route("/runs/{id}/sandbox/services", get(list_sandbox_services))
         .route("/runs/{id}/sandbox/files", get(list_sandbox_files))
         .route(
             "/runs/{id}/sandbox/file",
@@ -526,6 +531,109 @@ async fn list_sandbox_files(
     }
 }
 
+async fn list_sandbox_services(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let record = match load_run_sandbox_record(&state, &id).await {
+        Ok(record) => record,
+        Err(response) => return response,
+    };
+    let provider = record.provider;
+    let sandbox = match reconnect_run_sandbox(&state, &id).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+    let result = match sandbox
+        .exec_command(
+            LIST_SANDBOX_SERVICES_COMMAND,
+            LIST_SANDBOX_SERVICES_TIMEOUT_MS,
+            None,
+            None,
+            None,
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(err) => {
+            return ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response();
+        }
+    };
+    if !result.is_success() {
+        return ApiError::new(
+            StatusCode::CONFLICT,
+            sandbox_service_command_failure_detail(&result),
+        )
+        .into_response();
+    }
+
+    Json(SandboxServiceListResponse {
+        data: parse_ss_listening_services(&result.stdout, &provider),
+    })
+    .into_response()
+}
+
+fn sandbox_service_command_failure_detail(result: &fabro_sandbox::ExecResult) -> String {
+    let stderr = result.stderr.trim();
+    if !stderr.is_empty() {
+        return stderr.to_string();
+    }
+    let stdout = result.stdout.trim();
+    if !stdout.is_empty() {
+        return stdout.to_string();
+    }
+    format!("{LIST_SANDBOX_SERVICES_COMMAND} failed")
+}
+
+fn parse_ss_listening_services(output: &str, provider: &str) -> Vec<SandboxService> {
+    let mut services = BTreeMap::<u16, SandboxService>::new();
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let Some(address) = fields.get(3).copied() else {
+            continue;
+        };
+        let Some(port) = parse_ss_local_port(address) else {
+            continue;
+        };
+        let process = (fields.len() > 5).then(|| fields[5..].join(" "));
+        let service = services.entry(port).or_insert_with(|| SandboxService {
+            port,
+            addresses: Vec::new(),
+            processes: Vec::new(),
+            preview_supported: preview_supported(provider, port),
+        });
+        push_unique(&mut service.addresses, address.to_string());
+        if let Some(process) = process {
+            push_unique(&mut service.processes, process);
+        }
+    }
+    services.into_values().collect()
+}
+
+fn parse_ss_local_port(address: &str) -> Option<u16> {
+    let port = address.rsplit_once(':')?.1.parse::<u16>().ok()?;
+    (port > 0).then_some(port)
+}
+
+fn preview_supported(provider: &str, port: u16) -> bool {
+    provider == SandboxProvider::Daytona.to_string() && (3000..=9999).contains(&port)
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
 async fn get_sandbox_file(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -745,6 +853,118 @@ mod tests {
         headers.insert("host", HeaderValue::from_static("127.0.0.1:4187"));
         headers.insert("origin", HeaderValue::from_static("https://evil.example"));
         assert!(!origin_allowed(&headers));
+    }
+
+    #[test]
+    fn ss_parser_extracts_addresses_processes_and_preview_support() {
+        let services = parse_ss_listening_services(
+            r#"
+LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
+LISTEN 0 4096 0.0.0.0:5173 0.0.0.0:* users:(("vite",pid=84,fd=19))
+LISTEN 0 4096 [::]:8080 [::]:* users:(("server",pid=126,fd=9))
+LISTEN 0 4096 [::1]:2500 [::]:* users:(("debug",pid=168,fd=7))
+"#,
+            "daytona",
+        );
+
+        assert_eq!(services.len(), 4);
+        assert_eq!(services[0].port, 2500);
+        assert_eq!(services[0].addresses, vec!["[::1]:2500"]);
+        assert_eq!(services[0].processes, vec![
+            r#"users:(("debug",pid=168,fd=7))"#
+        ]);
+        assert!(!services[0].preview_supported);
+        assert_eq!(services[1].port, 3000);
+        assert_eq!(services[1].addresses, vec!["127.0.0.1:3000"]);
+        assert_eq!(services[1].processes, vec![
+            r#"users:(("node",pid=42,fd=23))"#
+        ]);
+        assert!(services[1].preview_supported);
+        assert_eq!(services[2].port, 5173);
+        assert_eq!(services[2].addresses, vec!["0.0.0.0:5173"]);
+        assert!(services[2].preview_supported);
+        assert_eq!(services[3].port, 8080);
+        assert_eq!(services[3].addresses, vec!["[::]:8080"]);
+        assert!(services[3].preview_supported);
+    }
+
+    #[test]
+    fn ss_parser_ignores_malformed_and_non_numeric_ports() {
+        let services = parse_ss_listening_services(
+            r#"
+LISTEN 0 4096 127.0.0.1:not-a-port 0.0.0.0:* users:(("node",pid=42,fd=23))
+LISTEN 0 4096 missing-peer
+not enough fields
+LISTEN 0 4096 127.0.0.1:0 0.0.0.0:* users:(("zero",pid=1,fd=2))
+LISTEN 0 4096 127.0.0.1:65536 0.0.0.0:* users:(("large",pid=1,fd=2))
+"#,
+            "daytona",
+        );
+
+        assert!(services.is_empty());
+    }
+
+    #[test]
+    fn ss_parser_groups_duplicate_ports_and_deduplicates_values() {
+        let services = parse_ss_listening_services(
+            r#"
+LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
+LISTEN 0 4096 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
+LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
+LISTEN 0 4096 [::]:3000 [::]:* users:(("vite",pid=84,fd=19))
+"#,
+            "daytona",
+        );
+
+        assert_eq!(services, vec![SandboxService {
+            port:              3000,
+            addresses:         vec![
+                "127.0.0.1:3000".to_string(),
+                "0.0.0.0:3000".to_string(),
+                "[::]:3000".to_string(),
+            ],
+            processes:         vec![
+                r#"users:(("node",pid=42,fd=23))"#.to_string(),
+                r#"users:(("vite",pid=84,fd=19))"#.to_string(),
+            ],
+            preview_supported: true,
+        }]);
+    }
+
+    #[test]
+    fn preview_support_is_daytona_only_for_documented_range() {
+        assert!(!preview_supported("daytona", 2500));
+        assert!(preview_supported("daytona", 3000));
+        assert!(preview_supported("daytona", 9999));
+        assert!(!preview_supported("daytona", 10000));
+        assert!(!preview_supported("docker", 3000));
+    }
+
+    #[test]
+    fn sandbox_service_command_failure_prefers_stderr_then_stdout() {
+        let mut result = fabro_sandbox::ExecResult {
+            stdout:      "stdout detail".to_string(),
+            stderr:      "stderr detail".to_string(),
+            exit_code:   Some(127),
+            termination: fabro_types::CommandTermination::Exited,
+            duration_ms: 10,
+        };
+        assert_eq!(
+            sandbox_service_command_failure_detail(&result),
+            "stderr detail"
+        );
+
+        result.stderr.clear();
+        assert_eq!(
+            sandbox_service_command_failure_detail(&result),
+            "stdout detail"
+        );
+
+        result.stdout.clear();
+        assert_eq!(
+            sandbox_service_command_failure_detail(&result),
+            "ss -H -ltnp failed"
+        );
     }
 
     struct FakeVncSandbox {

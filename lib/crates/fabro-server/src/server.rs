@@ -34,10 +34,10 @@ pub use fabro_api::types::{
     RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest, RewindResponse,
     RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
     RunError, RunManifest, RunStage, RunStatusResponse, SandboxDetails, SandboxFileEntry,
-    SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
-    StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
-    SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, VncPreviewResponse,
-    WriteBlobResponse,
+    SandboxFileListResponse, SandboxService, SandboxServiceListResponse, SshAccessRequest,
+    SshAccessResponse, StageHandler, StageState, StartRunRequest, SubmitAnswerRequest,
+    SystemFeatures, SystemInfoResponse, SystemRepairRunIssue, SystemRepairRunsResponse,
+    SystemRunCounts, TimelineEntryResponse, VncPreviewResponse, WriteBlobResponse,
 };
 use fabro_auth::{
     CredentialSource, VaultCredentialSource, auth_issue_message, parse_credential_secret,

@@ -79,6 +79,10 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
             get(demo::list_sandbox_files_stub),
         )
         .route(
+            "/runs/{id}/sandbox/services",
+            get(demo::list_sandbox_services_stub),
+        )
+        .route(
             "/runs/{id}/sandbox/file",
             get(demo::get_sandbox_file_stub).put(demo::put_sandbox_file_stub),
         )

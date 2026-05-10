@@ -6321,6 +6321,7 @@ async fn worker_token_is_rejected_on_user_only_routes() {
         (Method::POST, format!("/runs/{run_id}/preview")),
         (Method::POST, format!("/runs/{run_id}/ssh")),
         (Method::GET, format!("/runs/{run_id}/sandbox/files")),
+        (Method::GET, format!("/runs/{run_id}/sandbox/services")),
         (Method::GET, format!("/runs/{run_id}/sandbox/file")),
         (Method::PUT, format!("/runs/{run_id}/sandbox/file")),
     ];

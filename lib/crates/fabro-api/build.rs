@@ -385,6 +385,12 @@ fn main() {
         ("DirtyStatus", "fabro_types::DirtyStatus", &[]),
         ("GitContext", "fabro_types::GitContext", &[]),
         ("SandboxDetails", "fabro_types::SandboxDetails", &[]),
+        ("SandboxService", "fabro_types::SandboxService", &[]),
+        (
+            "SandboxServiceListResponse",
+            "fabro_types::SandboxServiceListResponse",
+            &[],
+        ),
         ("SandboxState", "fabro_types::SandboxState", &[]),
         ("SandboxResources", "fabro_types::SandboxResources", &[]),
         ("SandboxTimestamps", "fabro_types::SandboxTimestamps", &[]),

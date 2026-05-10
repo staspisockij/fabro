@@ -20,7 +20,8 @@ use fabro_api::types::{
     PaginationMeta, RunArtifactListResponse, RunCommit, RunCommitParent, RunCommitParentSha,
     RunCommitParentShortSha, RunCommitPerson, RunCommitSha, RunCommitShortSha, RunCommitTreeSha,
     RunCommitsMeta, RunCommitsMetaBaseSha, RunCommitsMetaHeadSha, RunCommitsMetaSource,
-    RunFilesMeta, RunFilesMetaScope, RunFilesMetaSource,
+    RunFilesMeta, RunFilesMetaScope, RunFilesMetaSource, SandboxService,
+    SandboxServiceListResponse,
 };
 use serde_json::json;
 
@@ -396,6 +397,33 @@ pub(crate) async fn list_sandbox_files_stub(
                 { "name": "logs", "is_dir": true }
             ]
         })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn list_sandbox_services_stub(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(SandboxServiceListResponse {
+            data: vec![
+                SandboxService {
+                    port:              3000,
+                    addresses:         vec!["0.0.0.0:3000".to_string()],
+                    processes:         vec![r#"users:(("node",pid=42,fd=23))"#.to_string()],
+                    preview_supported: true,
+                },
+                SandboxService {
+                    port:              2500,
+                    addresses:         vec!["127.0.0.1:2500".to_string()],
+                    processes:         vec![r#"users:(("debug",pid=84,fd=19))"#.to_string()],
+                    preview_supported: false,
+                },
+            ],
+        }),
     )
         .into_response()
 }
