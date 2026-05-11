@@ -199,14 +199,133 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KRCE4MSB8DK908K6QB17Y69H",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-11T21:12:41.799244Z",
+    "run_branch": "fabro/run/01KRCE4MSB8DK908K6QB17Y69H",
+    "base_sha": "df46f28a14d8ff3c187a7071827678cd1ecf443b"
   },
-  "status_updated_at": "2026-05-11T21:12:26.189494Z",
-  "last_event_at": "2026-05-11T21:12:41.333146Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-11T21:12:41.799310Z",
+  "last_event_at": "2026-05-11T21:12:59.051112Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-11T21:12:44.990322Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.fidelity": "compact",
+          "failure_class": "",
+          "internal.retry_count.start": 0,
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "internal.run_id": "01KRCE4MSB8DK908K6QB17Y69H",
+          "current_node": "start",
+          "outcome": "succeeded",
+          "internal.thread_id": null,
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.node_visit_count": 1,
+          "failure_signature": "",
+          "graph.rankdir": "LR"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "greet",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-11T21:12:59.263965Z",
+        "current_node": "greet",
+        "completed_nodes": [
+          "start",
+          "greet"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "current_node": "greet",
+          "graph.rankdir": "LR",
+          "thread.start.current_node": "greet",
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.thread_id": "start",
+          "failure_class": "",
+          "internal.retry_count.greet": 0,
+          "failure_signature": "",
+          "internal.fidelity": "compact",
+          "last_stage": "greet",
+          "last_response": "Done! Here's what was added to the README, just below the main tagline:\n\n```\n> *Agents run the graph*\n> *Human gates hold what matters*\n> *Ship with confidence*\n```\n\nThe haiku (5–7–5) captures Fab",
+          "internal.node_visit_count": 1,
+          "graph.goal": "Say hello and demonstrate a basic Fabro workflow",
+          "internal.run_id": "01KRCE4MSB8DK908K6QB17Y69H",
+          "outcome": "succeeded",
+          "response.greet": "Done! Here's what was added to the README, just below the main tagline:\n\n```\n> *Agents run the graph*\n> *Human gates hold what matters*\n> *Ship with confidence*\n```\n\nThe haiku (5–7–5) captures Fabro's core philosophy:\n- **Line 1** — agents execute workflow graphs autonomously\n- **Line 2** — human-in-the-loop gates give engineers control at the right moments\n- **Line 3** — the end result is confidence in what ships",
+          "internal.retry_count.start": 0
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "greet": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "greet",
+              "last_response": "Done! Here's what was added to the README, just below the main tagline:\n\n```\n> *Agents run the graph*\n> *Human gates hold what matters*\n> *Ship with confidence*\n```\n\nThe haiku (5–7–5) captures Fab",
+              "response.greet": "Done! Here's what was added to the README, just below the main tagline:\n\n```\n> *Agents run the graph*\n> *Human gates hold what matters*\n> *Ship with confidence*\n```\n\nThe haiku (5–7–5) captures Fabro's core philosophy:\n- **Line 1** — agents execute workflow graphs autonomously\n- **Line 2** — human-in-the-loop gates give engineers control at the right moments\n- **Line 3** — the end result is confidence in what ships"
+            },
+            "notes": "Stage completed: greet",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 4664,
+                    "output_tokens": 455,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 25020,
+                    "cache_write_tokens": 12415
+                  }
+                },
+                "facts": {
+                  "provider": "anthropic",
+                  "cache_write_5m_tokens": 12415,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 74879
+            },
+            "files_touched": [
+              "/home/daytona/workspace/README.md"
+            ]
+          }
+        },
+        "next_node_id": "exit",
+        "node_visits": {
+          "start": 1,
+          "greet": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -223,5 +342,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-11T21:12:44.990080Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T21:12:44.989891Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "greet@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T21:12:44.990471Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 4664,
+        "output_tokens": 455,
+        "total_tokens": 42554,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 25020,
+        "cache_write_tokens": 12415,
+        "total_usd_micros": 74879
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-sonnet-4-6"
+      },
+      "state": "running"
+    }
+  }
 }
