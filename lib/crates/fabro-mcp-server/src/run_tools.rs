@@ -211,9 +211,10 @@ impl TryFrom<FabroRunInteractParams> for ValidatedInteractRun {
                     "question_id is required for action answer",
                 ));
             }
-            if params.answer.is_none() {
+            let Some(answer) = params.answer.as_ref() else {
                 return Err(ToolError::message("answer is required for action answer"));
-            }
+            };
+            answer_to_submit_request(answer.clone())?;
         }
         Ok(Self { raw: params })
     }
@@ -847,16 +848,23 @@ fn build_mcp_run_manifest(
 }
 
 fn mcp_manifest_args(spec: &CreateRunSpec) -> Option<types::ManifestArgs> {
-    let label = spec
+    let mut input = spec
+        .inputs
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>();
+    input.sort();
+    let mut label = spec
         .labels
         .iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>();
+    label.sort();
     let payload = types::ManifestArgs {
         auto_approve: spec.auto_approve.filter(|value| *value),
         docker_image: None,
         dry_run: spec.dry_run.filter(|value| *value),
-        input: Vec::new(),
+        input,
         label,
         model: spec.model.clone(),
         preserve_sandbox: spec.preserve_sandbox.filter(|value| *value),
@@ -1089,5 +1097,45 @@ mod tests {
         let err = answer_to_submit_request(json!({ "value": "yes" })).unwrap_err();
 
         assert!(err.as_str().contains("option, options, text"));
+    }
+
+    #[test]
+    fn interact_answer_validation_rejects_unsupported_json_before_api_calls() {
+        let err = ValidatedInteractRun::try_from(FabroRunInteractParams {
+            action:      RunInteractAction::Answer,
+            run_id:      "run_123".to_string(),
+            message:     None,
+            interrupt:   None,
+            question_id: Some("question-1".to_string()),
+            answer:      Some(json!({ "value": "yes" })),
+        })
+        .unwrap_err();
+
+        assert!(err.as_str().contains("option, options, text"));
+    }
+
+    #[test]
+    fn mcp_manifest_args_preserve_input_provenance() {
+        let args = mcp_manifest_args(&CreateRunSpec {
+            workflow:         "simple".to_string(),
+            run_id:           None,
+            cwd:              None,
+            goal:             None,
+            inputs:           HashMap::from([
+                ("count".to_string(), json!(3)),
+                ("decision".to_string(), json!("approve")),
+            ]),
+            labels:           HashMap::new(),
+            model:            None,
+            provider:         None,
+            sandbox:          None,
+            dry_run:          None,
+            auto_approve:     None,
+            preserve_sandbox: None,
+            start:            None,
+        })
+        .expect("input args should be present");
+
+        assert_eq!(args.input, vec![r"count=3", r#"decision="approve""#]);
     }
 }

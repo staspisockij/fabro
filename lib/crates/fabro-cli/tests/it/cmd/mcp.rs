@@ -18,8 +18,10 @@ use fabro_test::{fabro_json_snapshot, fabro_snapshot, test_context};
 use httpmock::Method::{GET, POST};
 use httpmock::MockServer;
 
-use super::support::mock_resolved_run;
-use crate::support::{RealAuthHarness, TEST_DEV_TOKEN, seed_dev_token_auth, unique_run_id};
+use super::support::{mock_resolved_run, remote_run_summary_json};
+use crate::support::{
+    RealAuthHarness, TEST_DEV_TOKEN, run_projection_json, seed_dev_token_auth, unique_run_id,
+};
 
 #[test]
 fn help() {
@@ -594,6 +596,70 @@ async fn mcp_search_filters_status_dates_and_paginates() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mcp_search_includes_archived_runs_by_default() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let target_url = format!("{}/api/v1", server.base_url());
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
+    seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
+    let active_id = unique_run_id();
+    let archived_id = unique_run_id();
+    let active = remote_run_summary_json(
+        &active_id,
+        "Simple",
+        "simple",
+        "Active run",
+        &serde_json::json!({ "kind": "succeeded", "reason": "completed" }),
+        "2026-04-05T12:00:00Z",
+    );
+    let mut archived = remote_run_summary_json(
+        &archived_id,
+        "Simple",
+        "simple",
+        "Archived run",
+        &serde_json::json!({ "kind": "succeeded", "reason": "completed" }),
+        "2026-04-05T12:01:00Z",
+    );
+    archived["lifecycle"]["archived"] = serde_json::json!(true);
+    archived["lifecycle"]["archived_at"] = serde_json::json!("2026-04-05T12:02:00Z");
+    let list_runs = server.mock(|when, then| {
+        when.method(GET)
+            .path("/api/v1/runs")
+            .query_param("include_archived", "true")
+            .query_param("page[limit]", "100")
+            .query_param("page[offset]", "0");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "data": [active, archived],
+                "meta": { "has_more": false }
+            }));
+    });
+
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+    let result = call_tool_json(
+        &client,
+        "fabro_run_search",
+        serde_json::json!({ "run_ids": [active_id, archived_id], "first": 10 }),
+    )
+    .await;
+
+    assert_eq!(result["runs"].as_array().unwrap().len(), 2);
+    assert!(
+        result["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|run| run["archived"] == true)
+    );
+    list_runs.assert();
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_lifecycle_tools_manage_real_run() {
     let context = test_context!();
     let harness =
@@ -784,6 +850,123 @@ async fn mcp_interact_error_does_not_stop_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mcp_interact_actions_resolve_selector_and_call_expected_endpoints() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let target_url = format!("{}/api/v1", server.base_url());
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
+    seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
+    let run_id = unique_run_id();
+    let selector = "nightly";
+    let resolve = mock_resolved_run(&server, selector, &run_id);
+    let retrieve = server.mock(|when, then| {
+        when.method(GET).path(format!("/api/v1/runs/{run_id}"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(remote_run_summary_json(
+                &run_id,
+                "Simple",
+                "simple",
+                "Run tests",
+                &serde_json::json!({ "kind": "running" }),
+                "2026-04-05T12:00:00Z",
+            ));
+    });
+    let projection = server.mock(|when, then| {
+        when.method(GET)
+            .path(format!("/api/v1/runs/{run_id}/state"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(run_projection_json(
+                &run_id,
+                &serde_json::json!({ "kind": "running" }),
+            ));
+    });
+    let start = server.mock(|when, then| {
+        when.method(POST)
+            .path(format!("/api/v1/runs/{run_id}/start"))
+            .json_body(serde_json::json!({ "resume": false }));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(remote_run_summary_json(
+                &run_id,
+                "Simple",
+                "simple",
+                "Run tests",
+                &serde_json::json!({ "kind": "running" }),
+                "2026-04-05T12:00:00Z",
+            ));
+    });
+    let message = server.mock(|when, then| {
+        when.method(POST)
+            .path(format!("/api/v1/runs/{run_id}/steer"))
+            .json_body(serde_json::json!({ "text": "continue", "interrupt": true }));
+        then.status(202);
+    });
+    let cancel = server.mock(|when, then| {
+        when.method(POST)
+            .path(format!("/api/v1/runs/{run_id}/cancel"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(remote_run_summary_json(
+                &run_id,
+                "Simple",
+                "simple",
+                "Run tests",
+                &serde_json::json!({ "kind": "running" }),
+                "2026-04-05T12:00:00Z",
+            ));
+    });
+
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+    let get = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": selector, "action": "get" }),
+    )
+    .await;
+    let start_result = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": selector, "action": "start" }),
+    )
+    .await;
+    let message_result = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({
+            "run_id": selector,
+            "action": "message",
+            "message": "continue",
+            "interrupt": true
+        }),
+    )
+    .await;
+    let cancel_result = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": selector, "action": "cancel" }),
+    )
+    .await;
+
+    assert_eq!(get["result"]["summary"]["run_id"], run_id);
+    assert_eq!(start_result["result"]["summary"]["run_id"], run_id);
+    assert_eq!(message_result["result"]["message"], "continue");
+    assert_eq!(message_result["result"]["interrupt"], true);
+    assert_eq!(cancel_result["result"]["summary"]["run_id"], run_id);
+    resolve.assert_calls(4);
+    retrieve.assert_calls(3);
+    projection.assert();
+    start.assert();
+    message.assert();
+    cancel.assert();
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_create_validation_errors_happen_before_auth_or_network() {
     let context = test_context!();
     let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
@@ -818,6 +1001,31 @@ async fn mcp_create_validation_errors_happen_before_auth_or_network() {
     assert!(empty.contains("runs"), "{empty}");
     assert!(many.contains("runs"), "{many}");
     assert!(null.contains("decision"), "{null}");
+    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_interact_answer_validation_happens_before_auth_or_network() {
+    let context = test_context!();
+    let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
+
+    let error = call_tool_error_text(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({
+            "run_id": "nightly",
+            "action": "answer",
+            "question_id": "q-1",
+            "answer": { "value": "yes" }
+        }),
+    )
+    .await;
+
+    assert!(error.contains("option, options, text"), "{error}");
     assert_eq!(client.list_tools().await.unwrap().len(), 5);
     client
         .shutdown()
