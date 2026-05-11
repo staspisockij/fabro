@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +12,7 @@ use fabro_config::bind::Bind;
 use fabro_config::daemon::ServerDaemon;
 use fabro_config::{RuntimeDirectory, Storage};
 use fabro_util::dev_token;
+use fabro_util::version::FABRO_VERSION;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ServerCapabilities, ServerInfo};
@@ -345,7 +347,10 @@ fn connect_target_transport(
     bearer_token: Option<&str>,
 ) -> Result<(fabro_http::HttpClient, String)> {
     if let Some(api_url) = target.as_http_url() {
-        let mut builder = fabro_http::HttpClientBuilder::new().no_proxy();
+        let mut builder = cli_compatible_http_client_builder();
+        if should_bypass_proxy_for_http_target(api_url) {
+            builder = builder.no_proxy();
+        }
         if let Some(token) = bearer_token {
             builder = apply_bearer_token_auth(builder, token)?;
         }
@@ -364,6 +369,29 @@ fn connect_target_transport(
         builder = apply_bearer_token_auth(builder, token)?;
     }
     Ok((builder.build()?, "http://fabro".to_string()))
+}
+
+fn cli_compatible_http_client_builder() -> fabro_http::HttpClientBuilder {
+    fabro_http::HttpClientBuilder::new().user_agent(format!("fabro-cli/{FABRO_VERSION}"))
+}
+
+#[expect(
+    clippy::disallowed_types,
+    reason = "Proxy bypass classification parses a configured raw API target and does not log credential-bearing URLs."
+)]
+fn should_bypass_proxy_for_http_target(api_url: &str) -> bool {
+    let Ok(url) = fabro_http::Url::parse(api_url) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_matches(['[', ']'])
+        .parse::<IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
 }
 
 async fn connect_bind_http_client(
@@ -399,4 +427,32 @@ async fn connect_bind_http_client(
         sleep(Duration::from_millis(50)).await;
     }
     Err(last_error.unwrap_or_else(|| anyhow!("Fabro server did not become ready in time")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_http_proxy_bypass_matches_cli_for_local_targets() {
+        assert!(should_bypass_proxy_for_http_target(
+            "http://localhost:3000/api/v1"
+        ));
+        assert!(should_bypass_proxy_for_http_target(
+            "http://127.0.0.1:3000/api/v1"
+        ));
+        assert!(should_bypass_proxy_for_http_target(
+            "http://[::1]:3000/api/v1"
+        ));
+    }
+
+    #[test]
+    fn explicit_http_proxy_bypass_matches_cli_for_remote_targets() {
+        assert!(!should_bypass_proxy_for_http_target(
+            "https://fabro.example.test/api/v1"
+        ));
+        assert!(!should_bypass_proxy_for_http_target(
+            "http://192.0.2.44:3000/api/v1"
+        ));
+    }
 }

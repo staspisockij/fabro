@@ -830,7 +830,7 @@ fn run_event_result(
         .map_err(|err| ToolError::message(format!("failed to serialize event: {err}")))?;
     let truncated = serialized.len() > max_content_length;
     let event_value = if truncated {
-        serialized.truncate(max_content_length);
+        serialized.truncate(floor_char_boundary(&serialized, max_content_length));
         Value::String(serialized)
     } else {
         serde_json::to_value(event)
@@ -842,6 +842,14 @@ fn run_event_result(
         event: event_value,
         truncated,
     })
+}
+
+fn floor_char_boundary(value: &str, max_len: usize) -> usize {
+    let mut boundary = max_len.min(value.len());
+    while !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    boundary
 }
 
 fn build_mcp_run_manifest(
@@ -1028,6 +1036,7 @@ fn run_status_kind(status: RunStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::{EventBody, RunEvent, fixtures};
     use serde_json::json;
 
     use super::*;
@@ -1139,5 +1148,42 @@ mod tests {
         .expect("input args should be present");
 
         assert_eq!(args.input, vec![r"count=3", r#"decision="approve""#]);
+    }
+
+    #[test]
+    fn run_event_result_truncates_at_utf8_boundary() {
+        let event = EventEnvelope {
+            seq:   1,
+            event: RunEvent {
+                id:                 "evt_utf8".to_string(),
+                ts:                 Utc::now(),
+                run_id:             fixtures::RUN_1,
+                node_id:            None,
+                node_label:         None,
+                stage_id:           None,
+                parallel_group_id:  None,
+                parallel_branch_id: None,
+                session_id:         None,
+                parent_session_id:  None,
+                tool_call_id:       None,
+                actor:              None,
+                body:               EventBody::Unknown {
+                    name:       "test.utf8".to_string(),
+                    properties: json!({ "message": "éééé" }),
+                },
+            },
+        };
+        let serialized = serde_json::to_string(&event).unwrap();
+        let first_multibyte = serialized
+            .find('é')
+            .expect("serialized event should contain é");
+
+        let result = run_event_result(&event, first_multibyte + 1).unwrap();
+
+        assert!(result.truncated);
+        let Value::String(event_json) = result.event else {
+            panic!("truncated events should return string payloads");
+        };
+        assert!(event_json.is_char_boundary(event_json.len()));
     }
 }
