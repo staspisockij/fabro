@@ -18,13 +18,13 @@ None currently open.
 - **I10 — Archived runs not filtered from default search**: fixed on 2026-05-11 by aligning MCP search with the HTTP API. `fabro_run_search` now hides archived runs when `archived` is omitted, while `archived=true` still searches archived runs explicitly.
 - **I15 / I16 — yes/no answer flow**: re-tested on 2026-05-11 against `fabro server` `0.230.0-nightly.0` at `127.0.0.1:32276`. `answer=true` and `answer=false` both submit successfully for the bundled `interview` workflow's first `yes_no` question. `true` advanced the run to the next `confirmation` question.
 - **I22 — numeric answer local validation**: re-tested on 2026-05-11 against the same server. `answer=42` now returns `unsupported answer value: 42; expected boolean, string, or object` from the MCP layer before reaching the API.
+- **Section 2 side observation — Search payloads include full `goal` text**: fixed on 2026-05-11. `fabro_run_search` now returns bounded `goal_preview` plus `goal_truncated` instead of the full `goal`, keeping list responses compact while preserving full summaries on other run interactions.
 - **X6 — Cursor/filter ordering**: simplified on 2026-05-11 by applying search filters before sorting and applying the `after` cursor. This prevents unrelated runs outside the filtered result set from trimming the page. Pagination is explicitly not snapshot-isolated; a new matching run inserted before the cursor during traversal appears when the client starts a new search.
 
 ### UX / polish
 - **C12 — `cwd` errors don't distinguish "directory missing" from "workflow not in directory"**: both return `workflow not found: <slug>`.
 - **S9 (bonus) — Undocumented date format**: error message reveals `YYYY-MM-DD` is accepted alongside RFC3339, but the schema only says RFC3339.
 - **S17 — `run_ids` accepts more than IDs**: error message reveals it also matches ID prefixes and workflow names. Either rename the field or document.
-- **Section 2 side observation — Search payloads include full `goal` text**: a single long-goal run (e.g. `ImplementPlan`) inflates every search response by ~30 KB. Consider truncation or excluding `goal` from list responses.
 - **E4 — Events `search` is whole-envelope substring match**: search includes embedded payloads (workflow definitions, settings, sandbox dockerfile, etc.), so a search like `query="list_prs"` legitimately matches the `run.created` event because that event embeds the workflow JSON. Easy to misinterpret. Consider documenting or scoping search to event body only.
 
 ### Nice-to-haves

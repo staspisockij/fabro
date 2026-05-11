@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use super::common;
 use super::common::{RunSummaryResult, ToolError, ToolResult};
 
+const SEARCH_GOAL_PREVIEW_CHARS: usize = 240;
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct FabroRunSearchParams {
     pub(crate) run_ids:        Option<Vec<String>>,
@@ -68,8 +70,25 @@ impl TryFrom<FabroRunSearchParams> for ValidatedSearchRuns {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct SearchRunsResult {
-    pub(crate) runs:        Vec<RunSummaryResult>,
+    pub(crate) runs:        Vec<SearchRunSummaryResult>,
     pub(crate) next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(crate) struct SearchRunSummaryResult {
+    pub(crate) run_id:           String,
+    pub(crate) workflow_name:    String,
+    pub(crate) workflow_slug:    Option<String>,
+    pub(crate) status:           String,
+    pub(crate) archived:         bool,
+    pub(crate) created_at:       String,
+    pub(crate) started_at:       Option<String>,
+    pub(crate) completed_at:     Option<String>,
+    pub(crate) labels:           HashMap<String, String>,
+    pub(crate) source_directory: Option<String>,
+    pub(crate) repo_origin_url:  Option<String>,
+    pub(crate) goal_preview:     String,
+    pub(crate) goal_truncated:   bool,
 }
 
 pub(crate) async fn search_runs(
@@ -89,9 +108,56 @@ pub(crate) async fn search_runs(
     let page = filter_sort_and_page_runs(runs, &raw, status.as_deref())?;
 
     Ok(SearchRunsResult {
-        runs:        page.runs.iter().map(common::run_summary_result).collect(),
+        runs:        page.runs.iter().map(search_run_summary_result).collect(),
         next_cursor: page.next_cursor,
     })
+}
+
+fn search_run_summary_result(run: &Run) -> SearchRunSummaryResult {
+    let RunSummaryResult {
+        run_id,
+        workflow_name,
+        workflow_slug,
+        status,
+        archived,
+        created_at,
+        started_at,
+        completed_at,
+        labels,
+        source_directory,
+        repo_origin_url,
+        goal,
+    } = common::run_summary_result(run);
+    let (goal_preview, goal_truncated) = goal_preview(&goal);
+
+    SearchRunSummaryResult {
+        run_id,
+        workflow_name,
+        workflow_slug,
+        status,
+        archived,
+        created_at,
+        started_at,
+        completed_at,
+        labels,
+        source_directory,
+        repo_origin_url,
+        goal_preview,
+        goal_truncated,
+    }
+}
+
+fn goal_preview(goal: &str) -> (String, bool) {
+    let mut chars = goal.chars();
+    let mut preview = chars
+        .by_ref()
+        .take(SEARCH_GOAL_PREVIEW_CHARS)
+        .collect::<String>();
+    let truncated = chars.next().is_some();
+    if truncated {
+        preview.push_str("...");
+    }
+    (preview, truncated)
 }
 
 struct RunSearchPage {
@@ -245,6 +311,18 @@ mod tests {
 
         let ids = result.runs.iter().map(|run| run.id).collect::<Vec<_>>();
         assert_eq!(ids, vec![active.id]);
+    }
+
+    #[test]
+    fn search_summary_uses_bounded_goal_preview() {
+        let mut run = run("01KRBZW5C00000000000000001", "keep", 30);
+        run.goal = format!("{}tail-marker", "a".repeat(300));
+
+        let summary = search_run_summary_result(&run);
+
+        assert!(summary.goal_truncated);
+        assert!(summary.goal_preview.len() < run.goal.len());
+        assert!(!summary.goal_preview.contains("tail-marker"));
     }
 
     fn run(id: &str, group: &str, seconds: u32) -> Run {
