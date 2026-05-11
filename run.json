@@ -229,14 +229,104 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KRC50SJDHTB4K9QSHQEJP5NW",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-11T18:33:21.254420Z",
+    "run_branch": "fabro/run/01KRC50SJDHTB4K9QSHQEJP5NW",
+    "base_sha": "503601f8be41604d2b9e031b2174392dd4114c3d"
   },
-  "status_updated_at": "2026-05-11T18:33:02.828528Z",
-  "last_event_at": "2026-05-11T18:33:19.971406Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-11T18:33:21.254471Z",
+  "last_event_at": "2026-05-11T18:33:23.823302Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-11T18:33:23.823200Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.goal": "List open PRs and issues via the gh CLI to verify GITHUB_TOKEN injection",
+          "internal.fidelity": "compact",
+          "failure_class": "",
+          "internal.thread_id": null,
+          "failure_signature": "",
+          "graph.rankdir": "LR",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.start": 0,
+          "current_node": "start",
+          "internal.work_dir": "/home/daytona/workspace",
+          "outcome": "succeeded",
+          "internal.run_id": "01KRC50SJDHTB4K9QSHQEJP5NW"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "list_prs",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-11T18:33:26.844614Z",
+        "current_node": "list_prs",
+        "completed_nodes": [
+          "start",
+          "list_prs"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "current_node": "list_prs",
+          "outcome": "succeeded",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "command.output": "blob://sha256/99b8d2c7a8a89dbd3fd18d066c43db85002cc429217d23ef528aaa46a1e623c4",
+          "failure_class": "",
+          "graph.goal": "List open PRs and issues via the gh CLI to verify GITHUB_TOKEN injection",
+          "internal.retry_count.start": 0,
+          "failure_signature": "",
+          "internal.retry_count.list_prs": 0,
+          "internal.run_id": "01KRC50SJDHTB4K9QSHQEJP5NW",
+          "thread.start.current_node": "list_prs",
+          "graph.rankdir": "LR",
+          "internal.thread_id": "start",
+          "internal.work_dir": "/home/daytona/workspace"
+        },
+        "node_outcomes": {
+          "list_prs": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/99b8d2c7a8a89dbd3fd18d066c43db85002cc429217d23ef528aaa46a1e623c4"
+            },
+            "notes": "Script completed: gh pr list --state open --limit 50 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "list_issues",
+        "node_visits": {
+          "list_prs": 1,
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -253,5 +343,62 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-11T18:33:23.823067Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T18:33:23.822959Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "list_prs@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "gh pr list --state open --limit 50 2>&1",
+        "command": "exec 2>&1\ngh pr list --state open --limit 50 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T18:33:23.823281Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
