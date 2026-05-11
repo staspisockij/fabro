@@ -13,8 +13,7 @@ use fabro_api::types;
 use fabro_client::Client;
 use fabro_config::{CliLayer, RunLayer};
 use fabro_manifest::{
-    ManifestBuildInput, RunOverrideInput, build_run_manifest as build_canonical_run_manifest,
-    build_sparse_run_overrides,
+    ManifestBuildInput, RunOverrideInput, build_run_manifest, build_sparse_run_overrides,
 };
 use fabro_server::manifest_validation;
 use fabro_types::{EventEnvelope, Run, RunId, RunStatus};
@@ -863,7 +862,7 @@ fn build_mcp_run_manifest(
         })?;
     }
 
-    let built = build_canonical_run_manifest(ManifestBuildInput {
+    let built = build_run_manifest(ManifestBuildInput {
         workflow:           PathBuf::from(&spec.workflow),
         cwd:                cwd.to_path_buf(),
         run_overrides:      mcp_run_overrides(spec),
