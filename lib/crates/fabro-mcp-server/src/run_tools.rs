@@ -246,10 +246,19 @@ impl TryFrom<FabroRunGatherParams> for ValidatedGatherRuns {
 
     fn try_from(params: FabroRunGatherParams) -> Result<Self, Self::Error> {
         validate_len("run_ids", params.run_ids.len(), 1, 50)?;
+        if params.timeout_seconds.is_some_and(|timeout| timeout > 600) {
+            return Err(ToolError::message("timeout_seconds must be <= 600"));
+        }
+        if params
+            .poll_interval_seconds
+            .is_some_and(|interval| interval < 5)
+        {
+            return Err(ToolError::message("poll_interval_seconds must be >= 5"));
+        }
         Ok(Self {
             run_ids:               params.run_ids,
-            timeout_seconds:       params.timeout_seconds.unwrap_or(300).min(600),
-            poll_interval_seconds: params.poll_interval_seconds.unwrap_or(15).max(5),
+            timeout_seconds:       params.timeout_seconds.unwrap_or(300),
+            poll_interval_seconds: params.poll_interval_seconds.unwrap_or(15),
         })
     }
 }
@@ -313,6 +322,21 @@ impl TryFrom<FabroRunEventsParams> for ValidatedRunEvents {
         }
         if let Some(created_before) = params.created_before.as_deref() {
             parse_datetime_filter("created_before", created_before)?;
+        }
+        if matches!(params.action, RunEventsAction::Details)
+            && params.event_ids.as_ref().is_none_or(Vec::is_empty)
+        {
+            return Err(ToolError::message(
+                "event_ids is required for details action",
+            ));
+        }
+        if matches!(params.action, RunEventsAction::Search)
+            && params
+                .query
+                .as_deref()
+                .is_none_or(|query| query.trim().is_empty())
+        {
+            return Err(ToolError::message("query is required for search action"));
         }
         Ok(Self { raw: params })
     }
@@ -734,14 +758,16 @@ fn event_fetch_limit(params: &FabroRunEventsParams) -> Option<usize> {
             params.action,
             RunEventsAction::Details | RunEventsAction::Search
         );
-    (!needs_full_scan).then(|| {
-        params
-            .first
-            .or(params.limit)
-            .unwrap_or(50)
-            .saturating_add(params.offset.unwrap_or(0))
-            .clamp(1, 200)
-    })
+    if needs_full_scan {
+        return None;
+    }
+
+    let requested = params
+        .first
+        .or(params.limit)
+        .unwrap_or(50)
+        .saturating_add(params.offset.unwrap_or(0));
+    (requested <= 200).then_some(requested.max(1))
 }
 
 fn filter_events(events: &mut Vec<EventEnvelope>, params: &FabroRunEventsParams) -> ToolResult<()> {

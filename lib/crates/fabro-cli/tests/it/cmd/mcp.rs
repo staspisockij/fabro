@@ -862,6 +862,46 @@ async fn mcp_gather_rejects_too_many_runs() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mcp_gather_rejects_invalid_timeout_values_before_auth() {
+    let context = test_context!();
+    let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
+
+    let timeout_error = call_tool_error_text(
+        &client,
+        "fabro_run_gather",
+        serde_json::json!({
+            "run_ids": ["run_123"],
+            "timeout_seconds": 601,
+            "poll_interval_seconds": 5
+        }),
+    )
+    .await;
+    let poll_error = call_tool_error_text(
+        &client,
+        "fabro_run_gather",
+        serde_json::json!({
+            "run_ids": ["run_123"],
+            "timeout_seconds": 300,
+            "poll_interval_seconds": 4
+        }),
+    )
+    .await;
+
+    assert!(timeout_error.contains("timeout_seconds"), "{timeout_error}");
+    assert!(
+        !timeout_error.contains("fabro auth login"),
+        "{timeout_error}"
+    );
+    assert!(poll_error.contains("poll_interval_seconds"), "{poll_error}");
+    assert!(!poll_error.contains("fabro auth login"), "{poll_error}");
+    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_gather_returns_timeout_result() {
     let context = test_context!();
     let harness =
@@ -1306,6 +1346,44 @@ async fn mcp_events_filters_find_matches_beyond_first_page() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn mcp_events_requires_action_specific_inputs_before_auth() {
+    let context = test_context!();
+    let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
+
+    let details_error = call_tool_error_text(
+        &client,
+        "fabro_run_events",
+        serde_json::json!({
+            "run_id": "run_123",
+            "action": "details"
+        }),
+    )
+    .await;
+    let search_error = call_tool_error_text(
+        &client,
+        "fabro_run_events",
+        serde_json::json!({
+            "run_id": "run_123",
+            "action": "search"
+        }),
+    )
+    .await;
+
+    assert!(details_error.contains("event_ids"), "{details_error}");
+    assert!(
+        !details_error.contains("fabro auth login"),
+        "{details_error}"
+    );
+    assert!(search_error.contains("query"), "{search_error}");
+    assert!(!search_error.contains("fabro auth login"), "{search_error}");
+    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_events_desc_after_offset_and_limit_page_over_requested_order() {
     let context = test_context!();
     let server = MockServer::start();
@@ -1425,6 +1503,77 @@ async fn mcp_events_desc_after_offset_and_limit_page_over_requested_order() {
     limited_events.assert_calls(0);
     full_events.assert();
     after_events.assert();
+    client
+        .shutdown()
+        .await
+        .expect("MCP client should shut down");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_events_offset_beyond_fetch_cap_reaches_later_pages() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let target_url = format!("{}/api/v1", server.base_url());
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
+    seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
+    let run_id = unique_run_id();
+    let resolve = mock_resolved_run(&server, "nightly", &run_id);
+    let events = (1..=300)
+        .map(|sequence| {
+            serde_json::json!({
+                "seq": sequence,
+                "id": format!("evt-{sequence}"),
+                "ts": "2026-04-05T12:00:00Z",
+                "run_id": run_id,
+                "event": "run.started",
+                "properties": { "name": format!("event {sequence}") },
+                "actor": null
+            })
+        })
+        .collect::<Vec<_>>();
+    let first_200_events = events.iter().take(200).cloned().collect::<Vec<_>>();
+    let capped_events = server.mock(|when, then| {
+        when.method(GET)
+            .path(format!("/api/v1/runs/{run_id}/events"))
+            .query_param("limit", "200");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "data": first_200_events,
+                "meta": { "has_more": true }
+            }));
+    });
+    let full_events = server.mock(|when, then| {
+        when.method(GET)
+            .path(format!("/api/v1/runs/{run_id}/events"))
+            .query_param_missing("limit")
+            .query_param_missing("since_seq");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .json_body(serde_json::json!({
+                "data": events,
+                "meta": { "has_more": false }
+            }));
+    });
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+
+    let paged = call_tool_json(
+        &client,
+        "fabro_run_events",
+        serde_json::json!({
+            "run_id": "nightly",
+            "action": "list",
+            "offset": 250,
+            "first": 1
+        }),
+    )
+    .await;
+
+    assert_eq!(paged["events"][0]["event_id"], "evt-251");
+    assert_eq!(paged["next_cursor"], 252);
+    resolve.assert();
+    capped_events.assert_calls(0);
+    full_events.assert();
     client
         .shutdown()
         .await
