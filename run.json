@@ -406,8 +406,8 @@
     "kind": "blocked",
     "blocked_reason": "human_input_required"
   },
-  "status_updated_at": "2026-05-11T19:09:58.394564Z",
-  "last_event_at": "2026-05-11T19:09:58.394564Z",
+  "status_updated_at": "2026-05-11T19:11:03.406006Z",
+  "last_event_at": "2026-05-11T19:11:03.406006Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -447,9 +447,9 @@
       "diff": {}
     },
     {
-      "seq": 0,
+      "seq": 29,
       "checkpoint": {
-        "timestamp": "2026-05-11T19:10:57.756806Z",
+        "timestamp": "2026-05-11T19:11:03.405654Z",
         "current_node": "yes_no",
         "completed_nodes": [
           "start",
@@ -457,26 +457,26 @@
         ],
         "node_retries": {},
         "context_values": {
-          "current_node": "yes_no",
-          "failure_class": "",
-          "human.gate.yes_no.label": "[Y] Yes",
+          "graph.goal": "wt2",
+          "human.gate.label": "[Y] Yes",
           "human.gate.yes_no.answer": "yes",
-          "internal.run_id": "01KRC73S0RY835WAXQ82VPFTA4",
-          "internal.fidelity": "compact",
+          "failure_class": "",
           "graph.rankdir": "LR",
+          "human.gate.yes_no.label": "[Y] Yes",
+          "current_node": "yes_no",
+          "internal.fidelity": "compact",
           "internal.node_visit_count": 1,
           "internal.retry_count.start": 0,
-          "internal.work_dir": "/home/daytona/workspace",
-          "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+          "internal.retry_count.yes_no": 0,
           "failure_signature": "",
           "thread.start.current_node": "yes_no",
-          "human.gate.label": "[Y] Yes",
-          "preferred_label": "[Y] Yes",
-          "outcome": "succeeded",
-          "graph.goal": "wt2",
-          "internal.retry_count.yes_no": 0,
+          "internal.work_dir": "/home/daytona/workspace",
           "internal.thread_id": "start",
-          "human.gate.selected": "Y"
+          "outcome": "succeeded",
+          "preferred_label": "[Y] Yes",
+          "human.gate.selected": "Y",
+          "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+          "internal.run_id": "01KRC73S0RY835WAXQ82VPFTA4"
         },
         "node_outcomes": {
           "yes_no": {
@@ -500,7 +500,97 @@
           }
         },
         "next_node_id": "confirmation",
+        "git_commit_sha": "a25ec9a0d094f7f99e86fe4c5f2b2c3044ebd22e",
         "node_visits": {
+          "yes_no": 1,
+          "start": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-11T19:14:39.637764Z",
+        "current_node": "confirmation",
+        "completed_nodes": [
+          "start",
+          "yes_no",
+          "confirmation"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
+          "human.gate.confirmation.label": "[Y] Continue",
+          "current_node": "confirmation",
+          "failure_class": "",
+          "human.gate.yes_no.label": "[Y] Yes",
+          "human.gate.confirmation.answer": "yes",
+          "human.gate.yes_no.answer": "yes",
+          "internal.retry_count.confirmation": 0,
+          "internal.run_id": "01KRC73S0RY835WAXQ82VPFTA4",
+          "internal.fidelity": "compact",
+          "graph.rankdir": "LR",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.start": 0,
+          "internal.work_dir": "/home/daytona/workspace",
+          "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+          "failure_signature": "",
+          "thread.start.current_node": "yes_no",
+          "human.gate.label": "[Y] Continue",
+          "preferred_label": "[Y] Continue",
+          "outcome": "succeeded",
+          "graph.goal": "wt2",
+          "thread.yes_no.current_node": "confirmation",
+          "internal.retry_count.yes_no": 0,
+          "internal.thread_id": "yes_no",
+          "human.gate.selected": "Y"
+        },
+        "node_outcomes": {
+          "confirmation": {
+            "status": "succeeded",
+            "preferred_label": "[Y] Continue",
+            "suggested_next_ids": [
+              "multiple_choice"
+            ],
+            "context_updates": {
+              "human.gate.selected": "Y",
+              "human.gate.label": "[Y] Continue",
+              "human.gate.confirmation.answer": "yes",
+              "human.gate.confirmation.question": "Confirm that you want to continue into more structured questions.",
+              "human.gate.confirmation.label": "[Y] Continue"
+            },
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "yes_no": {
+            "status": "succeeded",
+            "preferred_label": "[Y] Yes",
+            "suggested_next_ids": [
+              "confirmation"
+            ],
+            "context_updates": {
+              "human.gate.label": "[Y] Yes",
+              "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+              "human.gate.yes_no.answer": "yes",
+              "human.gate.selected": "Y",
+              "human.gate.yes_no.label": "[Y] Yes"
+            },
+            "usage": null
+          }
+        },
+        "next_node_id": "multiple_choice",
+        "node_visits": {
+          "confirmation": 1,
           "yes_no": 1,
           "start": 1
         }
@@ -524,25 +614,25 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {
-    "01KRC74D7TSJ076J0PJREGNZYJ": {
+    "01KRC76CQDMRP5QHWZKD14B5TG": {
       "question": {
-        "id": "01KRC74D7TSJ076J0PJREGNZYJ",
-        "text": "Is this interview workflow easy to follow so far?",
-        "stage": "yes_no",
-        "question_type": "yes_no",
+        "id": "01KRC76CQDMRP5QHWZKD14B5TG",
+        "text": "Confirm that you want to continue into more structured questions.",
+        "stage": "confirmation",
+        "question_type": "confirmation",
         "options": [
           {
             "key": "Y",
-            "label": "[Y] Yes"
+            "label": "[Y] Continue"
           },
           {
             "key": "N",
-            "label": "[N] No"
+            "label": "[N] Stop after this, but still summarize"
           }
         ],
         "allow_freeform": false
       },
-      "started_at": "2026-05-11T19:09:58.394539Z"
+      "started_at": "2026-05-11T19:11:03.405977Z"
     }
   },
   "stages": {
@@ -550,7 +640,12 @@
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-11T19:10:57.756736Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": null,
@@ -559,6 +654,7 @@
       "output": null,
       "started_at": "2026-05-11T19:09:58.394498Z",
       "handler": "human",
+      "duration_ms": 59361,
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -567,7 +663,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "start@1": {
       "first_event_seq": 16,
@@ -597,6 +693,29 @@
         "cache_write_tokens": 0
       },
       "state": "succeeded"
+    },
+    "confirmation@1": {
+      "first_event_seq": 32,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T19:11:03.405922Z",
+      "handler": "human",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
     }
   }
 }
