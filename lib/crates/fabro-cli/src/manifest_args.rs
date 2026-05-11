@@ -1,6 +1,4 @@
 use fabro_api::types;
-#[allow(unused_imports, reason = "fabro-cli public lib re-exports this type")]
-pub use fabro_manifest::{BuiltManifest, ManifestBuildInput, build_run_manifest};
 
 use crate::args::{PreflightArgs, RunArgs};
 
