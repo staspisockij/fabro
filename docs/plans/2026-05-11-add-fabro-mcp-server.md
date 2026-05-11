@@ -332,6 +332,7 @@ struct FabroRunEventsParams {
 - There is no separate MCP authentication. Tool calls use the same `CommandContext` and `fabro-client` auth store behavior as existing CLI commands. Auth failures returned from tools must include the existing user guidance: `Run \`fabro auth login\` to authenticate.`
 - Tool failures are MCP tool errors, not process exits. The stdio server should stay alive after invalid arguments, not-found selectors, conflicts, auth failures, and API errors.
 - Every successful tool returns structured content and a concise text fallback. The text fallback is for clients that do not yet show MCP structured output. Do not return `rmcp::Json<T>` directly from successful tools, because its text content is the full JSON payload. Instead, build a `CallToolResult` with `structured_content: Some(...)` and a short `Content::text(...)` summary.
+- `rmcp 1.3` only accepts manually constructed `CallToolResult` values from tool handlers through `Result<CallToolResult, rmcp::ErrorData>`. Do not use `Result<CallToolResult, String>` in `#[tool]` methods; it does not satisfy `IntoCallToolResult`. Expected Fabro failures must be returned as `Ok(CallToolResult::error(...))` so they are MCP tool errors and the server stays alive. Reserve `Err(ErrorData)` for unexpected serialization/framework failures.
 - Run selectors must go through `Client::resolve_run(...)` to preserve existing Fabro prefix/workflow-name behavior.
 - Run creation must reuse `build_run_manifest(...)` and server manifest validation. Do not fabricate run specs or bypass the same source-of-truth path as `fabro create`.
 - Agent config writes must be idempotent and preserve unrelated user config.
@@ -687,6 +688,11 @@ Expected: FAIL because config/init are stubs.
 In `commands/mcp/config.rs`, implement:
 
 ```rust
+#![expect(
+    clippy::disallowed_methods,
+    reason = "MCP client config setup intentionally performs small synchronous JSON file reads/writes from a CLI command."
+)]
+
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -705,7 +711,6 @@ pub(crate) fn init_agent(args: McpInitArgs) -> Result<()> {
     let path = agent_config_path(args.agent)?;
     let entry = server_entry(&args.connection);
     merge_server_entry(&path, entry)?;
-    eprintln!("Configured Fabro MCP server for {} at {}", agent_name(args.agent), path.display());
     Ok(())
 }
 ```
@@ -786,7 +791,7 @@ git commit -m "feat(cli): configure fabro mcp clients"
 Add a test that uses the existing `fabro_mcp::client::McpClient` to spawn the compiled CLI:
 
 ```rust
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn stdio_server_initializes_and_lists_run_tools() {
     let context = test_context!();
     let config = fabro_mcp::config::McpServerSettings {
@@ -846,7 +851,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use rmcp::{
-    ServerHandler, serve_server,
+    ErrorData, ServerHandler, serve_server,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
@@ -903,30 +908,80 @@ impl FabroMcpServer {
     async fn fabro_run_create(
         &self,
         params: Parameters<run_tools::FabroRunCreateParams>,
-    ) -> Result<CallToolResult, String> {
-        let result = run_tools::create_runs(self.client().await?, &self.cwd, params.0).await?;
-        run_tools::success_result(&result, run_tools::create_runs_text(&result))
+    ) -> Result<CallToolResult, ErrorData> {
+        let client = match self.client().await {
+            Ok(client) => client,
+            Err(err) => return Ok(run_tools::error_result(err)),
+        };
+        match run_tools::create_runs(client, &self.cwd, params.0).await {
+            Ok(result) => run_tools::success_result(&result, run_tools::create_runs_text(&result)),
+            Err(err) => Ok(run_tools::error_result(err)),
+        }
     }
 }
 
 ```
 
+Use this same handler shape for all five tools: acquire the lazy client, call
+the corresponding `run_tools` function, return successful values with
+`success_result(...)`, and convert expected Fabro/API/validation failures with
+`error_result(...)`.
+
 `new(...)` should copy `ctx.cwd().to_path_buf()` into the `cwd` field before
 storing the context, so tool calls resolve relative workflows against the MCP
 process cwd captured at startup.
 
-Each placeholder in `run_tools.rs` should return a tool error result until later
-tasks, except it must compile and be listed. Add:
+Each placeholder in `run_tools.rs` should return `Err(ToolError::message("not implemented"))`
+until later tasks, except it must compile and be listed. Add a small
+crate-local tool error type:
+
+```rust
+#[derive(Debug)]
+pub(crate) struct ToolError {
+    message: String,
+}
+
+impl ToolError {
+    pub(crate) fn message(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn from_anyhow(err: anyhow::Error) -> Self {
+        Self::message(format_tool_error(err))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.message
+    }
+}
+
+pub(crate) type ToolResult<T> = Result<T, ToolError>;
+```
+
+Then add result helpers:
 
 ```rust
 pub(crate) fn success_result<T: serde::Serialize>(
     value: &T,
     text: impl Into<String>,
-) -> Result<rmcp::model::CallToolResult, String> {
-    let structured_content = serde_json::to_value(value).map_err(|err| err.to_string())?;
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let structured_content = serde_json::to_value(value).map_err(|err| {
+        rmcp::ErrorData::internal_error(
+            format!("failed to serialize Fabro MCP tool result: {err}"),
+            None,
+        )
+    })?;
     let mut result = rmcp::model::CallToolResult::structured(structured_content);
     result.content = vec![rmcp::model::Content::text(text.into())];
     Ok(result)
+}
+
+pub(crate) fn error_result(err: ToolError) -> rmcp::model::CallToolResult {
+    rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+        err.as_str().to_string(),
+    )])
 }
 ```
 
@@ -937,9 +992,9 @@ JSON dump.
 Implement `client(&self)` with lazy connection:
 
 ```rust
-async fn client(&self) -> Result<Arc<Client>, String> {
+async fn client(&self) -> Result<Arc<Client>, run_tools::ToolError> {
     self.client
-        .get_or_try_init(|| async { self.ctx.server().await.map_err(format_tool_error) })
+        .get_or_try_init(|| async { self.ctx.server().await.map_err(run_tools::ToolError::from_anyhow) })
         .await
         .map(Arc::clone)
 }
@@ -1017,7 +1072,7 @@ git commit -m "feat(cli): start fabro mcp stdio server"
 Add a test backed by an authenticated real Fabro server:
 
 ```rust
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
     let context = test_context!();
     let harness = RealAuthHarness::start_with_dev_token(fabro_test::GitHubAppState::default()).await;
@@ -1110,7 +1165,7 @@ pub(crate) async fn create_runs(
     client: Arc<Client>,
     base_cwd: &Path,
     params: FabroRunCreateParams,
-) -> Result<CreateRunsResult, String> {
+) -> ToolResult<CreateRunsResult> {
     validate_len("runs", params.runs.len(), 1, 50)?;
     let mut created = Vec::with_capacity(params.runs.len());
     for spec in params.runs {
@@ -1144,9 +1199,9 @@ pub(crate) async fn create_runs(
 
 Important: the function signature in `server.rs` should pass both the lazy API client and the MCP process cwd from the context, not call `std::env::current_dir()` deep in the tool.
 The outline above omits some `map_err(...)` calls for readability; the real
-implementation must convert every `anyhow::Error` and API error into the shared
-tool-error string helper so `?` never tries to convert `anyhow::Error` directly
-into `String`.
+implementation must convert every `anyhow::Error` and API error into
+`ToolError` with the shared formatting helper so `?` never tries to convert
+`anyhow::Error` directly into `ToolError`.
 
 Implement `mcp_manifest_args(&CreateRunSpec) -> Option<fabro_api::types::ManifestArgs>`
 in `run_tools.rs`. It should mirror `manifest_builder::run_manifest_args` for
@@ -1324,15 +1379,56 @@ Use `serde_json::to_value(...)` for API objects rather than manually copying com
 Add unit tests for:
 
 ```rust
-assert_answer(true, SubmitAnswerRequestKind::Yes);
-assert_answer(false, SubmitAnswerRequestKind::No);
-assert_answer("hello", SubmitAnswerRequestKind::Freeform);
-assert_answer(json!({"option":"a"}), SubmitAnswerRequestKind::SingleChoice);
-assert_answer(json!({"options":["a","b"]}), SubmitAnswerRequestKind::MultiChoice);
-assert_answer(json!({"text":"hello"}), SubmitAnswerRequestKind::Freeform);
+assert_answer_json(json!(true), json!({"kind": "yes"}));
+assert_answer_json(json!(false), json!({"kind": "no"}));
+assert_answer_json(json!("hello"), json!({"kind": "text", "text": "hello"}));
+assert_answer_json(json!({"option":"a"}), json!({"kind": "selected", "option_key": "a"}));
+assert_answer_json(
+    json!({"options":["a","b"]}),
+    json!({"kind": "multi_selected", "option_keys": ["a", "b"]}),
+);
+assert_answer_json(json!({"text":"hello"}), json!({"kind": "text", "text": "hello"}));
 ```
 
-Use actual generated `fabro_api::types::SubmitAnswerRequest` constructors/builders available in the crate. If generated variants are awkward, inspect the generated type and map exactly to the existing API shape used by `Client::submit_run_answer`.
+Build the generated `fabro_api::types::SubmitAnswerRequest` through the
+documented wire JSON shape and then serialize it back in tests:
+
+```rust
+fn answer_to_submit_request(answer: serde_json::Value) -> ToolResult<types::SubmitAnswerRequest> {
+    let payload = match answer {
+        serde_json::Value::Bool(true) => serde_json::json!({ "kind": "yes" }),
+        serde_json::Value::Bool(false) => serde_json::json!({ "kind": "no" }),
+        serde_json::Value::String(text) => serde_json::json!({ "kind": "text", "text": text }),
+        serde_json::Value::Object(mut object) => {
+            if let Some(option) = object.remove("option") {
+                serde_json::json!({ "kind": "selected", "option_key": option })
+            } else if let Some(options) = object.remove("options") {
+                serde_json::json!({ "kind": "multi_selected", "option_keys": options })
+            } else if let Some(text) = object.remove("text") {
+                serde_json::json!({ "kind": "text", "text": text })
+            } else {
+                return Err(ToolError::message(
+                    "answer object must contain one of: option, options, text",
+                ));
+            }
+        }
+        other => {
+            return Err(ToolError::message(format!(
+                "unsupported answer value: {other}; expected boolean, string, or object",
+            )));
+        }
+    };
+    serde_json::from_value(payload).map_err(|err| {
+        ToolError::message(format!("failed to build submit-answer request: {err}"))
+    })
+}
+```
+
+This matches the current API contract proven by
+`lib/crates/fabro-api/tests/submit_answer_request_round_trip.rs`, which uses
+`kind: yes`, `kind: no`, `kind: selected`, `kind: multi_selected`, and
+`kind: text`. Do not introduce references to non-existent generated names such
+as `SubmitAnswerRequestKind`.
 
 - [ ] **Step 6: Implement `fabro_run_gather`**
 
