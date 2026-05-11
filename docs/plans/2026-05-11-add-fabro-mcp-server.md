@@ -4,16 +4,32 @@
 
 **Goal:** Add a stdio MCP server to the `fabro` CLI, exposed as `fabro mcp start`, with `fabro mcp config` and `fabro mcp init <agent>` support and first-class tools for managing Fabro runs.
 
-**Architecture:** Implement the Fabro MCP server inside `fabro-cli`, not in `fabro-mcp`, because the server must reuse CLI authentication, server target resolution, settings loading, and run manifest construction without creating a crate dependency cycle. Use `rmcp` server macros and stdio transport for protocol correctness, connect lazily to the Fabro API through `CommandContext`, and return structured MCP tool results plus text fallbacks. Keep the existing `fabro-mcp` crate as the external MCP client used by Fabro agents.
+**Architecture:** Implement the Fabro MCP server in a new `fabro-mcp-server` crate, with `fabro-cli` owning only clap parsing and dispatch for `fabro mcp ...`. Use `rmcp` server macros and stdio transport for protocol correctness, connect lazily to the Fabro API through settings built from the same CLI auth/config inputs as existing Fabro commands, and return structured MCP tool results plus text fallbacks. Keep the existing `fabro-mcp` crate as the external MCP client/shared protocol support used by Fabro agents and tests, not as the server crate.
 
-**Tech Stack:** Rust, clap, tokio, rmcp 1.3 stdio server transport, serde/schemars JSON schemas, fabro-client, fabro-api generated types, existing Fabro CLI integration test harness with insta snapshots.
+**Tech Stack:** Rust, clap, tokio, new `fabro-mcp-server` crate, rmcp 1.3 stdio server transport, serde/schemars JSON schemas, fabro-client, fabro-api generated types, existing Fabro CLI integration test harness with insta snapshots.
 
 ---
 
 ## File Structure
 
+- Create `lib/crates/fabro-mcp-server/Cargo.toml`
+  - New crate for the stdio MCP server implementation. Add direct `rmcp` dependency with server, macros, schemars, and stdio transport features, plus the Fabro crates needed for API access, run manifest construction, settings/auth-store resolution, and tests. The workspace already includes `lib/crates/*`, so no root workspace member edit is required.
+
+- Create `lib/crates/fabro-mcp-server/src/lib.rs`
+  - Export the server entry points and settings types consumed by `fabro-cli`: `McpServerSettings`, `McpConfigSettings`, `McpAgent`, `start(settings)`, `config_json(settings)`, and `init_agent(settings)`.
+
+- Create `lib/crates/fabro-mcp-server/src/server.rs`
+  - Own the stdio MCP service, tool registration, API client acquisition from explicit settings, and tool error shaping.
+
+- Create `lib/crates/fabro-mcp-server/src/run_tools.rs`
+  - Own run-management behavior behind the MCP tools: create/start, search, interact, gather, and events.
+  - This split keeps protocol boilerplate out of run semantics.
+
+- Create `lib/crates/fabro-mcp-server/src/config.rs`
+  - Own generic MCP config rendering and agent-specific config path/merge/write logic.
+
 - Modify `lib/crates/fabro-cli/Cargo.toml`
-  - Add a direct `rmcp` dependency with server, macros, schemars, and stdio transport features. `fabro-cli` currently reaches `rmcp` only indirectly through `fabro-mcp`; direct usage is needed because the new server implementation lives in this crate.
+  - Add a path dependency on the new `fabro-mcp-server` crate. `fabro-cli` should not depend directly on `rmcp` for the server implementation.
 
 - Modify `lib/crates/fabro-cli/src/args.rs`
   - Add `McpNamespace`, `McpCommand`, `McpStartArgs`, `McpConfigArgs`, `McpInitArgs`, and `McpAgent`.
@@ -29,22 +45,12 @@
 - Create `lib/crates/fabro-cli/src/commands/mcp/mod.rs`
   - Own CLI dispatch for `start`, `config`, and `init`.
 
-- Create `lib/crates/fabro-cli/src/commands/mcp/server.rs`
-  - Own the stdio MCP service, tool registration, tool parameter structs, output structs, API client acquisition, and tool error shaping.
-
-- Create `lib/crates/fabro-cli/src/commands/mcp/run_tools.rs`
-  - Own run-management behavior behind the MCP tools: create/start, search, interact, gather, and events.
-  - This split keeps protocol boilerplate out of run semantics.
-
-- Create `lib/crates/fabro-cli/src/commands/mcp/config.rs`
-  - Own generic MCP config rendering and agent-specific config path/merge/write logic.
-
 - Modify `lib/crates/fabro-cli/src/commands/run/overrides.rs`
-  - Expose small helper functions needed by MCP run creation, or add equivalent crate-visible wrappers:
+  - If needed, move shared manifest override construction into a non-CLI crate or expose a small reusable helper without creating a dependency from `fabro-mcp-server` back to `fabro-cli`:
     - label parsing
     - goal layer construction
     - execution/model/sandbox override construction
-  - Do not duplicate manifest override semantics in the MCP module.
+  - Do not duplicate manifest override semantics in the MCP server crate.
 
 - Modify `lib/crates/fabro-cli/tests/it/cmd/mod.rs`
   - Add `mod mcp;`.
@@ -329,9 +335,9 @@ struct FabroRunEventsParams {
 
 - `fabro mcp start` stdout is reserved for MCP JSON-RPC only. All logs, warnings, errors, tracing, and diagnostics must go to stderr.
 - MCP initialize and tools/list must not require a live Fabro server. API connection is lazy and happens when a tool needs it.
-- There is no separate MCP authentication. Tool calls use the same `CommandContext` and `fabro-client` auth store behavior as existing CLI commands. Auth failures returned from tools must include the existing user guidance: `Run \`fabro auth login\` to authenticate.`
+- There is no separate MCP authentication. Tool calls use the same CLI auth store and `fabro-client` behavior as existing CLI commands. Auth failures returned from tools must include the existing user guidance: `Run \`fabro auth login\` to authenticate.`
 - Tool failures are MCP tool errors, not process exits. The stdio server should stay alive after invalid arguments, not-found selectors, conflicts, auth failures, and API errors.
-- Tool-level argument validation that does not need server state must run before acquiring the lazy Fabro API client. Invalid local input such as empty run lists, too many run ids, malformed timestamps, missing required action fields, or unsupported answer JSON must report that validation error even when the CLI is not authenticated or the server is unavailable.
+- Tool-level argument validation that does not need server state must run before acquiring the lazy Fabro API client. Every handler must convert raw MCP parameter structs into its tool-specific `Validated...` type before auth lookup, client creation, selector resolution, or API calls. Invalid local input such as empty run lists, too many run ids, malformed timestamps, missing required action fields, unsupported answer JSON, or timeout values must report that validation error even when the CLI is not authenticated or the server is unavailable.
 - Every successful tool returns structured content and a concise text fallback. The text fallback is for clients that do not yet show MCP structured output. Do not return `rmcp::Json<T>` directly from successful tools, because its text content is the full JSON payload. Instead, build a `CallToolResult` with `structured_content: Some(...)` and a short `Content::text(...)` summary.
 - `rmcp 1.3` only accepts manually constructed `CallToolResult` values from tool handlers through `Result<CallToolResult, rmcp::ErrorData>`. Do not use `Result<CallToolResult, String>` in `#[tool]` methods; it does not satisfy `IntoCallToolResult`. Expected Fabro failures must be returned as `Ok(CallToolResult::error(...))` so they are MCP tool errors and the server stays alive. Reserve `Err(ErrorData)` for unexpected serialization/framework failures.
 - Run selectors must go through `Client::resolve_run(...)` to preserve existing Fabro prefix/workflow-name behavior.
@@ -341,7 +347,7 @@ struct FabroRunEventsParams {
 
 ## Strategy Decisions
 
-- **Keep implementation in `fabro-cli`:** The existing `fabro-mcp` crate is a client abstraction for agents consuming third-party MCP servers. A Fabro MCP server needs CLI config, auth, and manifest-building internals. Moving those internals into `fabro-mcp` would either create a cycle or force a broad public API extraction. The clean steady-state for this feature is a CLI-owned MCP server module with a future extraction point if other binaries need it.
+- **Implement the server in `fabro-mcp-server`:** The existing `fabro-mcp` crate remains the client/shared protocol support for agents consuming third-party MCP servers. The new `fabro-mcp-server` crate owns the Fabro server implementation and exposes explicit settings APIs so `fabro-cli` can wire `fabro mcp ...` commands without making the existing client crate a server crate.
 - **Use `rmcp` instead of hand-rolled JSON-RPC:** The project already depends on `rmcp` and uses it for MCP client behavior. The server should use the same SDK to get initialize/tools/list/tools/call semantics, JSON schema generation, and stdio framing right.
 - **Default create to start:** Devin's session creation starts usable sessions. For Fabro, a run that stays submitted unless the caller remembers a second tool call is a surprising first-use experience. `start: false` keeps the lower-level control available without making it the default.
 - **Use five Devin-shaped tools instead of many tiny tools:** The user explicitly asked to adapt Devin sessions to Fabro runs. The five-tool shape is easier for MCP clients to discover and keeps later additions compatible. Internally, the Rust implementation should still split actions into small functions.
@@ -351,14 +357,16 @@ struct FabroRunEventsParams {
 ## Task 1: Add CLI Surface And Help Snapshots
 
 **Files:**
+- Create: `lib/crates/fabro-mcp-server/Cargo.toml`
+- Create: `lib/crates/fabro-mcp-server/src/lib.rs`
+- Create: `lib/crates/fabro-mcp-server/src/config.rs`
+- Create: `lib/crates/fabro-mcp-server/src/run_tools.rs`
+- Create: `lib/crates/fabro-mcp-server/src/server.rs`
 - Modify: `lib/crates/fabro-cli/Cargo.toml`
 - Modify: `lib/crates/fabro-cli/src/args.rs`
 - Modify: `lib/crates/fabro-cli/src/main.rs`
 - Modify: `lib/crates/fabro-cli/src/commands/mod.rs`
 - Create: `lib/crates/fabro-cli/src/commands/mcp/mod.rs`
-- Create: `lib/crates/fabro-cli/src/commands/mcp/config.rs`
-- Create: `lib/crates/fabro-cli/src/commands/mcp/run_tools.rs`
-- Create: `lib/crates/fabro-cli/src/commands/mcp/server.rs`
 - Create: `lib/crates/fabro-cli/tests/it/cmd/mcp.rs`
 - Modify: `lib/crates/fabro-cli/tests/it/cmd/mod.rs`
 
@@ -414,12 +422,21 @@ cargo nextest run -p fabro-cli --test it cmd::mcp::help cmd::mcp::start_help cmd
 
 Expected: FAIL because `fabro mcp` does not exist.
 
-- [ ] **Step 3: Add clap arguments and no-op dispatch**
+- [ ] **Step 3: Add new crate, clap arguments, and no-op dispatch**
 
-In `lib/crates/fabro-cli/Cargo.toml`, add direct `rmcp` dependency:
+Create `lib/crates/fabro-mcp-server/Cargo.toml` with the package name
+`fabro-mcp-server`. Add direct `rmcp` dependency there:
 
 ```toml
 rmcp = { workspace = true, features = ["server", "macros", "schemars", "transport-io"] }
+```
+
+Also add the Fabro crate dependencies needed for settings/auth, API calls,
+manifest construction, and tests. In `lib/crates/fabro-cli/Cargo.toml`, add only
+the path dependency:
+
+```toml
+fabro-mcp-server = { path = "../fabro-mcp-server" }
 ```
 
 In `lib/crates/fabro-cli/src/args.rs`, add:
@@ -488,25 +505,35 @@ Create `commands/mcp/mod.rs`:
 ```rust
 use anyhow::Result;
 
-use crate::args::{McpCommand, McpNamespace};
+use crate::args::{McpAgent, McpCommand, McpNamespace, ServerConnectionArgs};
 use crate::command_context::CommandContext;
-
-mod config;
-mod run_tools;
-mod server;
 
 pub(crate) async fn dispatch(ns: McpNamespace, base_ctx: &CommandContext) -> Result<()> {
     match ns.command {
-        McpCommand::Start(args) => server::start(args, base_ctx).await,
-        McpCommand::Config(args) => config::print_config(args),
-        McpCommand::Init(args) => config::init_agent(args),
+        McpCommand::Start(args) => {
+            fabro_mcp_server::start(server_settings(base_ctx, &args.connection)?).await
+        }
+        McpCommand::Config(args) => {
+            let json = fabro_mcp_server::config_json(config_settings(&args.connection)?)?;
+            print!("{json}");
+            Ok(())
+        }
+        McpCommand::Init(args) => {
+            fabro_mcp_server::init_agent(init_settings(args.agent, &args.connection)?)?;
+            Ok(())
+        }
     }
 }
 ```
 
-Create `commands/mcp/config.rs`, `commands/mcp/run_tools.rs`, and
-`commands/mcp/server.rs` in this task. Use stub implementations that return
-`Ok(())` for config/init for now, except `server::start` can
+Add small conversion helpers in `commands/mcp/mod.rs` that turn CLI arguments
+and `base_ctx.cwd()` into `fabro_mcp_server` settings. These helpers must pass
+plain owned values such as server URL override, storage-dir override, home dir,
+and cwd; the new crate must not depend on `fabro-cli::CommandContext`.
+
+Create `lib/crates/fabro-mcp-server/src/lib.rs`, `config.rs`, `run_tools.rs`,
+and `server.rs` in this task. Use stub implementations that return `Ok(())` or
+placeholder JSON for config/init for now, except `start(settings)` can
 `anyhow::bail!("fabro mcp start is not implemented yet")` until Task 3.
 `run_tools.rs` can contain only a placeholder module comment until Task 3 adds
 the first types/helpers.
@@ -539,6 +566,7 @@ Run:
 ```bash
 cargo +nightly-2026-04-14 fmt --all
 cargo +nightly-2026-04-14 clippy -p fabro-cli --test it -- -D warnings
+cargo +nightly-2026-04-14 clippy -p fabro-mcp-server --all-targets -- -D warnings
 ```
 
 Expected: PASS.
@@ -546,14 +574,16 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add lib/crates/fabro-cli/Cargo.toml lib/crates/fabro-cli/src/args.rs lib/crates/fabro-cli/src/main.rs lib/crates/fabro-cli/src/commands/mod.rs lib/crates/fabro-cli/src/commands/mcp/mod.rs lib/crates/fabro-cli/src/commands/mcp/config.rs lib/crates/fabro-cli/src/commands/mcp/run_tools.rs lib/crates/fabro-cli/src/commands/mcp/server.rs lib/crates/fabro-cli/tests/it/cmd/mod.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
+git add lib/crates/fabro-mcp-server/Cargo.toml lib/crates/fabro-mcp-server/src/lib.rs lib/crates/fabro-mcp-server/src/config.rs lib/crates/fabro-mcp-server/src/run_tools.rs lib/crates/fabro-mcp-server/src/server.rs lib/crates/fabro-cli/Cargo.toml lib/crates/fabro-cli/src/args.rs lib/crates/fabro-cli/src/main.rs lib/crates/fabro-cli/src/commands/mod.rs lib/crates/fabro-cli/src/commands/mcp/mod.rs lib/crates/fabro-cli/tests/it/cmd/mod.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
 git commit -m "feat(cli): add mcp command surface"
 ```
 
 ## Task 2: Implement `fabro mcp config` And `fabro mcp init`
 
 **Files:**
-- Modify: `lib/crates/fabro-cli/src/commands/mcp/config.rs`
+- Modify: `lib/crates/fabro-mcp-server/src/config.rs`
+- Modify: `lib/crates/fabro-mcp-server/src/lib.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/mcp/mod.rs`
 - Modify: `lib/crates/fabro-cli/tests/it/cmd/mcp.rs`
 
 - [ ] **Step 1: Write failing config/init tests**
@@ -695,7 +725,7 @@ Expected: FAIL because config/init are stubs.
 
 - [ ] **Step 3: Implement config rendering**
 
-In `commands/mcp/config.rs`, implement:
+In `lib/crates/fabro-mcp-server/src/config.rs`, implement:
 
 ```rust
 #![expect(
@@ -708,18 +738,17 @@ use std::path::PathBuf;
 use anyhow::{Context as _, Result, anyhow, bail};
 use serde_json::{Map, Value, json};
 
-use crate::args::{McpAgent, McpConfigArgs, McpInitArgs, ServerConnectionArgs};
-use crate::shared::print_json_pretty;
-
 const SERVER_NAME: &str = "fabro";
 
-pub(crate) fn print_config(args: McpConfigArgs) -> Result<()> {
-    print_json_pretty(&generic_config(&args.connection))
+pub fn config_json(settings: McpConfigSettings) -> Result<String> {
+    serde_json::to_string_pretty(&generic_config(&settings))
+        .map(|json| format!("{json}\n"))
+        .context("failed to render Fabro MCP client config")
 }
 
-pub(crate) fn init_agent(args: McpInitArgs) -> Result<()> {
-    let path = agent_config_path(args.agent)?;
-    let entry = server_entry(&args.connection);
+pub fn init_agent(settings: McpInitSettings) -> Result<()> {
+    let path = agent_config_path(settings.agent, &settings.home_dir)?;
+    let entry = server_entry(&settings.config);
     merge_server_entry(&path, entry)?;
     Ok(())
 }
@@ -728,13 +757,13 @@ pub(crate) fn init_agent(args: McpInitArgs) -> Result<()> {
 `server_entry(...)` must emit command `fabro` and args built by:
 
 ```rust
-fn start_args(connection: &ServerConnectionArgs) -> Vec<String> {
+fn start_args(settings: &McpConfigSettings) -> Vec<String> {
     let mut args = vec!["mcp".to_string(), "start".to_string()];
-    if let Some(server) = connection.target.server.as_ref() {
+    if let Some(server) = settings.server.as_ref() {
         args.push("--server".to_string());
         args.push(server.clone());
     }
-    if let Some(storage_dir) = connection.storage_dir.as_deref() {
+    if let Some(storage_dir) = settings.storage_dir.as_deref() {
         args.push("--storage-dir".to_string());
         args.push(storage_dir.display().to_string());
     }
@@ -778,6 +807,7 @@ Run:
 ```bash
 cargo +nightly-2026-04-14 fmt --all
 cargo +nightly-2026-04-14 clippy -p fabro-cli --test it -- -D warnings
+cargo +nightly-2026-04-14 clippy -p fabro-mcp-server --all-targets -- -D warnings
 ```
 
 Expected: PASS.
@@ -785,15 +815,16 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add lib/crates/fabro-cli/src/commands/mcp/config.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
+git add lib/crates/fabro-mcp-server/src/config.rs lib/crates/fabro-mcp-server/src/lib.rs lib/crates/fabro-cli/src/commands/mcp/mod.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
 git commit -m "feat(cli): configure fabro mcp clients"
 ```
 
 ## Task 3: Add MCP Server Skeleton With Protocol Tests
 
 **Files:**
-- Modify: `lib/crates/fabro-cli/src/commands/mcp/server.rs`
-- Modify: `lib/crates/fabro-cli/src/commands/mcp/run_tools.rs`
+- Modify: `lib/crates/fabro-mcp-server/src/server.rs`
+- Modify: `lib/crates/fabro-mcp-server/src/run_tools.rs`
+- Modify: `lib/crates/fabro-mcp-server/src/lib.rs`
 - Modify: `lib/crates/fabro-cli/tests/it/cmd/mcp.rs`
 
 - [ ] **Step 1: Write failing stdio protocol test**
@@ -836,10 +867,47 @@ async fn stdio_server_initializes_and_lists_run_tools() {
 ```
 
 `TestContext` does not currently expose a reusable command env map. Add a narrow
-test helper that builds `std::process::Command` with `fabro_test::apply_test_isolation`
-and `current_dir(&context.temp_dir)`, then either converts its env into the
-`HashMap<String, String>` expected by `McpServerSettings` or uses that command
-directly for raw subprocess tests. Do not use ambient user `HOME`.
+test helper that constructs a deterministic child-process environment instead
+of reading from ambient user `HOME` or trying to reverse a built
+`std::process::Command`:
+
+```rust
+struct McpStdioFixture {
+    command: Vec<String>,
+    env: HashMap<String, String>,
+    current_dir: PathBuf,
+}
+
+fn mcp_stdio_fixture(context: &fabro_test::TestContext, extra_args: &[&str]) -> McpStdioFixture {
+    let mut command = vec![
+        env!("CARGO_BIN_EXE_fabro").to_string(),
+        "mcp".to_string(),
+        "start".to_string(),
+    ];
+    command.extend(extra_args.iter().map(|arg| (*arg).to_string()));
+
+    let mut env = fabro_test::isolated_env(&context.home_dir);
+    env.insert("HOME".to_string(), context.home_dir.display().to_string());
+    env.insert("FABRO_HOME".to_string(), context.home_dir.join(".fabro").display().to_string());
+    env.insert("NO_COLOR".to_string(), "1".to_string());
+
+    McpStdioFixture {
+        command,
+        env,
+        current_dir: context.temp_dir.clone(),
+    }
+}
+```
+
+If `fabro_test::isolated_env` does not exist, add a similarly narrow helper to
+`fabro_test` that returns the same env map used by
+`fabro_test::apply_test_isolation`. Use `fixture.env.clone()` for
+`fabro_mcp::config::McpServerSettings`, and use the same `fixture.env` plus
+`fixture.current_dir` when spawning raw subprocess tests; raw subprocess helpers
+must call `cmd.env_clear()` before applying this map. The production crate
+should expose equivalent explicit settings (`McpServerSettings { server,
+storage_dir, home_dir, cwd }`) so tests and CLI dispatch build settings from
+owned values directly; do not depend on ambient process env in tests.
 
 - [ ] **Step 2: Run test and verify it fails**
 
@@ -853,7 +921,7 @@ Expected: FAIL because `fabro mcp start` is not implemented.
 
 - [ ] **Step 3: Implement rmcp server skeleton**
 
-In `server.rs`, implement:
+In `lib/crates/fabro-mcp-server/src/server.rs`, implement:
 
 ```rust
 use std::path::PathBuf;
@@ -869,23 +937,20 @@ use rmcp::{
 };
 use tokio::sync::OnceCell;
 
-use crate::args::McpStartArgs;
-use crate::command_context::CommandContext;
-use crate::server_client::Client;
+use fabro_client::Client;
 
-use super::run_tools;
+use crate::{McpServerSettings, run_tools};
 
 #[derive(Clone)]
 pub(crate) struct FabroMcpServer {
-    ctx: Arc<CommandContext>,
+    settings: Arc<McpServerSettings>,
     client: Arc<OnceCell<Arc<Client>>>,
     cwd: PathBuf,
     tool_router: ToolRouter<Self>,
 }
 
-pub(crate) async fn start(args: McpStartArgs, base_ctx: &CommandContext) -> Result<()> {
-    let ctx = Arc::new(base_ctx.with_connection(&args.connection)?);
-    let server = FabroMcpServer::new(ctx);
+pub async fn start(settings: McpServerSettings) -> Result<()> {
+    let server = FabroMcpServer::new(Arc::new(settings));
     let service = serve_server(server, stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -912,7 +977,7 @@ Add tool functions with temporary placeholder results:
 ```rust
 #[tool_router]
 impl FabroMcpServer {
-    pub(crate) fn new(ctx: Arc<CommandContext>) -> Self { ... }
+    pub(crate) fn new(settings: Arc<McpServerSettings>) -> Self { ... }
 
     #[tool(name = "fabro_run_create", description = "...")]
     async fn fabro_run_create(
@@ -942,8 +1007,8 @@ lazy client only after validation succeeds, call the corresponding `run_tools`
 function, return successful values with `success_result(...)`, and convert
 expected Fabro/API/validation failures with `error_result(...)`.
 
-`new(...)` should copy `ctx.cwd().to_path_buf()` into the `cwd` field before
-storing the context, so tool calls resolve relative workflows against the MCP
+`new(...)` should copy `settings.cwd.clone()` into the `cwd` field before
+storing the settings, so tool calls resolve relative workflows against the MCP
 process cwd captured at startup.
 
 Each placeholder in `run_tools.rs` should still define the input structs,
@@ -1012,7 +1077,7 @@ Implement `client(&self)` with lazy connection:
 ```rust
 async fn client(&self) -> Result<Arc<Client>, run_tools::ToolError> {
     self.client
-        .get_or_try_init(|| async { self.ctx.server().await.map_err(run_tools::ToolError::from_anyhow) })
+        .get_or_try_init(|| async { client_from_settings(&self.settings).await.map_err(run_tools::ToolError::from_anyhow) })
         .await
         .map(Arc::clone)
 }
@@ -1040,9 +1105,9 @@ Add a raw subprocess test that:
 - asserts it parses as JSON and has `jsonrpc: "2.0"`
 - asserts stderr may contain logs but stdout contains no leading human text
 
-Use the same isolated environment as `TestContext::command()` for the raw
-subprocess helper: `fabro_test::apply_test_isolation(&mut cmd, &context.home_dir)`
-and `cmd.current_dir(&context.temp_dir)`.
+Use `mcp_stdio_fixture(&context, &[])` for the raw subprocess helper so this
+test and the `McpServerSettings` test use identical command, env, and cwd
+values.
 
 Use a child timeout and kill-on-drop cleanup. The raw JSON should be:
 
@@ -1060,28 +1125,60 @@ cargo nextest run -p fabro-cli --test it cmd::mcp::stdio_server_initializes_and_
 
 Expected: PASS.
 
-- [ ] **Step 7: Refactor and verify**
+- [ ] **Step 7: Add startup/list-tools performance smoke**
+
+Add a lightweight smoke test that uses `mcp_stdio_fixture` to initialize the
+server and call `tools/list` without a live Fabro server or auth. Assert the
+combined initialize plus list-tools path completes within 2 seconds on the test
+machine:
+
+```rust
+#[tokio::test(flavor = "multi_thread")]
+async fn stdio_startup_and_list_tools_is_fast() {
+    let context = test_context!();
+    let start = std::time::Instant::now();
+    let client = spawn_mcp_client(&context, &[]).await;
+    let tools = client.list_tools().await.unwrap();
+    assert_eq!(tools.len(), 5);
+    assert!(start.elapsed() < std::time::Duration::from_secs(2));
+}
+```
+
+This is a smoke check, not a benchmark. If CI variance makes 2 seconds too
+tight, keep the assertion but adjust the threshold in the implementation with a
+comment explaining the observed bound.
+
+Run:
+
+```bash
+cargo nextest run -p fabro-cli --test it cmd::mcp::stdio_startup_and_list_tools_is_fast
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Refactor and verify**
 
 Run:
 
 ```bash
 cargo +nightly-2026-04-14 fmt --all
 cargo +nightly-2026-04-14 clippy -p fabro-cli --test it -- -D warnings
+cargo +nightly-2026-04-14 clippy -p fabro-mcp-server --all-targets -- -D warnings
 ```
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add lib/crates/fabro-cli/src/commands/mcp/server.rs lib/crates/fabro-cli/src/commands/mcp/run_tools.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
+git add lib/crates/fabro-mcp-server/src/server.rs lib/crates/fabro-mcp-server/src/run_tools.rs lib/crates/fabro-mcp-server/src/lib.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
 git commit -m "feat(cli): start fabro mcp stdio server"
 ```
 
 ## Task 4: Implement Run Create/Search Tools
 
 **Files:**
-- Modify: `lib/crates/fabro-cli/src/commands/mcp/run_tools.rs`
+- Modify: `lib/crates/fabro-mcp-server/src/run_tools.rs`
 - Modify: `lib/crates/fabro-cli/src/commands/run/overrides.rs`
 - Modify: `lib/crates/fabro-cli/tests/it/cmd/mcp.rs`
 
@@ -1183,9 +1280,8 @@ Implementation outline:
 pub(crate) async fn create_runs(
     client: Arc<Client>,
     base_cwd: &Path,
-    params: FabroRunCreateParams,
+    params: ValidatedCreateRuns,
 ) -> ToolResult<CreateRunsResult> {
-    validate_len("runs", params.runs.len(), 1, 50)?;
     let mut created = Vec::with_capacity(params.runs.len());
     for spec in params.runs {
         let cwd = spec.cwd.clone().unwrap_or_else(|| base_cwd.to_path_buf());
@@ -1216,7 +1312,7 @@ pub(crate) async fn create_runs(
 }
 ```
 
-Important: the function signature in `server.rs` should pass both the lazy API client and the MCP process cwd from the context, not call `std::env::current_dir()` deep in the tool.
+Important: the function signature in `server.rs` should pass both the lazy API client and the MCP process cwd from the captured `McpServerSettings`, not call `std::env::current_dir()` deep in the tool. The raw `FabroRunCreateParams` must only appear at the MCP handler boundary; `ValidatedCreateRuns::try_from(raw)` must run before acquiring the client, and `create_runs(...)` must accept `ValidatedCreateRuns`.
 The outline above omits some `map_err(...)` calls for readability; the real
 implementation must convert every `anyhow::Error` and API error into
 `ToolError` with the shared formatting helper so `?` never tries to convert
@@ -1273,7 +1369,7 @@ Add unit tests in `run_tools.rs` for:
 Run:
 
 ```bash
-cargo nextest run -p fabro-cli mcp::run_tools
+cargo nextest run -p fabro-mcp-server run_tools
 ```
 
 Expected: PASS after implementation.
@@ -1307,6 +1403,7 @@ Run:
 ```bash
 cargo +nightly-2026-04-14 fmt --all
 cargo +nightly-2026-04-14 clippy -p fabro-cli --test it -- -D warnings
+cargo +nightly-2026-04-14 clippy -p fabro-mcp-server --all-targets -- -D warnings
 ```
 
 Expected: PASS.
@@ -1314,14 +1411,14 @@ Expected: PASS.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add lib/crates/fabro-cli/src/commands/mcp/run_tools.rs lib/crates/fabro-cli/src/commands/run/overrides.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
+git add lib/crates/fabro-mcp-server/src/run_tools.rs lib/crates/fabro-cli/src/commands/run/overrides.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
 git commit -m "feat(cli): add mcp run create and search tools"
 ```
 
 ## Task 5: Implement Interact/Gather/Events Tools
 
 **Files:**
-- Modify: `lib/crates/fabro-cli/src/commands/mcp/run_tools.rs`
+- Modify: `lib/crates/fabro-mcp-server/src/run_tools.rs`
 - Modify: `lib/crates/fabro-cli/tests/it/cmd/mcp.rs`
 
 - [ ] **Step 1: Write failing lifecycle interaction test**
@@ -1357,6 +1454,7 @@ fabro_json_snapshot!(
 Add tests for:
 
 - `fabro_run_gather` rejects more than 50 run ids without requiring auth or a reachable server. Start `fabro mcp start --server http://127.0.0.1:9` with no auth entry, call the tool, assert the error mentions `run_ids`, then call `tools/list` again to prove the server stayed alive.
+- `fabro_run_gather` returns `timed_out: true` when the timeout expires before all requested runs are terminal. Use a real authenticated test server, create or select a non-terminal run, call gather with `timeout_seconds: 1` and `poll_interval_seconds: 5`, assert elapsed wall time is bounded, and verify the returned run summary is the current state rather than a process/tool failure.
 - `fabro_run_interact` action `message` without `message` returns an MCP tool error and the server remains alive for a subsequent `fabro_run_search`.
 - Missing auth against a protected remote target returns a tool error containing `Run \`fabro auth login\` to authenticate.`
 
@@ -1365,7 +1463,7 @@ Add tests for:
 Run:
 
 ```bash
-cargo nextest run -p fabro-cli --test it cmd::mcp::mcp_lifecycle_tools_manage_real_run cmd::mcp::mcp_gather_rejects_too_many_runs cmd::mcp::mcp_interact_error_does_not_stop_server cmd::mcp::mcp_tool_auth_error_mentions_login
+cargo nextest run -p fabro-cli --test it cmd::mcp::mcp_lifecycle_tools_manage_real_run cmd::mcp::mcp_gather_rejects_too_many_runs cmd::mcp::mcp_gather_returns_timeout_result cmd::mcp::mcp_interact_error_does_not_stop_server cmd::mcp::mcp_tool_auth_error_mentions_login
 ```
 
 Expected: FAIL because tools are incomplete.
@@ -1451,7 +1549,8 @@ as `SubmitAnswerRequestKind`.
 
 - [ ] **Step 6: Implement `fabro_run_gather`**
 
-Validation:
+Validation converts raw `FabroRunGatherParams` into `ValidatedGatherRuns`
+before client acquisition:
 
 ```rust
 validate_len("run_ids", params.run_ids.len(), 1, 50)?;
@@ -1463,7 +1562,8 @@ Implementation:
 
 - resolve all selectors at the start
 - poll summaries until every `summary.lifecycle.status.is_terminal()` or deadline
-- return `timed_out`, `runs`, and `elapsed_seconds`
+- if the deadline expires, return `timed_out: true`, current run summaries, and `elapsed_seconds` as a successful structured tool result
+- only return a tool error for selector/API failures, not for ordinary timeout expiry
 
 - [ ] **Step 7: Implement `fabro_run_events`**
 
@@ -1505,7 +1605,7 @@ struct RunEventsResult {
 Run:
 
 ```bash
-cargo nextest run -p fabro-cli --test it cmd::mcp::mcp_lifecycle_tools_manage_real_run cmd::mcp::mcp_gather_rejects_too_many_runs cmd::mcp::mcp_interact_error_does_not_stop_server cmd::mcp::mcp_tool_auth_error_mentions_login
+cargo nextest run -p fabro-cli --test it cmd::mcp::mcp_lifecycle_tools_manage_real_run cmd::mcp::mcp_gather_rejects_too_many_runs cmd::mcp::mcp_gather_returns_timeout_result cmd::mcp::mcp_interact_error_does_not_stop_server cmd::mcp::mcp_tool_auth_error_mentions_login
 ```
 
 Expected: PASS.
@@ -1517,6 +1617,7 @@ Run:
 ```bash
 cargo +nightly-2026-04-14 fmt --all
 cargo +nightly-2026-04-14 clippy -p fabro-cli --test it -- -D warnings
+cargo +nightly-2026-04-14 clippy -p fabro-mcp-server --all-targets -- -D warnings
 ```
 
 Expected: PASS.
@@ -1524,7 +1625,7 @@ Expected: PASS.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add lib/crates/fabro-cli/src/commands/mcp/run_tools.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
+git add lib/crates/fabro-mcp-server/src/run_tools.rs lib/crates/fabro-cli/tests/it/cmd/mcp.rs
 git commit -m "feat(cli): add mcp run control tools"
 ```
 
