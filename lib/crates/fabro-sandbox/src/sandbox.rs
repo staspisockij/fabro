@@ -9,6 +9,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use fabro_types::{CommandOutputStream, CommandTermination};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
@@ -118,6 +119,18 @@ macro_rules! delegate_sandbox {
                         cancel_token,
                         output_callback,
                     )
+                    .await
+            }
+
+            async fn spawn_stdio_process(
+                &self,
+                command: &str,
+                working_dir: Option<&str>,
+                env_vars: Option<&std::collections::HashMap<String, String>>,
+                cancel_token: Option<tokio_util::sync::CancellationToken>,
+            ) -> $crate::Result<$crate::StdioProcess> {
+                self.$field
+                    .spawn_stdio_process(command, working_dir, env_vars, cancel_token)
                     .await
             }
 
@@ -666,6 +679,90 @@ pub type CommandOutputCallback = Arc<
         + Sync,
 >;
 
+pub struct StdioProcess {
+    pub stdin:  Pin<Box<dyn AsyncWrite + Send>>,
+    pub stdout: Pin<Box<dyn AsyncRead + Send>>,
+    pub stderr: StderrCollector,
+    pub handle: StdioProcessHandle,
+}
+
+#[derive(Debug, Clone)]
+pub struct StderrCollector {
+    inner:     Arc<tokio::sync::Mutex<Vec<u8>>>,
+    max_bytes: usize,
+}
+
+impl StderrCollector {
+    #[must_use]
+    pub fn new(max_bytes: usize) -> Self {
+        Self {
+            inner: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            max_bytes,
+        }
+    }
+
+    pub async fn push(&self, bytes: &[u8]) {
+        let mut tail = self.inner.lock().await;
+        tail.extend_from_slice(bytes);
+        if tail.len() > self.max_bytes {
+            let excess = tail.len() - self.max_bytes;
+            tail.drain(..excess);
+        }
+    }
+
+    pub async fn tail_string(&self) -> String {
+        let tail = self.inner.lock().await;
+        String::from_utf8_lossy(&tail).into_owned()
+    }
+
+    pub fn spawn_reader<R>(&self, mut reader: R) -> tokio::task::JoinHandle<()>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        let collector = self.clone();
+        tokio::spawn(async move {
+            let mut buf = [0_u8; 8192];
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) => return,
+                    Ok(read) => collector.push(&buf[..read]).await,
+                    Err(err) => {
+                        tracing::warn!(error = %err, "Failed to read stdio process stderr");
+                        return;
+                    }
+                }
+            }
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct StdioProcessHandle {
+    control: Arc<dyn StdioProcessControl>,
+}
+
+impl StdioProcessHandle {
+    pub(crate) fn new(control: impl StdioProcessControl + 'static) -> Self {
+        Self {
+            control: Arc::new(control),
+        }
+    }
+
+    pub async fn terminate(&self) -> crate::Result<()> {
+        self.control.terminate().await
+    }
+
+    pub async fn wait(&self) -> crate::Result<CommandTermination> {
+        self.control.wait().await
+    }
+}
+
+#[async_trait]
+pub(crate) trait StdioProcessControl: Send + Sync {
+    async fn terminate(&self) -> crate::Result<()>;
+    async fn wait(&self) -> crate::Result<CommandTermination>;
+}
+
 #[derive(Debug, Clone)]
 pub struct DirEntry {
     pub name:   String,
@@ -752,6 +849,19 @@ pub trait Sandbox: Send + Sync {
             live_streaming: false,
         })
     }
+
+    async fn spawn_stdio_process(
+        &self,
+        _command: &str,
+        _working_dir: Option<&str>,
+        _env_vars: Option<&HashMap<String, String>>,
+        _cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        Err(crate::Error::message(
+            "ACP backend requires bidirectional stdio; this sandbox provider does not support it",
+        ))
+    }
+
     async fn grep(
         &self,
         pattern: &str,

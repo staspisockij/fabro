@@ -13,8 +13,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::sandbox::optional_timeout;
 use crate::{
-    CommandOutputCallback, DirEntry, ExecResult, ExecStreamingResult, GrepOptions, Sandbox,
-    SandboxEvent, SandboxEventCallback, format_lines_numbered,
+    CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
+    ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
+    StderrCollector, StdioProcess, StdioProcessHandle, format_lines_numbered,
 };
 
 pub struct LocalSandbox {
@@ -139,6 +140,39 @@ where
         }
     }
     buf
+}
+
+struct LocalStdioProcessControl {
+    child:       tokio::sync::Mutex<Child>,
+    termination: tokio::sync::Mutex<Option<CommandTermination>>,
+}
+
+#[async_trait]
+impl crate::sandbox::StdioProcessControl for LocalStdioProcessControl {
+    async fn terminate(&self) -> crate::Result<()> {
+        if self.termination.lock().await.is_some() {
+            return Ok(());
+        }
+
+        let mut child = self.child.lock().await;
+        sigterm_then_kill(&mut child).await;
+        *self.termination.lock().await = Some(CommandTermination::Cancelled);
+        Ok(())
+    }
+
+    async fn wait(&self) -> crate::Result<CommandTermination> {
+        if let Some(termination) = *self.termination.lock().await {
+            return Ok(termination);
+        }
+
+        let mut child = self.child.lock().await;
+        child
+            .wait()
+            .await
+            .map_err(|e| crate::Error::context("Failed to wait for stdio process", e))?;
+        *self.termination.lock().await = Some(CommandTermination::Exited);
+        Ok(CommandTermination::Exited)
+    }
 }
 
 #[async_trait]
@@ -421,6 +455,85 @@ impl Sandbox for LocalSandbox {
             },
             streams_separated: true,
             live_streaming:    true,
+        })
+    }
+
+    async fn spawn_stdio_process(
+        &self,
+        command: &str,
+        working_dir: Option<&str>,
+        env_vars: Option<&std::collections::HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        let mut filtered_env: Vec<(String, String)> = process_env_vars()
+            .into_iter()
+            .filter(|(key, _)| !Self::should_filter_env_var(key))
+            .collect();
+
+        if let Some(extra) = env_vars {
+            for (k, v) in extra {
+                if !Self::should_filter_env_var(k) {
+                    filtered_env.push((k.clone(), v.clone()));
+                }
+            }
+        }
+
+        let effective_dir =
+            working_dir.map_or_else(|| self.working_directory.clone(), std::path::PathBuf::from);
+
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg("-lc")
+            .arg(command)
+            .current_dir(&effective_dir)
+            .env_clear()
+            .envs(filtered_env)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        #[cfg(unix)]
+        fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| crate::Error::context("Failed to spawn stdio process", e))?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| crate::Error::message("Failed to open stdio process stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| crate::Error::message("Failed to open stdio process stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| crate::Error::message("Failed to open stdio process stderr"))?;
+
+        let stderr_collector = StderrCollector::new(DEFAULT_EXEC_OUTPUT_TAIL_BYTES);
+        stderr_collector.spawn_reader(stderr);
+
+        let handle = StdioProcessHandle::new(LocalStdioProcessControl {
+            child:       tokio::sync::Mutex::new(child),
+            termination: tokio::sync::Mutex::new(None),
+        });
+
+        if let Some(token) = cancel_token {
+            let handle_for_cancel = handle.clone();
+            tokio::spawn(async move {
+                token.cancelled().await;
+                if let Err(err) = handle_for_cancel.terminate().await {
+                    tracing::warn!(error = %err, "Failed to terminate cancelled stdio process");
+                }
+            });
+        }
+
+        Ok(StdioProcess {
+            stdin:  Box::pin(stdin),
+            stdout: Box::pin(stdout),
+            stderr: stderr_collector,
+            handle,
         })
     }
 
@@ -740,7 +853,7 @@ mod tests {
     use std::pin::Pin;
     use std::task::{Context as TaskContext, Poll};
 
-    use tokio::io::ReadBuf;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, ReadBuf};
 
     use super::*;
 
@@ -873,6 +986,34 @@ mod tests {
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(result.termination, CommandTermination::Exited);
         assert!(result.duration_ms < 5000);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stdio_process_round_trips_lines() {
+        let dir = temp_dir();
+        let sandbox = LocalSandbox::new(dir.clone());
+        let process = sandbox
+            .spawn_stdio_process(
+                "python3 -u -c 'import sys; [print(line.strip()[::-1], flush=True) for line in sys.stdin]'",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut stdin = process.stdin;
+        let mut stdout = BufReader::new(process.stdout);
+
+        stdin.write_all(b"abc\n").await.unwrap();
+        stdin.flush().await.unwrap();
+
+        let mut line = String::new();
+        stdout.read_line(&mut line).await.unwrap();
+        assert_eq!(line.trim_end(), "cba");
+
+        process.handle.terminate().await.unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

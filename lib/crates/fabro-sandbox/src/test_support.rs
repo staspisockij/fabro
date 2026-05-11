@@ -6,7 +6,10 @@ use fabro_types::CommandTermination;
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 
-use crate::{DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback};
+use crate::{
+    DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
+    SandboxEventCallback, StderrCollector, StdioProcess, StdioProcessHandle,
+};
 
 // --- MockSandbox ---
 
@@ -104,6 +107,19 @@ impl Default for MockSandbox {
     }
 }
 
+struct MockStdioProcessControl;
+
+#[async_trait]
+impl crate::sandbox::StdioProcessControl for MockStdioProcessControl {
+    async fn terminate(&self) -> crate::Result<()> {
+        Ok(())
+    }
+
+    async fn wait(&self) -> crate::Result<CommandTermination> {
+        Ok(CommandTermination::Exited)
+    }
+}
+
 #[async_trait]
 impl Sandbox for MockSandbox {
     async fn read_file(
@@ -182,6 +198,40 @@ impl Sandbox for MockSandbox {
             .lock()
             .expect("captured_env_vars lock poisoned") = env_vars.cloned();
         Ok(self.exec_result.clone())
+    }
+
+    async fn spawn_stdio_process(
+        &self,
+        command: &str,
+        working_dir: Option<&str>,
+        env_vars: Option<&std::collections::HashMap<String, String>>,
+        _cancel_token: Option<CancellationToken>,
+    ) -> crate::Result<StdioProcess> {
+        *self
+            .captured_command
+            .lock()
+            .expect("captured_command lock poisoned") = Some(command.to_string());
+        self.captured_commands
+            .lock()
+            .expect("captured_commands lock poisoned")
+            .push(command.to_string());
+        self.captured_working_dirs
+            .lock()
+            .expect("captured_working_dirs lock poisoned")
+            .push(working_dir.map(String::from));
+        *self
+            .captured_env_vars
+            .lock()
+            .expect("captured_env_vars lock poisoned") = env_vars.cloned();
+
+        let (stdin, _stdin_read) = tokio::io::duplex(1024);
+        let (_stdout_write, stdout) = tokio::io::duplex(1024);
+        Ok(StdioProcess {
+            stdin:  Box::pin(stdin),
+            stdout: Box::pin(stdout),
+            stderr: StderrCollector::new(DEFAULT_EXEC_OUTPUT_TAIL_BYTES),
+            handle: StdioProcessHandle::new(MockStdioProcessControl),
+        })
     }
 
     async fn grep(
