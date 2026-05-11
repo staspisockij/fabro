@@ -120,6 +120,9 @@ impl ConnectTo<Client> for SandboxAcpTransport {
         );
         tokio::select! {
             result = protocol => {
+                if let Err(err) = handle.terminate().await {
+                    tracing::warn!(error = %err, "Failed to terminate ACP process after protocol completion");
+                }
                 let _ = timeout(Duration::from_millis(500), handle.wait()).await;
                 result
             }

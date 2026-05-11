@@ -8,6 +8,7 @@ use fabro_acp::{AcpError, AcpRunRequest, AcpRunResult, resolve_acp_command, run_
 use fabro_model::Provider;
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
 use tokio::fs::{read_to_string, write};
+use tokio::process::Command;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
@@ -148,6 +149,62 @@ async fn cancellation_sends_session_cancel_and_returns_cancelled() {
 }
 
 #[tokio::test]
+async fn pre_session_cancellation_returns_cancelled() {
+    let tempdir = tempfile::tempdir().expect("create tempdir");
+    let cancel_token = CancellationToken::new();
+    cancel_token.cancel();
+
+    let err = run_fake_agent(
+        tempdir.path(),
+        HashMap::from([("ACP_MODE".to_string(), "slow_initialize".to_string())]),
+        Some(1_000),
+        cancel_token,
+    )
+    .await
+    .expect_err("pre-session cancellation should error");
+
+    assert!(matches!(err, AcpError::Cancelled));
+}
+
+#[tokio::test]
+async fn successful_turn_terminates_lingering_agent_process() {
+    let tempdir = tempfile::tempdir().expect("create tempdir");
+    let pid_path = tempdir.path().join("agent.pid");
+
+    let result = run_fake_agent(
+        tempdir.path(),
+        HashMap::from([
+            ("ACP_MODE".to_string(), "linger_after_response".to_string()),
+            (
+                "ACP_PID_RECORD".to_string(),
+                pid_path.to_string_lossy().into_owned(),
+            ),
+        ]),
+        Some(5_000),
+        CancellationToken::new(),
+    )
+    .await
+    .expect("run ACP turn");
+
+    sleep(Duration::from_millis(100)).await;
+    let pid = read_to_string(&pid_path).await.expect("read agent pid");
+    let still_running = process_is_running(pid.trim()).await;
+    if still_running {
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.trim())
+            .status()
+            .await;
+    }
+
+    assert_eq!(result.text, "hello from acp");
+    assert!(
+        !still_running,
+        "successful ACP turn should not leave lingering agent process"
+    );
+}
+
+#[tokio::test]
 async fn refusal_stop_reason_returns_text() {
     let tempdir = tempfile::tempdir().expect("create tempdir");
 
@@ -283,15 +340,52 @@ async fn run_fake_agent(
     .await
 }
 
+async fn process_is_running(pid: &str) -> bool {
+    let Ok(status) = Command::new("kill").arg("-0").arg(pid).status().await else {
+        return false;
+    };
+    if !status.success() {
+        return false;
+    }
+
+    let Ok(output) = Command::new("ps")
+        .args(["-ww", "-o", "stat=", "-p", pid])
+        .output()
+        .await
+    else {
+        return true;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .chars()
+        .find(|ch| !ch.is_whitespace())
+        .is_none_or(|state| !matches!(state, 'Z' | 'z'))
+}
+
 fn fake_agent_script() -> &'static str {
     r#"
 import json
 import os
+import signal
 import sys
 import time
 
 methods = []
 session_id = "sess-1"
+
+if os.environ.get("ACP_PID_RECORD"):
+    with open(os.environ["ACP_PID_RECORD"], "w", encoding="utf-8") as record:
+        record.write(str(os.getpid()))
+
+def handle_sigterm(signum, frame):
+    if os.environ.get("ACP_LINGER_TERMINATED"):
+        with open(os.environ["ACP_LINGER_TERMINATED"], "w", encoding="utf-8") as record:
+            record.write("terminated\n")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 def send(message):
     print(json.dumps(message), flush=True)
@@ -310,6 +404,8 @@ for line in sys.stdin:
     methods.append(method)
 
     if method == "initialize":
+        if os.environ.get("ACP_MODE") == "slow_initialize":
+            time.sleep(60)
         respond(message, {"protocolVersion": 1, "agentCapabilities": {}})
     elif method == "session/new":
         if os.environ.get("ACP_SESSION_NEW_PARAMS"):
@@ -380,6 +476,9 @@ for line in sys.stdin:
         })
         record_methods()
         respond(message, {"stopReason": os.environ.get("ACP_STOP_REASON", "end_turn")})
+        if mode == "linger_after_response":
+            while True:
+                time.sleep(1)
         break
     else:
         send({

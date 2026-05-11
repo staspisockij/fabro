@@ -287,15 +287,15 @@ The accepted testing strategy still holds, with scoped additions from the implem
     - Disposition: new
     - Harness: repository test suites named by the implementation plan.
     - Preconditions: all implementation tasks complete.
-    - Actions: run:
-     `ulimit -n 4096 && cargo nextest run -p fabro-acp`;
-     `ulimit -n 4096 && cargo nextest run -p fabro-sandbox -E 'test(stdio)'`;
-     `ulimit -n 4096 && cargo nextest run -p fabro-workflow -E 'test(router_) | test(acp_backend) | test(agent_acp) | test(initialize.*acp)'`;
-     `ulimit -n 4096 && cargo nextest run -p fabro-validate -E 'test(backend_valid)'`;
-     `ulimit -n 4096 && cargo nextest run -p fabro-store -E 'test(agent_acp)'`;
-     `ulimit -n 4096 && cargo nextest run -p fabro-server -E 'test(acp.*steer|steer.*acp)'`;
-     `ulimit -n 4096 && cargo nextest run -p fabro-cli -E 'test(acp_backend_workflow)'`.
-    - Expected outcome: every targeted suite passes without live provider credentials. Source of truth: accepted strategy final verification and implementation plan Task 10.
+   - Actions: run:
+     `ulimit -n 4096 && cargo nextest run -p fabro-acp --run-ignored all --no-fail-fast`;
+     `ulimit -n 4096 && cargo nextest run -p fabro-sandbox --run-ignored all --no-fail-fast`;
+     `ulimit -n 4096 && cargo nextest run -p fabro-workflow --run-ignored all --no-fail-fast`;
+     `ulimit -n 4096 && cargo nextest run -p fabro-validate --run-ignored all --no-fail-fast`;
+     `ulimit -n 4096 && cargo nextest run -p fabro-store --run-ignored all --no-fail-fast`;
+     `ulimit -n 4096 && cargo nextest run -p fabro-server --run-ignored all --no-fail-fast`;
+     `ulimit -n 4096 && cargo nextest run -p fabro-cli --run-ignored all --no-fail-fast`.
+    - Expected outcome: every suite passes without skipped tests or live provider credentials. Source of truth: accepted strategy final verification and implementation plan Task 10.
     - Interactions: all changed crates and user-visible workflow/server surfaces.
 
 30. **Workspace-wide build, formatting, and lint gates pass**
@@ -303,8 +303,8 @@ The accepted testing strategy still holds, with scoped additions from the implem
     - Disposition: existing
     - Harness: repository-wide Cargo/rustfmt/clippy commands.
     - Preconditions: targeted tests pass.
-    - Actions: run `cargo build --workspace`, `cargo +nightly-2026-04-14 fmt --check --all`, and `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.
-    - Expected outcome: build, formatting, and clippy all pass. Source of truth: repository `AGENTS.md` build/test commands.
+   - Actions: run `cargo build --workspace`, `ulimit -n 4096 && cargo nextest run --workspace --run-ignored all --no-fail-fast`, `cargo +nightly-2026-04-14 fmt --check --all`, and `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.
+    - Expected outcome: build, workspace tests, formatting, and clippy all pass with zero skipped tests. Source of truth: repository `AGENTS.md` build/test commands and the no-skipped-tests final-run requirement.
     - Interactions: full workspace dependency graph, feature flags, generated code boundaries.
 
 ## Coverage Summary

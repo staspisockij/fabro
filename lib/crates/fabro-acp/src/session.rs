@@ -41,6 +41,7 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
     let start = std::time::Instant::now();
     let state = TransportState::new();
     let cancel_token = request.cancel_token.clone();
+    let run_cancel_token = request.cancel_token.clone();
     let permission_cancel_token = request.cancel_token.clone();
     let prompt = request.prompt.clone();
     let cwd = request.cwd.clone();
@@ -95,6 +96,9 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
                 result
             } else {
                 state.terminate().await?;
+                if run_cancel_token.is_cancelled() {
+                    return Err(AcpError::Cancelled);
+                }
                 return Err(AcpError::TimedOut {
                     stderr: state.stderr_tail().await,
                 });
@@ -102,8 +106,19 @@ pub async fn run_acp_turn(request: AcpRunRequest) -> Result<AcpRunResult, AcpErr
         }
         None => run.await,
     };
-    let (text, stop_reason) = outcome.map_err(map_protocol_error)?;
+    let (text, stop_reason) = match outcome {
+        Ok(result) => result,
+        Err(_) if run_cancel_token.is_cancelled() => {
+            state.terminate().await?;
+            return Err(AcpError::Cancelled);
+        }
+        Err(error) => {
+            state.terminate().await?;
+            return Err(map_protocol_error(error));
+        }
+    };
 
+    state.terminate().await?;
     let stderr = state.stderr_tail().await;
     Ok(AcpRunResult {
         text,

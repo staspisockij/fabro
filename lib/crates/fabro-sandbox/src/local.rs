@@ -473,9 +473,7 @@ impl Sandbox for LocalSandbox {
 
         if let Some(extra) = env_vars {
             for (k, v) in extra {
-                if !Self::should_filter_env_var(k) {
-                    filtered_env.push((k.clone(), v.clone()));
-                }
+                filtered_env.push((k.clone(), v.clone()));
             }
         }
 
@@ -484,7 +482,7 @@ impl Sandbox for LocalSandbox {
 
         let mut cmd = Command::new("/bin/bash");
         cmd.arg("-lc")
-            .arg(command)
+            .arg(format!("exec {command}"))
             .current_dir(&effective_dir)
             .env_clear()
             .envs(filtered_env)
@@ -1015,6 +1013,30 @@ mod tests {
         assert_eq!(line.trim_end(), "cba");
 
         process.handle.terminate().await.unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn stdio_process_forwards_explicit_provider_credentials() {
+        let dir = temp_dir();
+        let sandbox = LocalSandbox::new(dir.clone());
+        let env = HashMap::from([("OPENAI_API_KEY".to_string(), "test-key".to_string())]);
+        let process = sandbox
+            .spawn_stdio_process(
+                "python3 -u -c 'import os; print(os.environ.get(\"OPENAI_API_KEY\", \"missing\"), flush=True)'",
+                None,
+                Some(&env),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut stdout = BufReader::new(process.stdout);
+        let mut line = String::new();
+        stdout.read_line(&mut line).await.unwrap();
+        assert_eq!(line.trim_end(), "test-key");
+
+        process.handle.wait().await.unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
