@@ -331,6 +331,7 @@ struct FabroRunEventsParams {
 - MCP initialize and tools/list must not require a live Fabro server. API connection is lazy and happens when a tool needs it.
 - There is no separate MCP authentication. Tool calls use the same `CommandContext` and `fabro-client` auth store behavior as existing CLI commands. Auth failures returned from tools must include the existing user guidance: `Run \`fabro auth login\` to authenticate.`
 - Tool failures are MCP tool errors, not process exits. The stdio server should stay alive after invalid arguments, not-found selectors, conflicts, auth failures, and API errors.
+- Tool-level argument validation that does not need server state must run before acquiring the lazy Fabro API client. Invalid local input such as empty run lists, too many run ids, malformed timestamps, missing required action fields, or unsupported answer JSON must report that validation error even when the CLI is not authenticated or the server is unavailable.
 - Every successful tool returns structured content and a concise text fallback. The text fallback is for clients that do not yet show MCP structured output. Do not return `rmcp::Json<T>` directly from successful tools, because its text content is the full JSON payload. Instead, build a `CallToolResult` with `structured_content: Some(...)` and a short `Content::text(...)` summary.
 - `rmcp 1.3` only accepts manually constructed `CallToolResult` values from tool handlers through `Result<CallToolResult, rmcp::ErrorData>`. Do not use `Result<CallToolResult, String>` in `#[tool]` methods; it does not satisfy `IntoCallToolResult`. Expected Fabro failures must be returned as `Ok(CallToolResult::error(...))` so they are MCP tool errors and the server stays alive. Reserve `Err(ErrorData)` for unexpected serialization/framework failures.
 - Run selectors must go through `Client::resolve_run(...)` to preserve existing Fabro prefix/workflow-name behavior.
@@ -345,6 +346,7 @@ struct FabroRunEventsParams {
 - **Default create to start:** Devin's session creation starts usable sessions. For Fabro, a run that stays submitted unless the caller remembers a second tool call is a surprising first-use experience. `start: false` keeps the lower-level control available without making it the default.
 - **Use five Devin-shaped tools instead of many tiny tools:** The user explicitly asked to adapt Devin sessions to Fabro runs. The five-tool shape is easier for MCP clients to discover and keeps later additions compatible. Internally, the Rust implementation should still split actions into small functions.
 - **Lazy API connection:** MCP clients often list tools during startup. Requiring auth/server connectivity during initialize would make even configuration validation brittle. Lazy connection gives users useful tool discovery and clear per-tool auth errors.
+- **Validate before connecting:** MCP clients often probe tools with incomplete or malformed payloads. Local validation must happen before API client acquisition so callers get actionable schema/argument errors instead of misleading auth or server availability failures.
 
 ## Task 1: Add CLI Surface And Help Snapshots
 
@@ -917,11 +919,15 @@ impl FabroMcpServer {
         &self,
         params: Parameters<run_tools::FabroRunCreateParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let params = match run_tools::ValidatedCreateRuns::try_from(params.0) {
+            Ok(params) => params,
+            Err(err) => return Ok(run_tools::error_result(err)),
+        };
         let client = match self.client().await {
             Ok(client) => client,
             Err(err) => return Ok(run_tools::error_result(err)),
         };
-        match run_tools::create_runs(client, &self.cwd, params.0).await {
+        match run_tools::create_runs(client, &self.cwd, params).await {
             Ok(result) => run_tools::success_result(&result, run_tools::create_runs_text(&result)),
             Err(err) => Ok(run_tools::error_result(err)),
         }
@@ -930,18 +936,22 @@ impl FabroMcpServer {
 
 ```
 
-Use this same handler shape for all five tools: acquire the lazy client, call
-the corresponding `run_tools` function, return successful values with
-`success_result(...)`, and convert expected Fabro/API/validation failures with
-`error_result(...)`.
+Use this same handler shape for all five tools: first normalize and validate
+the parameter object into a tool-specific `Validated...` type, then acquire the
+lazy client only after validation succeeds, call the corresponding `run_tools`
+function, return successful values with `success_result(...)`, and convert
+expected Fabro/API/validation failures with `error_result(...)`.
 
 `new(...)` should copy `ctx.cwd().to_path_buf()` into the `cwd` field before
 storing the context, so tool calls resolve relative workflows against the MCP
 process cwd captured at startup.
 
-Each placeholder in `run_tools.rs` should return `Err(ToolError::message("not implemented"))`
-until later tasks, except it must compile and be listed. Add a small
-crate-local tool error type:
+Each placeholder in `run_tools.rs` should still define the input structs,
+validated parameter structs, and `TryFrom<Params>` validation hooks for all five
+tools in this task. The run functions can return
+`Err(ToolError::message("not implemented"))` until later tasks, except the
+module must compile and tools must be listed. Add a small crate-local tool error
+type:
 
 ```rust
 #[derive(Debug)]
@@ -1084,13 +1094,14 @@ Add a test backed by an authenticated real Fabro server:
 async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
     let context = test_context!();
     let harness = RealAuthHarness::start_with_dev_token(fabro_test::GitHubAppState::default()).await;
-    let target: fabro_client::ServerTarget = harness.api_base_url.parse().unwrap();
+    let target_url = harness.api_target();
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
     seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
     let workflow = context.install_fixture("simple.fabro");
 
     let client = spawn_mcp_client(&context, &[
         "--server",
-        &harness.api_base_url,
+        &target_url,
     ]).await;
 
     let create = call_tool_json(&client, "fabro_run_create", serde_json::json!({
@@ -1345,7 +1356,7 @@ fabro_json_snapshot!(
 
 Add tests for:
 
-- `fabro_run_gather` rejects more than 50 run ids.
+- `fabro_run_gather` rejects more than 50 run ids without requiring auth or a reachable server. Start `fabro mcp start --server http://127.0.0.1:9` with no auth entry, call the tool, assert the error mentions `run_ids`, then call `tools/list` again to prove the server stayed alive.
 - `fabro_run_interact` action `message` without `message` returns an MCP tool error and the server remains alive for a subsequent `fabro_run_search`.
 - Missing auth against a protected remote target returns a tool error containing `Run \`fabro auth login\` to authenticate.`
 
