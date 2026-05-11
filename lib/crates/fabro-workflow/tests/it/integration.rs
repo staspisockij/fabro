@@ -10406,6 +10406,106 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     }
 }
 
+#[tokio::test]
+async fn backend_router_delegates_to_acp_for_acp_node() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let script_path = tempdir.path().join("fake_acp_agent.py");
+    tokio::fs::write(&script_path, fake_router_acp_agent_script())
+        .await
+        .unwrap();
+    let env: Arc<dyn fabro_agent::Sandbox> =
+        Arc::new(fabro_agent::LocalSandbox::new(tempdir.path().to_path_buf()));
+
+    let api_backend = Box::new(MockCodergenBackend);
+    let cli = AgentCliBackend::new_from_env("gpt-5.3-codex".into(), Provider::OpenAi)
+        .with_poll_interval(Duration::from_millis(10));
+    let router = BackendRouter::new(
+        api_backend,
+        cli,
+        AgentAcpBackend::new_from_env("fake-acp".into(), Provider::OpenAi),
+    );
+
+    let mut node = Node::new("acp_step");
+    node.attrs
+        .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+    node.attrs.insert(
+        "provider".to_string(),
+        AttrValue::String("openai".to_string()),
+    );
+    node.attrs.insert(
+        "model".to_string(),
+        AttrValue::String("fake-acp".to_string()),
+    );
+    node.attrs.insert(
+        "acp_command".to_string(),
+        AttrValue::String(format!(
+            "python3 {}",
+            fabro_agent::shell_quote(&script_path.to_string_lossy())
+        )),
+    );
+
+    let result = router
+        .run(
+            &node,
+            "Build it",
+            &Context::new(),
+            None,
+            &Arc::new(Emitter::default()),
+            &env,
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("router should succeed");
+
+    match result {
+        CodergenResult::Text { text, .. } => {
+            assert_eq!(
+                text, "ACP response",
+                "should route to ACP backend for backend=acp"
+            );
+        }
+        CodergenResult::Full(_) => panic!("expected Text result"),
+    }
+}
+
+fn fake_router_acp_agent_script() -> &'static str {
+    r#"
+import json
+import sys
+
+session_id = "sess-1"
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+def respond(message, result):
+    send({"jsonrpc": "2.0", "id": message["id"], "result": result})
+
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    if method == "initialize":
+        respond(message, {"protocolVersion": 1, "agentCapabilities": {}})
+    elif method == "session/new":
+        respond(message, {"sessionId": session_id})
+    elif method == "session/prompt":
+        send({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "ACP response"}
+                }
+            }
+        })
+        respond(message, {"stopReason": "end_turn"})
+        break
+"#
+}
+
 // -- Full pipeline e2e with BackendRouter --
 
 #[tokio::test]

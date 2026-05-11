@@ -690,6 +690,7 @@ mod tests {
     use tokio::sync::RwLock as AsyncRwLock;
 
     use super::*;
+    use crate::context::{Context, keys};
     use crate::event::StoreProgressLogger;
     use crate::pipeline::types::InitOptions;
     use crate::records::RunSpec;
@@ -1011,6 +1012,170 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initialize_executes_acp_backend_node_from_registry() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let script_path = temp.path().join("fake_acp_agent.py");
+        std::fs::write(&script_path, fake_acp_agent_script()).unwrap();
+
+        let source = format!(
+            r#"digraph test {{
+  start [shape=Mdiamond];
+  writer [type="agent", backend="acp", provider="openai", model="fake-acp", prompt="write hello", acp_command="python3 {}"];
+  exit [shape=Msquare];
+  start -> writer;
+  writer -> exit;
+}}"#,
+            script_path.display()
+        );
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        let mut writer = Node::new("writer");
+        writer
+            .attrs
+            .insert("type".to_string(), AttrValue::String("agent".to_string()));
+        writer
+            .attrs
+            .insert("backend".to_string(), AttrValue::String("acp".to_string()));
+        writer.attrs.insert(
+            "provider".to_string(),
+            AttrValue::String("openai".to_string()),
+        );
+        writer.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("fake-acp".to_string()),
+        );
+        writer.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("write hello".to_string()),
+        );
+        writer.attrs.insert(
+            "acp_command".to_string(),
+            AttrValue::String(format!(
+                "python3 {}",
+                fabro_sandbox::shell_quote(&script_path.to_string_lossy())
+            )),
+        );
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        graph.nodes.insert("writer".to_string(), writer);
+        graph.nodes.insert("exit".to_string(), exit);
+        graph.edges.push(Edge::new("start", "writer"));
+        graph.edges.push(Edge::new("writer", "exit"));
+
+        let mut vault = Vault::load(temp.path().join("secrets.json")).unwrap();
+        vault
+            .set(
+                "openai",
+                &serde_json::to_string(&AuthCredential {
+                    provider: fabro_llm::Provider::OpenAi,
+                    details:  AuthDetails::ApiKey {
+                        key: "openai-key".to_string(),
+                    },
+                })
+                .unwrap(),
+                SecretType::Credential,
+                None,
+            )
+            .unwrap();
+        let vault = Arc::new(AsyncRwLock::new(vault));
+
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.event_name().to_string())
+        });
+        let store = memory_store();
+        let run_store = store.create_run(&test_run_id()).await.unwrap();
+        let initialized = initialize(test_persisted(graph, source, &run_dir), InitOptions {
+            run_id:            test_run_id(),
+            run_store:         run_store.into(),
+            dry_run:           false,
+            emitter:           emitter.clone(),
+            sandbox:           SandboxSpec::Local {
+                working_directory: temp.path().to_path_buf(),
+            },
+            llm:               LlmSpec {
+                model:          "fake-acp".to_string(),
+                provider:       fabro_llm::Provider::OpenAi,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        false,
+            },
+            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(emitter)),
+            lifecycle:         crate::run_options::LifecycleOptions {
+                setup_commands:           Vec::new(),
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases:      Vec::new(),
+            },
+            run_options:       test_settings(&run_dir),
+            workflow_path:     None,
+            workflow_bundle:   None,
+            hooks:             fabro_hooks::HookSettings { hooks: vec![] },
+            sandbox_env:       SandboxEnvSpec {
+                devcontainer_env:   HashMap::new(),
+                toml_env:           HashMap::new(),
+                github_permissions: None,
+                origin_url:         None,
+            },
+            vault:             Some(vault),
+            devcontainer:      None,
+            git:               None,
+            run_control:       None,
+            registry_override: None,
+            artifact_sink:     None,
+            checkpoint:        None,
+            seed_context:      None,
+        })
+        .await
+        .unwrap();
+
+        let node = initialized.graph.nodes.get("writer").unwrap().clone();
+        let handler = initialized.engine.registry.resolve(&node);
+        let context = Context::new();
+        context.set(
+            keys::INTERNAL_RUN_ID,
+            serde_json::json!(test_run_id().to_string()),
+        );
+        let outcome = handler
+            .execute(
+                &node,
+                &context,
+                &initialized.graph,
+                &initialized.run_options.run_dir,
+                &initialized.engine,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.context_updates.get(&keys::response_key("writer")),
+            Some(&serde_json::json!("hello from initialized acp"))
+        );
+        assert!(
+            seen.lock()
+                .unwrap()
+                .contains(&"agent.acp.started".to_string())
+        );
+        assert!(
+            seen.lock()
+                .unwrap()
+                .contains(&"agent.acp.completed".to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn initialize_runs_setup_commands() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
@@ -1080,6 +1245,43 @@ mod tests {
                 .iter()
                 .any(|event| event == "sandbox.initialized")
         );
+    }
+
+    fn fake_acp_agent_script() -> &'static str {
+        r#"
+import json
+import sys
+
+session_id = "sess-1"
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+def respond(message, result):
+    send({"jsonrpc": "2.0", "id": message["id"], "result": result})
+
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    if method == "initialize":
+        respond(message, {"protocolVersion": 1, "agentCapabilities": {}})
+    elif method == "session/new":
+        respond(message, {"sessionId": session_id})
+    elif method == "session/prompt":
+        send({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "hello from initialized acp"}
+                }
+            }
+        })
+        respond(message, {"stopReason": "end_turn"})
+        break
+"#
     }
 
     #[tokio::test]
