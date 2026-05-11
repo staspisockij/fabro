@@ -401,14 +401,117 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KRCAQ9AS14KFCW4CXBZQ0CW9",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-11T20:12:58.168105Z",
+    "run_branch": "fabro/run/01KRCAQ9AS14KFCW4CXBZQ0CW9",
+    "base_sha": "55ff3d0601874e7319a150be8e6969baa3f6a4f5"
   },
-  "status_updated_at": "2026-05-11T20:12:42.755016Z",
-  "last_event_at": "2026-05-11T20:12:57.584683Z",
+  "status": {
+    "kind": "blocked",
+    "blocked_reason": "human_input_required"
+  },
+  "status_updated_at": "2026-05-11T20:13:01.105079Z",
+  "last_event_at": "2026-05-11T20:13:01.105079Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-11T20:13:01.104888Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_signature": "",
+          "internal.work_dir": "/home/daytona/workspace",
+          "outcome": "succeeded",
+          "internal.node_visit_count": 1,
+          "graph.rankdir": "LR",
+          "graph.goal": "codex answer repro bool_true",
+          "current_node": "start",
+          "failure_class": "",
+          "internal.run_id": "01KRCAQ9AS14KFCW4CXBZQ0CW9",
+          "internal.thread_id": null,
+          "internal.retry_count.start": 0,
+          "internal.fidelity": "compact"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "yes_no",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-11T20:13:47.731479Z",
+        "current_node": "yes_no",
+        "completed_nodes": [
+          "start",
+          "yes_no"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "thread.start.current_node": "yes_no",
+          "graph.goal": "codex answer repro bool_true",
+          "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?",
+          "internal.thread_id": "start",
+          "internal.run_id": "01KRCAQ9AS14KFCW4CXBZQ0CW9",
+          "human.gate.label": "[Y] Yes",
+          "human.gate.yes_no.label": "[Y] Yes",
+          "current_node": "yes_no",
+          "internal.retry_count.yes_no": 0,
+          "graph.rankdir": "LR",
+          "preferred_label": "[Y] Yes",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.start": 0,
+          "internal.fidelity": "compact",
+          "outcome": "succeeded",
+          "human.gate.yes_no.answer": "yes",
+          "human.gate.selected": "Y",
+          "failure_signature": "",
+          "failure_class": "",
+          "internal.work_dir": "/home/daytona/workspace"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "yes_no": {
+            "status": "succeeded",
+            "preferred_label": "[Y] Yes",
+            "suggested_next_ids": [
+              "confirmation"
+            ],
+            "context_updates": {
+              "human.gate.selected": "Y",
+              "human.gate.yes_no.answer": "yes",
+              "human.gate.label": "[Y] Yes",
+              "human.gate.yes_no.label": "[Y] Yes",
+              "human.gate.yes_no.question": "Is this interview workflow easy to follow so far?"
+            },
+            "usage": null
+          }
+        },
+        "next_node_id": "confirmation",
+        "node_visits": {
+          "start": 1,
+          "yes_no": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -424,6 +527,80 @@
   },
   "pull_request": null,
   "superseded_by": null,
-  "pending_interviews": {},
-  "stages": {}
+  "pending_interviews": {
+    "01KRCAQV9H6JMNVE60BZ89BDNH": {
+      "question": {
+        "id": "01KRCAQV9H6JMNVE60BZ89BDNH",
+        "text": "Is this interview workflow easy to follow so far?",
+        "stage": "yes_no",
+        "question_type": "yes_no",
+        "options": [
+          {
+            "key": "Y",
+            "label": "[Y] Yes"
+          },
+          {
+            "key": "N",
+            "label": "[N] No"
+          }
+        ],
+        "allow_freeform": false
+      },
+      "started_at": "2026-05-11T20:13:01.105055Z"
+    }
+  },
+  "stages": {
+    "yes_no@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T20:13:01.105002Z",
+      "handler": "human",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    },
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-11T20:13:01.104709Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T20:13:01.104219Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    }
+  }
 }
