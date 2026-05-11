@@ -2031,6 +2031,7 @@ dependencies = [
  "fabro-client",
  "fabro-http",
  "fabro-types",
+ "fabro-util",
  "rmcp",
  "schemars 1.2.1",
  "serde",

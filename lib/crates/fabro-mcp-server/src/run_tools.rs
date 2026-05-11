@@ -6,17 +6,18 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, NaiveDate, Utc};
 use fabro_api::types;
 use fabro_client::Client;
-use fabro_types::{Run, RunId, RunStatus};
+use fabro_types::{EventEnvelope, Run, RunId, RunStatus};
+use fabro_util::exit::{self, ExitClass};
 use rmcp::model::{CallToolResult, Content};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use tokio::fs;
-use tokio::task::yield_now;
+use serde_json::{Value, json};
+use tokio::{fs, time};
 
 #[derive(Debug)]
 pub(crate) struct ToolError {
@@ -154,7 +155,7 @@ pub(crate) struct RunSummaryResult {
     pub(crate) goal:             String,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RunInteractAction {
     Get,
@@ -252,7 +253,7 @@ pub(crate) struct GatherRunsResult {
     pub(crate) elapsed_seconds: u64,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RunEventsAction {
     List,
@@ -293,6 +294,17 @@ impl TryFrom<FabroRunEventsParams> for ValidatedRunEvents {
         let first = params.first.or(params.limit).unwrap_or(50);
         if first > 200 {
             return Err(ToolError::message("first must be <= 200"));
+        }
+        if let Some(direction) = params.direction.as_deref() {
+            if !matches!(direction, "asc" | "desc") {
+                return Err(ToolError::message("direction must be `asc` or `desc`"));
+            }
+        }
+        if let Some(created_after) = params.created_after.as_deref() {
+            parse_datetime_filter("created_after", created_after)?;
+        }
+        if let Some(created_before) = params.created_before.as_deref() {
+            parse_datetime_filter("created_before", created_before)?;
         }
         Ok(Self { raw: params })
     }
@@ -417,33 +429,169 @@ pub(crate) async fn search_runs(
 }
 
 pub(crate) async fn interact_run(
-    _client: Arc<Client>,
-    _params: ValidatedInteractRun,
+    client: Arc<Client>,
+    params: ValidatedInteractRun,
 ) -> ToolResult<InteractRunResult> {
-    yield_now().await;
-    Err(ToolError::message(
-        "fabro_run_interact is not implemented yet",
-    ))
+    let raw = params.raw;
+    let run_id = client
+        .resolve_run(&raw.run_id)
+        .await
+        .map_err(|err| ToolError::from_anyhow(&err))?
+        .id;
+    let result = match raw.action {
+        RunInteractAction::Get => interact_get(&client, &run_id).await?,
+        RunInteractAction::Start => {
+            client
+                .start_run(&run_id, false)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "summary": run_summary_result(&retrieve_run(&client, &run_id).await?) })
+        }
+        RunInteractAction::Message => {
+            let message = raw
+                .message
+                .expect("validated message action has a message")
+                .trim()
+                .to_string();
+            client
+                .steer_run(&run_id, message.clone(), raw.interrupt.unwrap_or(false))
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "message": message, "interrupt": raw.interrupt.unwrap_or(false) })
+        }
+        RunInteractAction::Cancel => {
+            client
+                .cancel_run(&run_id)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "summary": run_summary_result(&retrieve_run(&client, &run_id).await?) })
+        }
+        RunInteractAction::Archive => {
+            client
+                .archive_run(&run_id)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "summary": run_summary_result(&retrieve_run(&client, &run_id).await?) })
+        }
+        RunInteractAction::Unarchive => {
+            client
+                .unarchive_run(&run_id)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "summary": run_summary_result(&retrieve_run(&client, &run_id).await?) })
+        }
+        RunInteractAction::GetQuestions => {
+            let questions = client
+                .list_run_questions(&run_id)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "questions": questions })
+        }
+        RunInteractAction::Answer => {
+            let question_id = raw
+                .question_id
+                .expect("validated answer action has a question_id");
+            let body = answer_to_submit_request(
+                raw.answer.expect("validated answer action has an answer"),
+            )?;
+            client
+                .submit_run_answer(&run_id, &question_id, body)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?;
+            json!({ "question_id": question_id, "submitted": true })
+        }
+    };
+
+    Ok(InteractRunResult {
+        run_id: run_id.to_string(),
+        action: raw.action,
+        result,
+    })
 }
 
 pub(crate) async fn gather_runs(
-    _client: Arc<Client>,
-    _params: ValidatedGatherRuns,
+    client: Arc<Client>,
+    params: ValidatedGatherRuns,
 ) -> ToolResult<GatherRunsResult> {
-    yield_now().await;
-    Err(ToolError::message(
-        "fabro_run_gather is not implemented yet",
-    ))
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(params.timeout_seconds);
+    let mut run_ids = Vec::with_capacity(params.run_ids.len());
+    for selector in params.run_ids {
+        run_ids.push(
+            client
+                .resolve_run(&selector)
+                .await
+                .map_err(|err| ToolError::from_anyhow(&err))?
+                .id,
+        );
+    }
+
+    loop {
+        let mut summaries = Vec::with_capacity(run_ids.len());
+        for run_id in &run_ids {
+            summaries.push(retrieve_run(&client, run_id).await?);
+        }
+        if summaries
+            .iter()
+            .all(|run| run.lifecycle.status.is_terminal())
+        {
+            return Ok(GatherRunsResult {
+                runs:            summaries.iter().map(run_summary_result).collect(),
+                timed_out:       false,
+                elapsed_seconds: start.elapsed().as_secs(),
+            });
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Ok(GatherRunsResult {
+                runs:            summaries.iter().map(run_summary_result).collect(),
+                timed_out:       true,
+                elapsed_seconds: start.elapsed().as_secs(),
+            });
+        }
+        let sleep_for = Duration::from_secs(params.poll_interval_seconds).min(deadline - now);
+        time::sleep(sleep_for).await;
+    }
 }
 
 pub(crate) async fn run_events(
-    _client: Arc<Client>,
-    _params: ValidatedRunEvents,
+    client: Arc<Client>,
+    params: ValidatedRunEvents,
 ) -> ToolResult<RunEventsResult> {
-    yield_now().await;
-    Err(ToolError::message(
-        "fabro_run_events is not implemented yet",
-    ))
+    let raw = params.raw;
+    let run_id = client
+        .resolve_run(&raw.run_id)
+        .await
+        .map_err(|err| ToolError::from_anyhow(&err))?
+        .id;
+    let mut events = client
+        .list_run_events(&run_id, raw.after, Some(event_fetch_limit(&raw)))
+        .await
+        .map_err(|err| ToolError::from_anyhow(&err))?;
+    filter_events(&mut events, &raw)?;
+    if raw.direction.as_deref() == Some("desc") {
+        events.reverse();
+    }
+    let offset = raw.offset.unwrap_or(0);
+    let first = raw.first.or(raw.limit).unwrap_or(50).min(200);
+    let page = events
+        .into_iter()
+        .skip(offset)
+        .take(first)
+        .collect::<Vec<_>>();
+    let max_content_length = raw.max_content_length.unwrap_or(20_000);
+    let results = page
+        .iter()
+        .map(|event| run_event_result(event, max_content_length))
+        .collect::<ToolResult<Vec<_>>>()?;
+    let next_cursor = page.last().map(|event| event.seq.saturating_add(1));
+
+    Ok(RunEventsResult {
+        run_id: run_id.to_string(),
+        action: raw.action,
+        events: results,
+        next_cursor,
+    })
 }
 
 pub(crate) fn success_result<T: Serialize>(
@@ -511,7 +659,131 @@ fn validate_len(name: &str, len: usize, min: usize, max: usize) -> ToolResult<()
 }
 
 fn format_tool_error(err: &anyhow::Error) -> String {
-    format!("{err:#}")
+    let mut rendered = format!("{err:#}");
+    if exit::exit_class_for(err) == Some(ExitClass::AuthRequired)
+        && !rendered.contains("fabro auth login")
+    {
+        rendered.push_str("\nRun `fabro auth login` to authenticate.");
+    }
+    rendered
+}
+
+async fn retrieve_run(client: &Client, run_id: &RunId) -> ToolResult<Run> {
+    client
+        .retrieve_run(run_id)
+        .await
+        .map_err(|err| ToolError::from_anyhow(&err))
+}
+
+async fn interact_get(client: &Client, run_id: &RunId) -> ToolResult<Value> {
+    let summary = retrieve_run(client, run_id).await?;
+    let projection = client
+        .get_run_state(run_id)
+        .await
+        .map_err(|err| ToolError::from_anyhow(&err))?;
+    Ok(json!({
+        "summary": run_summary_result(&summary),
+        "projection": projection,
+    }))
+}
+
+fn answer_to_submit_request(answer: Value) -> ToolResult<types::SubmitAnswerRequest> {
+    let payload = match answer {
+        Value::Bool(true) => json!({ "kind": "yes" }),
+        Value::Bool(false) => json!({ "kind": "no" }),
+        Value::String(text) => json!({ "kind": "text", "text": text }),
+        Value::Object(mut object) => {
+            if let Some(option) = object.remove("option") {
+                json!({ "kind": "selected", "option_key": option })
+            } else if let Some(options) = object.remove("options") {
+                json!({ "kind": "multi_selected", "option_keys": options })
+            } else if let Some(text) = object.remove("text") {
+                json!({ "kind": "text", "text": text })
+            } else {
+                return Err(ToolError::message(
+                    "answer object must contain one of: option, options, text",
+                ));
+            }
+        }
+        other => {
+            return Err(ToolError::message(format!(
+                "unsupported answer value: {other}; expected boolean, string, or object",
+            )));
+        }
+    };
+    serde_json::from_value(payload)
+        .map_err(|err| ToolError::message(format!("failed to build submit-answer request: {err}")))
+}
+
+fn event_fetch_limit(params: &FabroRunEventsParams) -> usize {
+    params
+        .first
+        .or(params.limit)
+        .unwrap_or(50)
+        .saturating_add(params.offset.unwrap_or(0))
+        .clamp(1, 200)
+}
+
+fn filter_events(events: &mut Vec<EventEnvelope>, params: &FabroRunEventsParams) -> ToolResult<()> {
+    if let Some(event_ids) = params.event_ids.as_ref() {
+        events.retain(|event| event_ids.contains(&event.event.id));
+    }
+    if let Some(event_types) = params.event_types.as_ref() {
+        events.retain(|event| {
+            event_types
+                .iter()
+                .any(|event_type| event_type == event.event.event_name())
+        });
+    }
+    if let Some(categories) = params.categories.as_ref() {
+        events.retain(|event| {
+            let category = event
+                .event
+                .event_name()
+                .split('.')
+                .next()
+                .unwrap_or_default();
+            categories.iter().any(|candidate| candidate == category)
+        });
+    }
+    if let Some(created_after) = params.created_after.as_deref() {
+        let cutoff = parse_datetime_filter("created_after", created_after)?;
+        events.retain(|event| event.event.ts >= cutoff);
+    }
+    if let Some(created_before) = params.created_before.as_deref() {
+        let cutoff = parse_datetime_filter("created_before", created_before)?;
+        events.retain(|event| event.event.ts <= cutoff);
+    }
+    if matches!(params.action, RunEventsAction::Search) {
+        if let Some(query) = params.query.as_deref() {
+            events.retain(|event| {
+                serde_json::to_string(event).is_ok_and(|serialized| serialized.contains(query))
+            });
+        }
+    }
+    Ok(())
+}
+
+fn run_event_result(
+    event: &EventEnvelope,
+    max_content_length: usize,
+) -> ToolResult<RunEventResult> {
+    let mut serialized = serde_json::to_string(event)
+        .map_err(|err| ToolError::message(format!("failed to serialize event: {err}")))?;
+    let truncated = serialized.len() > max_content_length;
+    let event_value = if truncated {
+        serialized.truncate(max_content_length);
+        Value::String(serialized)
+    } else {
+        serde_json::to_value(event)
+            .map_err(|err| ToolError::message(format!("failed to serialize event: {err}")))?
+    };
+    Ok(RunEventResult {
+        event_id: event.event.id.clone(),
+        sequence: event.seq,
+        event: event_value,
+        truncated,
+    })
 }
 
 async fn build_run_manifest(spec: &CreateRunSpec, cwd: &Path) -> ToolResult<types::RunManifest> {
@@ -747,5 +1019,38 @@ mod tests {
 
         assert!(err.as_str().contains("goal"));
         assert!(err.as_str().contains("null"));
+    }
+
+    #[test]
+    fn answer_payloads_map_to_submit_answer_wire_json() {
+        let cases = [
+            (json!(true), json!({ "kind": "yes" })),
+            (json!(false), json!({ "kind": "no" })),
+            (json!("hello"), json!({ "kind": "text", "text": "hello" })),
+            (
+                json!({ "option": "a" }),
+                json!({ "kind": "selected", "option_key": "a" }),
+            ),
+            (
+                json!({ "options": ["a", "b"] }),
+                json!({ "kind": "multi_selected", "option_keys": ["a", "b"] }),
+            ),
+            (
+                json!({ "text": "hello" }),
+                json!({ "kind": "text", "text": "hello" }),
+            ),
+        ];
+
+        for (answer, expected) in cases {
+            let request = answer_to_submit_request(answer).unwrap();
+            assert_eq!(serde_json::to_value(request).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn unsupported_answer_object_is_rejected() {
+        let err = answer_to_submit_request(json!({ "value": "yes" })).unwrap_err();
+
+        assert!(err.as_str().contains("option, options, text"));
     }
 }

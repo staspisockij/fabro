@@ -484,6 +484,204 @@ async fn mcp_create_and_search_manage_real_runs_with_cli_auth() {
     harness.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_lifecycle_tools_manage_real_run() {
+    let context = test_context!();
+    let harness =
+        RealAuthHarness::start_with_dev_token(fabro_test::GitHubAppState::default()).await;
+    let target_url = harness.api_target();
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
+    seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
+    let workflow = context.install_fixture("simple.fabro");
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+    let run_id = create_mcp_run(&client, workflow, true).await;
+    let cancel = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": run_id, "action": "cancel" }),
+    )
+    .await;
+
+    let gather = call_tool_json(
+        &client,
+        "fabro_run_gather",
+        serde_json::json!({
+            "run_ids": [run_id],
+            "timeout_seconds": 20,
+            "poll_interval_seconds": 5
+        }),
+    )
+    .await;
+    let run_id = gather["runs"][0]["run_id"].as_str().unwrap().to_string();
+    let get = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": run_id, "action": "get" }),
+    )
+    .await;
+    let events = call_tool_json(
+        &client,
+        "fabro_run_events",
+        serde_json::json!({ "run_id": run_id, "action": "list", "first": 5 }),
+    )
+    .await;
+    let archive = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": run_id, "action": "archive" }),
+    )
+    .await;
+    let unarchive = call_tool_json(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": run_id, "action": "unarchive" }),
+    )
+    .await;
+    let search = call_tool_json(
+        &client,
+        "fabro_run_search",
+        serde_json::json!({ "run_ids": [run_id], "archived": false }),
+    )
+    .await;
+
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "gather": normalize_gather(gather),
+            "cancel_action": cancel["action"],
+            "get_status": get["result"]["summary"]["status"],
+            "events_nonempty": events["events"].as_array().is_some_and(|events| !events.is_empty()),
+            "archive_action": archive["action"],
+            "unarchive_action": unarchive["action"],
+            "unarchived_search_count": search["runs"].as_array().unwrap().len(),
+        }),
+        @r#"
+    {
+      "gather": {
+        "runs": [
+          {
+            "run_id": "[RUN_ID]",
+            "workflow_name": "Simple",
+            "workflow_slug": "simple",
+            "status": "failed",
+            "archived": false,
+            "created_at": "[TIMESTAMP]",
+            "started_at": null,
+            "completed_at": "[TIMESTAMP]",
+            "labels": {
+              "source": "mcp-test"
+            },
+            "source_directory": "[SOURCE_DIRECTORY]",
+            "repo_origin_url": null,
+            "goal": "Run the Fabro workflow."
+          }
+        ],
+        "timed_out": false,
+        "elapsed_seconds": "[ELAPSED]"
+      },
+      "cancel_action": "cancel",
+      "get_status": "failed",
+      "events_nonempty": true,
+      "archive_action": "archive",
+      "unarchive_action": "unarchive",
+      "unarchived_search_count": 1
+    }
+    "#
+    );
+
+    harness.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_gather_rejects_too_many_runs() {
+    let context = test_context!();
+    let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
+    let run_ids = (0..51)
+        .map(|index| format!("run_{index}"))
+        .collect::<Vec<_>>();
+
+    let error = call_tool_error_text(
+        &client,
+        "fabro_run_gather",
+        serde_json::json!({ "run_ids": run_ids }),
+    )
+    .await;
+
+    assert!(error.contains("run_ids"), "{error}");
+    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_gather_returns_timeout_result() {
+    let context = test_context!();
+    let harness =
+        RealAuthHarness::start_with_dev_token(fabro_test::GitHubAppState::default()).await;
+    let target_url = harness.api_target();
+    let target: fabro_client::ServerTarget = target_url.parse().unwrap();
+    seed_dev_token_auth(&context.home_dir, &target, TEST_DEV_TOKEN);
+    let workflow = context.install_fixture("simple.fabro");
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+    let run_id = create_mcp_run(&client, workflow, false).await;
+
+    let start = std::time::Instant::now();
+    let gather = call_tool_json(
+        &client,
+        "fabro_run_gather",
+        serde_json::json!({
+            "run_ids": [run_id],
+            "timeout_seconds": 1,
+            "poll_interval_seconds": 5
+        }),
+    )
+    .await;
+
+    assert_eq!(gather["timed_out"], true);
+    assert!(start.elapsed() < std::time::Duration::from_secs(4));
+    assert_eq!(gather["runs"][0]["status"], "submitted");
+
+    harness.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_interact_error_does_not_stop_server() {
+    let context = test_context!();
+    let client = spawn_mcp_client(&context, &["--server", "http://127.0.0.1:9"]).await;
+
+    let error = call_tool_error_text(
+        &client,
+        "fabro_run_interact",
+        serde_json::json!({ "run_id": "run_123", "action": "message" }),
+    )
+    .await;
+
+    assert!(error.contains("message"), "{error}");
+    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_tool_auth_error_mentions_login() {
+    let context = test_context!();
+    let harness =
+        RealAuthHarness::start_with_dev_token(fabro_test::GitHubAppState::default()).await;
+    let target_url = harness.api_target();
+    let client = spawn_mcp_client(&context, &["--server", &target_url]).await;
+
+    let error = call_tool_error_text(
+        &client,
+        "fabro_run_search",
+        serde_json::json!({ "first": 1 }),
+    )
+    .await;
+
+    assert!(
+        error.contains("Run `fabro auth login` to authenticate."),
+        "{error}"
+    );
+    assert_eq!(client.list_tools().await.unwrap().len(), 5);
+
+    harness.shutdown().await;
+}
+
 fn expected_claude_config_path(home_dir: &Path) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -582,7 +780,66 @@ async fn call_tool_json(
         .expect("tool result should include structured content")
 }
 
+async fn call_tool_error_text(
+    client: &McpClient,
+    name: &str,
+    arguments: serde_json::Value,
+) -> String {
+    let result = client
+        .call_tool(name, arguments, std::time::Duration::from_secs(30))
+        .await
+        .expect("tool call should complete");
+    assert_eq!(result.is_error, Some(true), "tool should return error");
+    result
+        .content
+        .first()
+        .and_then(|content| serde_json::to_value(content).ok())
+        .and_then(|content| content["text"].as_str().map(ToOwned::to_owned))
+        .expect("tool error should include text")
+}
+
+async fn create_mcp_run(client: &McpClient, workflow: PathBuf, start: bool) -> String {
+    let create = call_tool_json(
+        client,
+        "fabro_run_create",
+        serde_json::json!({
+            "runs": [{
+                "workflow": workflow,
+                "dry_run": true,
+                "auto_approve": true,
+                "labels": { "source": "mcp-test" },
+                "start": start
+            }]
+        }),
+    )
+    .await;
+    create["runs"][0]["run_id"]
+        .as_str()
+        .expect("create result should include run id")
+        .to_string()
+}
+
 fn normalize_run_search(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(runs) = value["runs"].as_array_mut() {
+        for run in runs {
+            run["run_id"] = serde_json::json!("[RUN_ID]");
+            run["created_at"] = serde_json::json!("[TIMESTAMP]");
+            if run["started_at"].is_string() {
+                run["started_at"] = serde_json::json!("[TIMESTAMP]");
+            }
+            if run["completed_at"].is_string() {
+                run["completed_at"] = serde_json::json!("[TIMESTAMP]");
+            }
+            if run["source_directory"].is_string() {
+                run["source_directory"] = serde_json::json!("[SOURCE_DIRECTORY]");
+            }
+        }
+    }
+    value
+}
+
+fn normalize_gather(mut value: serde_json::Value) -> serde_json::Value {
+    value["elapsed_seconds"] = serde_json::json!("[ELAPSED]");
     if let Some(runs) = value["runs"].as_array_mut() {
         for run in runs {
             run["run_id"] = serde_json::json!("[RUN_ID]");
