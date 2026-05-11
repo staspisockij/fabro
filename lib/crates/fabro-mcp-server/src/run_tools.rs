@@ -918,7 +918,7 @@ fn mcp_manifest_args(spec: &CreateRunSpec) -> Option<types::ManifestArgs> {
         sandbox: spec.sandbox.clone(),
         verbose: None,
     };
-    (!mcp_manifest_args_is_empty(&payload)).then_some(payload)
+    (!fabro_manifest::manifest_args_is_empty(&payload)).then_some(payload)
 }
 
 fn mcp_run_overrides(spec: &CreateRunSpec) -> Option<RunLayer> {
@@ -932,19 +932,6 @@ fn mcp_run_overrides(spec: &CreateRunSpec) -> Option<RunLayer> {
         auto_approve:     spec.auto_approve,
         labels:           spec.labels.clone(),
     })
-}
-
-fn mcp_manifest_args_is_empty(args: &types::ManifestArgs) -> bool {
-    args.auto_approve.is_none()
-        && args.docker_image.is_none()
-        && args.dry_run.is_none()
-        && args.input.is_empty()
-        && args.label.is_empty()
-        && args.model.is_none()
-        && args.preserve_sandbox.is_none()
-        && args.provider.is_none()
-        && args.sandbox.is_none()
-        && args.verbose.is_none()
 }
 
 fn json_to_toml_value(key: &str, value: &Value) -> ToolResult<toml::Value> {
