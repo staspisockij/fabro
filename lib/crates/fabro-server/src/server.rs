@@ -1595,28 +1595,29 @@ async fn delete_run_internal(
     } else {
         None
     };
+    let durable_status = if managed_run.is_some() {
+        load_durable_run_status(state.as_ref(), &id).await
+    } else {
+        None
+    };
+    let should_signal_cancel = !durable_status.is_some_and(RunStatus::is_terminal);
 
     if let Some(managed_run) = managed_run.as_mut() {
-        if let Some(token) = &managed_run.cancel_token {
-            token.cancel();
-        }
-        if let Some(answer_transport) = managed_run.answer_transport.clone() {
-            let _ = answer_transport.cancel_run().await;
-        }
-        if let Some(cancel_tx) = managed_run.cancel_tx.take() {
-            let _ = cancel_tx.send(());
+        if should_signal_cancel {
+            if let Some(token) = &managed_run.cancel_token {
+                token.cancel();
+            }
+            if let Some(answer_transport) = managed_run.answer_transport.clone() {
+                let _ = answer_transport.cancel_run().await;
+            }
+            if let Some(cancel_tx) = managed_run.cancel_tx.take() {
+                let _ = cancel_tx.send(());
+            }
         }
         // Terminal runs can still carry a stale worker PID briefly after their
         // completion events land, so avoid paying the full cancellation grace.
-        let delete_grace = if matches!(
-            managed_run.status,
-            RunStatus::Submitted
-                | RunStatus::Queued
-                | RunStatus::Starting
-                | RunStatus::Running
-                | RunStatus::Blocked { .. }
-                | RunStatus::Paused { .. }
-        ) {
+        let delete_grace = if should_signal_cancel && managed_run.status.requires_force_to_delete()
+        {
             WORKER_CANCEL_GRACE
         } else {
             TERMINAL_DELETE_WORKER_GRACE
@@ -1656,6 +1657,12 @@ async fn delete_run_internal(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         })?;
     Ok(delete_outcome)
+}
+
+async fn load_durable_run_status(state: &AppState, id: &RunId) -> Option<RunStatus> {
+    let run_store = state.store.open_run(id).await.ok()?;
+    let projection = run_store.state().await.ok()?;
+    Some(projection.status)
 }
 
 async fn delete_run_sandbox_resource(
@@ -2178,6 +2185,11 @@ async fn shutdown_active_workers_with_grace(
 
 async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
     let run_store = state.store.open_run(&run_id).await?;
+    let run_state = run_store.state().await?;
+    if run_state.status.is_terminal() {
+        return Ok(());
+    }
+
     workflow_event::append_event(
         &run_store,
         &run_id,

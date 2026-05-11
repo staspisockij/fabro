@@ -2298,6 +2298,86 @@ async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id
     .unwrap();
 }
 
+#[tokio::test]
+async fn persist_cancelled_run_status_ignores_already_terminal_runs() {
+    let state = test_app_state();
+    let run_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1000,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    persist_cancelled_run_status(state.as_ref(), run_id)
+        .await
+        .unwrap();
+
+    let run_store = state.store.open_run(&run_id).await.unwrap();
+    let projection = run_store.state().await.unwrap();
+    assert_eq!(projection.status, RunStatus::Succeeded {
+        reason: SuccessReason::Completed,
+    });
+    assert!(!run_store.list_events().await.unwrap().iter().any(|event| {
+        matches!(
+            event.event.body,
+            EventBody::RunFailed(ref props) if props.reason == FailureReason::Cancelled
+        )
+    }));
+}
+
+#[tokio::test]
+async fn delete_terminal_managed_run_does_not_send_cancel_signal() {
+    let state = test_app_state();
+    let run_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::WorkflowRunCompleted {
+            duration_ms:          1000,
+            artifact_count:       0,
+            status:               "succeeded".to_string(),
+            reason:               SuccessReason::Completed,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          None,
+            diff_summary:         None,
+            billing:              None,
+        },
+    ])
+    .await;
+
+    let temp = tempfile::tempdir().unwrap();
+    let run_dir = temp.path().join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let cancel_token = CancellationToken::new();
+    let mut run = managed_run(
+        MINIMAL_DOT.to_string(),
+        RunStatus::Running,
+        Utc::now(),
+        run_dir,
+        RunExecutionMode::Start,
+    );
+    run.cancel_token = Some(cancel_token.clone());
+    let (cancel_tx, _cancel_rx) = oneshot::channel();
+    run.cancel_tx = Some(cancel_tx);
+    state
+        .runs
+        .lock()
+        .expect("runs lock poisoned")
+        .insert(run_id, run);
+
+    delete_run_internal(&state, run_id, true).await.unwrap();
+
+    assert!(!cancel_token.is_cancelled());
+}
+
 /// Append a stage lifecycle event with an explicit `StageScope`, so the
 /// stored envelope carries the full `stage_id` (`node_id@visit`). The bare
 /// [`workflow_event::append_event`] helper only writes `node_id` because
