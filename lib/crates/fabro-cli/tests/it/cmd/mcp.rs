@@ -1,0 +1,112 @@
+use fabro_test::{fabro_snapshot, test_context};
+
+#[test]
+fn help() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["mcp", "--help"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Model Context Protocol server
+
+    Usage: fabro mcp [OPTIONS] <COMMAND>
+
+    Commands:
+      start   Start the Fabro MCP server over stdio
+      config  Print MCP client configuration JSON
+      init    Configure an MCP client to launch Fabro
+      help    Print this message or the help of the given subcommand(s)
+
+    Options:
+          --json              Output as JSON [env: FABRO_JSON=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
+    ----- stderr -----
+    ");
+}
+
+#[test]
+fn start_help() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["mcp", "start", "--help"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Start the Fabro MCP server over stdio
+
+    Usage: fabro mcp start [OPTIONS]
+
+    Options:
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help                       Print help
+    ----- stderr -----
+    ");
+}
+
+#[test]
+fn config_help() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["mcp", "config", "--help"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Print MCP client configuration JSON
+
+    Usage: fabro mcp config [OPTIONS]
+
+    Options:
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help                       Print help
+    ----- stderr -----
+    ");
+}
+
+#[test]
+fn init_help() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.args(["mcp", "init", "--help"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Configure an MCP client to launch Fabro
+
+    Usage: fabro mcp init [OPTIONS] <AGENT>
+
+    Arguments:
+      <AGENT>  [possible values: claude, cursor, windsurf]
+
+    Options:
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help                       Print help
+    ----- stderr -----
+    ");
+}

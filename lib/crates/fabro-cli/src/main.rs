@@ -281,6 +281,9 @@ async fn main_inner(worker_token: Option<String>) -> (String, Result<()>) {
             Commands::Model { command } => {
                 commands::model::execute(command, &base_ctx).await?;
             }
+            Commands::Mcp(ns) => {
+                commands::mcp::dispatch(ns, &base_ctx).await?;
+            }
             Commands::Server(ns) => {
                 Box::pin(commands::server::dispatch(
                     ns.command,

@@ -1679,6 +1679,7 @@ dependencies = [
  "fabro-llm",
  "fabro-macros",
  "fabro-mcp",
+ "fabro-mcp-server",
  "fabro-model",
  "fabro-oauth",
  "fabro-proc",
@@ -2017,6 +2018,18 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "fabro-mcp-server"
+version = "0.230.0-nightly.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
