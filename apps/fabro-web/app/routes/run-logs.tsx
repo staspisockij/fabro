@@ -27,7 +27,7 @@ export default function RunLogs() {
   const { id } = useParams();
   const runQuery = useRun(id);
   const stagesQuery = useRunStages(id);
-  const isLive = runQuery.data?.status?.kind === "running";
+  const isLive = runQuery.data?.lifecycle.status.kind === "running";
   const logsQuery = useRunLogs(id, isLive ? LIVE_REFRESH_MS : undefined);
   const stages = useMemo(
     () => mapRunStagesToSidebarStages(stagesQuery.data),

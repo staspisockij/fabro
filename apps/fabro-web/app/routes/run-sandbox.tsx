@@ -120,13 +120,14 @@ function Panel({ title, children }: PanelProps) {
 
 function StatusStrip({ details }: { details: SandboxDetails }) {
   const display = STATE_DISPLAY[details.state] ?? STATE_DISPLAY.unknown;
+  const provider = details.sandbox.provider;
   const showNative =
     details.native_state &&
     details.native_state.toLowerCase() !== details.state.toLowerCase();
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-line bg-panel/60 px-4 py-3 text-sm">
       <span className="font-mono text-xs text-fg-muted uppercase tracking-wide">
-        {details.provider}
+        {provider}
       </span>
       <span className="flex items-center gap-1.5">
         <span className={`size-2 rounded-full ${display.dot}`} />
@@ -142,15 +143,17 @@ function StatusStrip({ details }: { details: SandboxDetails }) {
 }
 
 function OverviewPanel({ details }: { details: SandboxDetails }) {
+  const sandbox = details.sandbox;
+  const runtime = sandbox.runtime;
   return (
     <Panel title="Overview">
-      <Row label="ID" value={nullable(details.id)} />
-      <Row label="Working directory" value={nullable(details.working_directory)} />
+      <Row label="ID" value={nullable(runtime?.id)} />
+      <Row label="Working directory" value={nullable(runtime?.working_directory)} />
       <Row
         label="Region"
-        value={details.region ? details.region : details.provider === "docker" ? "local" : EMPTY_VALUE}
+        value={details.region ? details.region : sandbox.provider === "docker" ? "local" : EMPTY_VALUE}
       />
-      <Row label="Image" value={nullable(details.image)} />
+      <Row label="Image" value={nullable(sandbox.image ?? sandbox.snapshot)} />
     </Panel>
   );
 }
@@ -214,7 +217,7 @@ function DetailsColumn({ details }: { details: SandboxDetails | null }) {
 
 export default function RunSandbox({ params }: { params: { id: string } }) {
   const sandboxQuery = useRunSandboxDetails(params.id);
-  const provider = sandboxQuery.data?.provider ?? null;
+  const provider = sandboxQuery.data?.sandbox.provider ?? null;
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedMode = useMemo(
     () => normalizeSandboxMode(searchParams.get("mode")),
@@ -285,7 +288,7 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
               return (
                 <FilesystemPanel
                   runId={params.id}
-                  rootDirectory={sandboxQuery.data?.working_directory}
+                  rootDirectory={sandboxQuery.data?.sandbox.runtime?.working_directory}
                   leading={modeToggle}
                 />
               );

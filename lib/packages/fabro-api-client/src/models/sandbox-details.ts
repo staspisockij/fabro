@@ -15,7 +15,7 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxProvider } from './sandbox-provider';
+import type { RunSandbox } from './run-sandbox';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { SandboxResources } from './sandbox-resources';
@@ -30,28 +30,16 @@ import type { SandboxTimestamps } from './sandbox-timestamps';
  * Provider-neutral details about the sandbox owned by a run.
  */
 export interface SandboxDetails {
-    'provider': SandboxProvider;
-    /**
-     * Fabro sandbox control identifier used for reconnect, terminal, and delete operations.
-     */
-    'id': string;
-    /**
-     * Path where the run executed inside the sandbox.
-     */
-    'working_directory': string;
+    'sandbox': RunSandbox;
     'state': SandboxState;
     /**
      * Original provider state string before normalization. Display/debugging only; UI behavior keys off `state`.
      */
-    'native_state'?: string;
+    'native_state'?: string | null;
     /**
      * Provider region or target. Null for local-style providers.
      */
-    'region'?: string;
-    /**
-     * Container image or sandbox snapshot identifier.
-     */
-    'image'?: string;
+    'region'?: string | null;
     'resources': SandboxResources;
     /**
      * Provider-reported labels.

@@ -827,7 +827,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/Run"
         "400":
           description: Invalid Graphviz source
           headers:
@@ -852,7 +852,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunSummary"
+                $ref: "#/components/schemas/Run"
         "400":
           description: Selector is invalid or ambiguous
           headers:
@@ -974,7 +974,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunSummary"
+                $ref: "#/components/schemas/Run"
         "404":
           description: Run not found
           headers:
@@ -1003,7 +1003,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunSummary"
+                $ref: "#/components/schemas/Run"
         "400":
           description: Invalid title
           headers:
@@ -1072,7 +1072,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/Run"
         "404":
           description: Run not found
           headers:
@@ -1220,7 +1220,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/Run"
         "404":
           description: Run not found
           headers:
@@ -1254,7 +1254,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/Run"
         "404":
           description: Run not found
           headers:
@@ -1288,7 +1288,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/Run"
         "404":
           description: Run not found
           headers:
@@ -1326,7 +1326,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/Run"
         "404":
           description: Run not found
           headers:
@@ -1529,7 +1529,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/Run"
         "404":
           description: Run not found
           headers:
@@ -1725,7 +1725,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequestRecord"
+                $ref: "#/components/schemas/PullRequest"
         "400":
           description: Pull request creation does not apply to this run
           headers:
@@ -1786,7 +1786,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PullRequestDetail"
+                $ref: "#/components/schemas/PullRequestDetails"
         "400":
           description: Pull request lookup does not apply to this run
           headers:
@@ -4260,7 +4260,7 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/RunSummary"
+            $ref: "#/components/schemas/Run"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
@@ -4279,7 +4279,7 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/RunListItem"
+            $ref: "#/components/schemas/Run"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
@@ -4751,10 +4751,8 @@ components:
 
     RunStatus:
       description: >
-        Lifecycle status of a run. `archived` is a terminal status reached by
-        an explicit user action on a previously terminal (`succeeded`, `failed`,
-        or `dead`) run; archived runs are hidden from default listings and are
-        read-only until unarchived.
+        Execution status of a run. Archive state is represented separately on
+        `RunLifecycle.archived` so terminal status payloads remain intact.
       oneOf:
         - $ref: "#/components/schemas/RunStatusSubmitted"
         - $ref: "#/components/schemas/RunStatusQueued"
@@ -4766,7 +4764,6 @@ components:
         - $ref: "#/components/schemas/RunStatusSucceeded"
         - $ref: "#/components/schemas/RunStatusFailed"
         - $ref: "#/components/schemas/RunStatusDead"
-        - $ref: "#/components/schemas/RunStatusArchived"
       discriminator:
         propertyName: kind
         mapping:
@@ -4780,7 +4777,6 @@ components:
           succeeded: "#/components/schemas/RunStatusSucceeded"
           failed: "#/components/schemas/RunStatusFailed"
           dead: "#/components/schemas/RunStatusDead"
-          archived: "#/components/schemas/RunStatusArchived"
 
     RunStatusSubmitted:
       type: object
@@ -4895,32 +4891,6 @@ components:
           type: string
           enum:
             - dead
-
-    RunStatusArchived:
-      type: object
-      required:
-        - kind
-        - prior
-      properties:
-        kind:
-          type: string
-          enum:
-            - archived
-        prior:
-          $ref: "#/components/schemas/TerminalStatus"
-
-    TerminalStatus:
-      description: Terminal run status captured inside an archived run.
-      oneOf:
-        - $ref: "#/components/schemas/RunStatusSucceeded"
-        - $ref: "#/components/schemas/RunStatusFailed"
-        - $ref: "#/components/schemas/RunStatusDead"
-      discriminator:
-        propertyName: kind
-        mapping:
-          succeeded: "#/components/schemas/RunStatusSucceeded"
-          failed: "#/components/schemas/RunStatusFailed"
-          dead: "#/components/schemas/RunStatusDead"
 
     SuccessReason:
       description: Reason attached to a successful terminal run status.
@@ -5439,49 +5409,6 @@ components:
           maxLength: 100
           description: New run title. The server trims leading/trailing whitespace, rejects blank values, rejects control characters and newline characters, and requires at most 100 characters.
           example: "Add rate limiting to auth endpoints"
-
-    RunStatusResponse:
-      description: Current status of a run with optional error and queue position.
-      type: object
-      required:
-        - id
-        - title
-        - status
-        - created_at
-      properties:
-        id:
-          type: string
-          description: Unique run identifier (ULID).
-          example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
-        title:
-          type: string
-          description: Non-blank resolved run title.
-          example: Add rate limiting to auth endpoints
-        status:
-          $ref: "#/components/schemas/RunStatus"
-        error:
-          $ref: "#/components/schemas/RunError"
-        queue_position:
-          type: integer
-          description: Position in the queue (1-based). Only present when the status kind is `queued`.
-          example: 3
-        pending_control:
-          oneOf:
-            - $ref: "#/components/schemas/RunControlAction"
-            - type: "null"
-        created_at:
-          type: string
-          format: date-time
-          description: Timestamp when the run was created.
-          example: "2026-03-06T14:30:00Z"
-        web_url:
-          type: string
-          format: uri
-          description: |
-            Public URL where the run can be viewed in the web UI. Present when
-            the server has the web UI enabled (`server.web.enabled = true`) and
-            `server.web.url` is non-empty; absent otherwise.
-          example: "http://localhost:3000/runs/01JNQVR7M0EJ5GKAT2SC4ERS1Z"
 
     DeleteRunResponse:
       description: Returned when a run is deleted but its sandbox is intentionally preserved.
@@ -6535,12 +6462,18 @@ components:
           description: Resolved run title from the event log.
         spec:
           $ref: "#/components/schemas/RunSpec"
+        web_url:
+          type: ["string", "null"]
+          description: Absolute web UI URL for this run when server web settings are configured.
         start:
           oneOf:
             - $ref: "#/components/schemas/StartRecord"
             - type: "null"
         status:
           $ref: "#/components/schemas/RunStatus"
+        archived_at:
+          type: ["string", "null"]
+          format: date-time
         status_updated_at:
           type: string
           format: date-time
@@ -6579,74 +6512,186 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/StageProjection"
 
-    RunSummary:
-      description: Durable run summary derived from the backing store.
+    Run:
+      description: Canonical public run shape.
       type: object
       required:
-        - run_id
-        - goal
+        - id
         - title
-        - labels
-        - status
+        - goal
+        - workflow
+        - automation
         - repository
-        - created_at
+        - created_by
+        - origin
+        - labels
+        - lifecycle
+        - sandbox
+        - models
+        - source_directory
+        - timestamps
+        - billing
+        - diff
+        - pull_request
+        - current_question
+        - superseded_by
+        - links
       properties:
-        run_id:
-          type: string
-        workflow_name:
-          type: ["string", "null"]
-        workflow_slug:
-          type: ["string", "null"]
-        goal:
+        id:
           type: string
         title:
           type: string
-          description: Non-blank resolved run title.
-          example: Add rate limiting to auth endpoints
+        goal:
+          type: string
+        workflow:
+          $ref: "#/components/schemas/WorkflowRef"
+        automation:
+          oneOf:
+            - $ref: "#/components/schemas/AutomationRef"
+            - type: "null"
+        repository:
+          oneOf:
+            - $ref: "#/components/schemas/RepositoryRef"
+            - type: "null"
+        created_by:
+          oneOf:
+            - $ref: "#/components/schemas/Principal"
+            - type: "null"
+        origin:
+          $ref: "#/components/schemas/RunOrigin"
         labels:
           type: object
           additionalProperties:
             type: string
+        lifecycle:
+          $ref: "#/components/schemas/RunLifecycle"
+        sandbox:
+          oneOf:
+            - $ref: "#/components/schemas/RunSandbox"
+            - type: "null"
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunModel"
         source_directory:
           type: ["string", "null"]
-        repo_origin_url:
+        timestamps:
+          $ref: "#/components/schemas/RunTimestamps"
+        billing:
+          oneOf:
+            - $ref: "#/components/schemas/RunBillingSummary"
+            - type: "null"
+        diff:
+          oneOf:
+            - $ref: "#/components/schemas/DiffSummary"
+            - type: "null"
+        pull_request:
+          oneOf:
+            - $ref: "#/components/schemas/PullRequest"
+            - type: "null"
+        current_question:
+          oneOf:
+            - $ref: "#/components/schemas/RunQuestion"
+            - type: "null"
+        superseded_by:
           type: ["string", "null"]
-        repository:
-          $ref: "#/components/schemas/RepositoryReference"
-        start_time:
+        links:
+          $ref: "#/components/schemas/RunLinks"
+
+    WorkflowRef:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
           type: ["string", "null"]
-          format: date-time
-        created_at:
+        name:
           type: string
-          format: date-time
-        last_event_at:
+
+    AutomationRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
           type: ["string", "null"]
-          format: date-time
+
+    RunOrigin:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [api]
+
+    RunLifecycle:
+      type: object
+      required: [status, pending_control, queue_position, error, archived, archived_at]
+      properties:
         status:
           $ref: "#/components/schemas/RunStatus"
         pending_control:
           oneOf:
             - $ref: "#/components/schemas/RunControlAction"
             - type: "null"
+        queue_position:
+          type: ["integer", "null"]
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/RunError"
+            - type: "null"
+        archived:
+          type: boolean
+        archived_at:
+          type: ["string", "null"]
+          format: date-time
+
+    RunModel:
+      type: object
+      required: [provider, name]
+      properties:
+        provider:
+          type: ["string", "null"]
+        name:
+          type: string
+
+    RunTimestamps:
+      type: object
+      required: [created_at, started_at, last_event_at, completed_at]
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: ["string", "null"]
+          format: date-time
+        last_event_at:
+          type: ["string", "null"]
+          format: date-time
+        completed_at:
+          type: ["string", "null"]
+          format: date-time
         duration_ms:
           type: ["integer", "null"]
           format: int64
-          minimum: 0
         elapsed_secs:
           type: ["number", "null"]
+
+    RunBillingSummary:
+      type: object
+      required: [total_usd_micros]
+      properties:
         total_usd_micros:
           type: ["integer", "null"]
           format: int64
-        superseded_by:
+
+    RunLinks:
+      type: object
+      required: [web]
+      properties:
+        web:
           type: ["string", "null"]
-        diff_summary:
-          oneOf:
-            - $ref: "#/components/schemas/DiffSummary"
-            - type: "null"
-        pull_request:
-          oneOf:
-            - $ref: "#/components/schemas/PullRequestRecord"
-            - type: "null"
+          format: uri
 
     ForkRequest:
       description: Request body for creating a new run from a source run checkpoint.
@@ -6815,16 +6860,23 @@ components:
           description: Human-readable run title.
           example: "PR #312 — Add OAuth2 PKCE flow"
 
-    RepositoryReference:
-      description: Reference to a repository by name.
+    RepositoryRef:
+      description: Durable repository metadata for a run.
       type: object
       required:
         - name
+        - origin_url
+        - provider
       properties:
         name:
           type: string
-          description: Repository name.
-          example: api-server
+          example: fabro-sh/fabro
+        origin_url:
+          type: ["string", "null"]
+          example: https://github.com/fabro-sh/fabro.git
+        provider:
+          type: string
+          enum: [github, git, unknown]
 
     BilledTokenCounts:
       description: Token counts with optional billed USD micros totals.
@@ -6922,43 +6974,11 @@ components:
           description: Error message.
           example: "Stage 'apply-changes' exceeded maximum retries."
 
-    RunPullRequest:
-      description: Pull request information for a run.
-      type: object
-      required:
-        - number
-      properties:
-        number:
-          type: integer
-          description: Pull request number.
-          example: 889
-        html_url:
-          type: string
-          format: uri
-          description: Stored GitHub pull request URL.
-          example: https://github.com/fabro-sh/fabro/pull/889
-        additions:
-          type: integer
-          description: Lines added.
-          example: 234
-        deletions:
-          type: integer
-          description: Lines deleted.
-          example: 67
-        comments:
-          type: integer
-          description: Number of review comments.
-          example: 4
-        checks:
-          type: array
-          description: CI check run results.
-          items:
-            $ref: "#/components/schemas/CheckRun"
-
-    PullRequestRecord:
+    PullRequest:
       description: Persisted record of a pull request created for a run.
       type: object
       required:
+        - provider
         - html_url
         - number
         - owner
@@ -6967,6 +6987,9 @@ components:
         - head_branch
         - title
       properties:
+        provider:
+          type: string
+          enum: [github]
         html_url:
           type: string
           format: uri
@@ -7010,39 +7033,26 @@ components:
           type: string
           example: fabro/run/demo
 
-    PullRequestDetail:
-      description: Stored pull request record plus live GitHub fields.
+    PullRequestDetails:
+      description: Stored pull request record plus live GitHub-enriched fields.
       type: object
       required:
-        - record
-        - number
-        - title
+        - pull_request
         - state
         - draft
         - merged
+        - merged_at
+        - mergeable
         - additions
         - deletions
         - changed_files
-        - html_url
-        - user
-        - head
-        - base
-        - created_at
-        - updated_at
+        - comments
+        - checks
+        - author
+        - timestamps
       properties:
-        record:
-          $ref: "#/components/schemas/PullRequestRecord"
-        number:
-          type: integer
-          example: 123
-        title:
-          type: string
-          example: Move PR commands server-side
-        body:
-          type: ["string", "null"]
-          example: |
-            ## Summary
-            - Move PR commands server-side
+        pull_request:
+          $ref: "#/components/schemas/PullRequest"
         state:
           type: string
           example: open
@@ -7068,24 +7078,25 @@ components:
         changed_files:
           type: integer
           example: 5
-        html_url:
-          type: string
-          format: uri
-          example: https://github.com/fabro-sh/fabro/pull/123
-        user:
+        comments:
+          type: integer
+          example: 4
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckRun"
+        author:
           $ref: "#/components/schemas/PullRequestUser"
-        head:
-          $ref: "#/components/schemas/PullRequestRef"
-        base:
-          $ref: "#/components/schemas/PullRequestRef"
-        created_at:
-          type: string
-          format: date-time
-          example: "2026-04-23T15:40:00Z"
-        updated_at:
-          type: string
-          format: date-time
-          example: "2026-04-23T15:45:00Z"
+        timestamps:
+          type: object
+          required: [created_at, updated_at]
+          properties:
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
 
     CreateRunPullRequestRequest:
       description: Request body for creating a run pull request.
@@ -7180,32 +7191,40 @@ components:
       type: object
       required:
         - provider
-        - id
-        - working_directory
+        - image
+        - snapshot
+        - runtime
       properties:
         provider:
           $ref: "#/components/schemas/SandboxProvider"
+        image:
+          type: ["string", "null"]
+        snapshot:
+          type: ["string", "null"]
+        runtime:
+          oneOf:
+            - $ref: "#/components/schemas/RunSandboxRuntime"
+            - type: "null"
+
+    RunSandboxRuntime:
+      type: object
+      required:
+        - id
+        - working_directory
+        - repo_cloned
+        - clone_origin_url
+        - clone_branch
+      properties:
         id:
           type: string
-          description: Fabro sandbox control identifier used for reconnect, terminal, and delete operations.
-          example: container-a1b2c3d4
         working_directory:
           type: string
-          description: Path where the run executed inside the sandbox.
-          example: /workspace
         repo_cloned:
           type: ["boolean", "null"]
-          description: Whether the provider cloned the repository into the sandbox, or null while unknown.
         clone_origin_url:
           type: ["string", "null"]
-          description: Repository origin cloned into the sandbox when available.
         clone_branch:
           type: ["string", "null"]
-          description: Repository branch cloned into the sandbox when available.
-        resources:
-          oneOf:
-            - $ref: "#/components/schemas/SandboxResources"
-            - type: "null"
 
     RunQuestion:
       description: A pending human-in-the-loop question summary.
@@ -7284,81 +7303,6 @@ components:
           type: string
           description: Human-readable stage name.
           example: Propose Changes
-
-    # ── Run Board Schemas (updated) ─────────────────────────────────────
-
-    RunListItem:
-      description: Canonical run summary shown in the board view, extended with board-specific metadata.
-      type: object
-      required:
-        - run_id
-        - goal
-        - title
-        - status
-        - labels
-        - repository
-        - created_at
-        - column
-      properties:
-        run_id:
-          type: string
-          description: Unique run identifier (ULID).
-          example: 01JNQVR7M0EJ5GKAT2SC4ERS1Z
-        workflow_name:
-          type: ["string", "null"]
-        workflow_slug:
-          type: ["string", "null"]
-        goal:
-          type: string
-        repository:
-          $ref: "#/components/schemas/RepositoryReference"
-        title:
-          type: string
-          description: Non-blank resolved run title.
-          example: Add rate limiting to auth endpoints
-        status:
-          $ref: "#/components/schemas/RunStatus"
-        labels:
-          type: object
-          additionalProperties:
-            type: string
-        source_directory:
-          type: ["string", "null"]
-        repo_origin_url:
-          type: ["string", "null"]
-        start_time:
-          type: ["string", "null"]
-          format: date-time
-        pending_control:
-          oneOf:
-            - $ref: "#/components/schemas/RunControlAction"
-            - type: "null"
-        duration_ms:
-          type: ["integer", "null"]
-          format: int64
-          minimum: 0
-        elapsed_secs:
-          type: ["number", "null"]
-        total_usd_micros:
-          type: ["integer", "null"]
-          format: int64
-        column:
-          $ref: "#/components/schemas/BoardColumn"
-        pull_request:
-          $ref: "#/components/schemas/RunPullRequest"
-        sandbox:
-          $ref: "#/components/schemas/RunSandbox"
-        question:
-          $ref: "#/components/schemas/RunQuestion"
-        created_at:
-          type: string
-          format: date-time
-          description: Timestamp when the run was created.
-          example: "2026-03-06T14:30:00Z"
-        last_event_at:
-          type: ["string", "null"]
-          format: date-time
-          description: Timestamp of the most recent event applied to the run's projection. Null until the first event is recorded.
 
     RunCheckpoint:
       description: Serializable snapshot of execution state for crash recovery and resume.
@@ -8066,33 +8010,22 @@ components:
       description: Provider-neutral details about the sandbox owned by a run.
       type: object
       required:
-        - provider
-        - id
-        - working_directory
+        - sandbox
         - state
         - resources
         - labels
         - timestamps
       properties:
-        provider:
-          $ref: "#/components/schemas/SandboxProvider"
-        id:
-          type: string
-          description: Fabro sandbox control identifier used for reconnect, terminal, and delete operations.
-        working_directory:
-          type: string
-          description: Path where the run executed inside the sandbox.
+        sandbox:
+          $ref: "#/components/schemas/RunSandbox"
         state:
           $ref: "#/components/schemas/SandboxState"
         native_state:
-          type: string
+          type: ["string", "null"]
           description: Original provider state string before normalization. Display/debugging only; UI behavior keys off `state`.
         region:
-          type: string
+          type: ["string", "null"]
           description: Provider region or target. Null for local-style providers.
-        image:
-          type: string
-          description: Container image or sandbox snapshot identifier.
         resources:
           $ref: "#/components/schemas/SandboxResources"
         labels:

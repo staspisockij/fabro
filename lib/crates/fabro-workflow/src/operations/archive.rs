@@ -16,8 +16,8 @@ pub fn archived_rejection_message(run_id: &RunId) -> String {
 /// Returns `Err(Error::Precondition)` when the given status represents an
 /// archived run. Use this at any mutation entry point that would otherwise
 /// transition or emit events against the run (rewind, resume, etc.).
-pub fn ensure_not_archived(status: Option<RunStatus>, run_id: &RunId) -> Result<(), Error> {
-    if matches!(status, Some(RunStatus::Archived { .. })) {
+pub fn ensure_not_archived(archived: bool, run_id: &RunId) -> Result<(), Error> {
+    if archived {
         Err(Error::Precondition(archived_rejection_message(run_id)))
     } else {
         Ok(())
@@ -27,7 +27,7 @@ pub fn ensure_not_archived(status: Option<RunStatus>, run_id: &RunId) -> Result<
 /// Outcome of an `archive` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArchiveOutcome {
-    /// Event was appended; projection transitions to `Archived`.
+    /// Event was appended; projection marks the run archived.
     Archived { prior_status: TerminalStatus },
     /// Run was already archived; no event emitted.
     AlreadyArchived,
@@ -36,7 +36,7 @@ pub enum ArchiveOutcome {
 /// Outcome of an `unarchive` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnarchiveOutcome {
-    /// Event was appended; projection transitions back to `restored_status`.
+    /// Event was appended; projection clears archive metadata.
     Unarchived { restored_status: TerminalStatus },
     /// Run was terminal but not archived; no event emitted. Symmetric with
     /// `ArchiveOutcome::AlreadyArchived`.
@@ -59,7 +59,7 @@ pub async fn archive(
         .map_err(|err| Error::engine(err.to_string()))?;
     let current = projection.status;
 
-    if matches!(current, RunStatus::Archived { .. }) {
+    if projection.archived_at.is_some() {
         return Ok(ArchiveOutcome::AlreadyArchived);
     }
 
@@ -104,10 +104,15 @@ pub async fn unarchive(
         .map_err(|err| Error::engine(err.to_string()))?;
     let current = projection.status;
 
-    if let RunStatus::Archived { prior } = current {
+    if projection.archived_at.is_some() {
         event::append_event(&run_store, run_id, &Event::RunUnarchived { actor })
             .await
             .map_err(|err| Error::engine(err.to_string()))?;
+        let prior = current.terminal_status().ok_or_else(|| {
+            Error::engine(format!(
+                "run {run_id} is archived but has non-terminal status {current}"
+            ))
+        })?;
         return Ok(UnarchiveOutcome::Unarchived {
             restored_status: prior,
         });
@@ -230,6 +235,11 @@ mod tests {
         run_store.state().await.unwrap().status
     }
 
+    async fn is_archived(store: &Database, run_id: &RunId) -> bool {
+        let run_store = store.open_run_reader(run_id).await.unwrap();
+        run_store.state().await.unwrap().archived_at.is_some()
+    }
+
     async fn event_count(store: &Database, run_id: &RunId) -> usize {
         let run_store = store.open_run_reader(run_id).await.unwrap();
         run_store.list_events().await.unwrap().len()
@@ -247,11 +257,13 @@ mod tests {
                 reason: SuccessReason::Completed,
             },
         });
-        assert_eq!(current_status(&store, &run_id).await, RunStatus::Archived {
-            prior: TerminalStatus::Succeeded {
+        assert_eq!(
+            current_status(&store, &run_id).await,
+            RunStatus::Succeeded {
                 reason: SuccessReason::Completed,
-            },
-        });
+            }
+        );
+        assert!(is_archived(&store, &run_id).await);
 
         let projection = store
             .open_run_reader(&run_id)
@@ -260,11 +272,10 @@ mod tests {
             .state()
             .await
             .unwrap();
-        assert_eq!(projection.status, RunStatus::Archived {
-            prior: TerminalStatus::Succeeded {
-                reason: SuccessReason::Completed,
-            },
+        assert_eq!(projection.status, RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
         });
+        assert!(projection.archived_at.is_some());
     }
 
     #[tokio::test]
@@ -279,11 +290,10 @@ mod tests {
                 reason: FailureReason::WorkflowError,
             },
         });
-        assert_eq!(current_status(&store, &run_id).await, RunStatus::Archived {
-            prior: TerminalStatus::Failed {
-                reason: FailureReason::WorkflowError,
-            },
+        assert_eq!(current_status(&store, &run_id).await, RunStatus::Failed {
+            reason: FailureReason::WorkflowError,
         });
+        assert!(is_archived(&store, &run_id).await);
     }
 
     #[tokio::test]
@@ -431,10 +441,12 @@ mod tests {
         let events_after = event_count(&store, &run_id).await;
 
         assert_eq!(events_after - events_before, 3);
-        assert_eq!(current_status(&store, &run_id).await, RunStatus::Archived {
-            prior: TerminalStatus::Succeeded {
+        assert_eq!(
+            current_status(&store, &run_id).await,
+            RunStatus::Succeeded {
                 reason: SuccessReason::Completed,
-            },
-        });
+            }
+        );
+        assert!(is_archived(&store, &run_id).await);
     }
 }

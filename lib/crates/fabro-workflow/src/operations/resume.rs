@@ -15,7 +15,7 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         .map_err(|err| Error::engine(err.to_string()))?;
 
     let status = state.status;
-    super::archive::ensure_not_archived(Some(status), &services.run_id)?;
+    super::archive::ensure_not_archived(state.archived_at.is_some(), &services.run_id)?;
     if matches!(status, RunStatus::Succeeded { .. }) {
         return Err(Error::Precondition(
             "run already finished successfully — nothing to resume".to_string(),

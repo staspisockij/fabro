@@ -3,7 +3,7 @@ import { ChevronDownIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outlin
 import { Link, useParams } from "react-router";
 import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
-import { ciConfig, columnForStatus, columnStatusDisplay, deriveCiStatus, mapRunSummaryToRunItem } from "../data/runs";
+import { ciConfig, columnForRun, columnStatusDisplay, deriveCiStatus, mapRunSummaryToRunItem } from "../data/runs";
 import type { ColumnStatus, RunWithStatus } from "../data/runs";
 import { useWorkflowRuns } from "../lib/queries";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
@@ -12,7 +12,7 @@ function mapWorkflowRuns(result: PaginatedRunList | null | undefined): RunWithSt
   const apiRuns = result?.data ?? [];
   return apiRuns
     .map((r) => {
-      const column = columnForStatus(r.status);
+      const column = columnForRun(r);
       if (column == null) return null;
       return {
         ...mapRunSummaryToRunItem(r),

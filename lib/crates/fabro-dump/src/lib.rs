@@ -557,13 +557,16 @@ mod tests {
             diff:                 RunDiff::default(),
         });
         projection.sandbox = Some(RunSandbox {
-            provider:          SandboxProvider::Local,
-            id:                "sandbox-1".to_string(),
-            working_directory: "/tmp/project".to_string(),
-            repo_cloned:       None,
-            clone_origin_url:  None,
-            clone_branch:      None,
-            resources:         None,
+            provider: SandboxProvider::Local,
+            image:    None,
+            snapshot: None,
+            runtime:  Some(fabro_types::RunSandboxRuntime {
+                id:                "sandbox-1".to_string(),
+                working_directory: "/tmp/project".to_string(),
+                repo_cloned:       None,
+                clone_origin_url:  None,
+                clone_branch:      None,
+            }),
         });
         let stage =
             projection.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(2));

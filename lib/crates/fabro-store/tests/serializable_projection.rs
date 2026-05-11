@@ -6,8 +6,8 @@ use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
-    QuestionType, RunDiff, RunSandbox, RunStatus, SandboxProvider, StageCompletion, StageOutcome,
-    StartRecord, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
+    QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProvider,
+    StageCompletion, StageOutcome, StartRecord, WorkflowSettings, first_event_seq, fixtures,
 };
 use serde_json::json;
 
@@ -100,13 +100,16 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         diff:       RunDiff::default(),
     });
     projection.sandbox = Some(RunSandbox {
-        provider:          SandboxProvider::Local,
-        id:                "sandbox-1".to_string(),
-        working_directory: "/tmp/project".to_string(),
-        repo_cloned:       None,
-        clone_origin_url:  None,
-        clone_branch:      None,
-        resources:         None,
+        provider: SandboxProvider::Local,
+        image:    None,
+        snapshot: None,
+        runtime:  Some(RunSandboxRuntime {
+            id:                "sandbox-1".to_string(),
+            working_directory: "/tmp/project".to_string(),
+            repo_cloned:       None,
+            clone_origin_url:  None,
+            clone_branch:      None,
+        }),
     });
     projection.pending_interviews = BTreeMap::new();
     let stage = projection.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(2));
@@ -189,9 +192,8 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
 #[test]
 fn projection_query_methods_expose_common_state() {
     let mut projection = RunProjection::new("Demo".to_string(), sample_run_spec(), Utc::now());
-    projection.status = RunStatus::Archived {
-        prior: TerminalStatus::Dead,
-    };
+    projection.status = RunStatus::Dead;
+    projection.archived_at = Some(Utc::now());
     projection.checkpoints.push(CheckpointRecord {
         seq:        7,
         checkpoint: sample_checkpoint(),
@@ -213,9 +215,8 @@ fn projection_query_methods_expose_common_state() {
         })]);
 
     assert_eq!(projection.spec().workflow_slug(), Some("demo"));
-    assert_eq!(projection.status(), RunStatus::Archived {
-        prior: TerminalStatus::Dead,
-    });
+    assert_eq!(projection.status(), RunStatus::Dead);
+    assert!(projection.is_archived());
     assert!(projection.is_terminal());
     assert_eq!(
         projection

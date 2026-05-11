@@ -870,7 +870,14 @@ async fn reconnect_daytona_sandbox(
         )
         .into_response());
     }
-    let Some(repo_cloned) = record.repo_cloned else {
+    let Some(runtime) = record.runtime.as_ref() else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "Sandbox record is missing runtime metadata.",
+        )
+        .into_response());
+    };
+    let Some(repo_cloned) = runtime.repo_cloned else {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "Sandbox record is missing clone metadata.",
@@ -879,11 +886,11 @@ async fn reconnect_daytona_sandbox(
     };
     let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
     let sandbox = DaytonaSandbox::reconnect(
-        &record.id,
+        &runtime.id,
         daytona_api_key,
         repo_cloned,
-        record.clone_origin_url.clone(),
-        record.clone_branch.clone(),
+        runtime.clone_origin_url.clone(),
+        runtime.clone_branch.clone(),
     )
     .await
     .map_err(|err| {
@@ -1345,7 +1352,7 @@ mod retrieve_sandbox_tests {
     }
 
     #[tokio::test]
-    async fn run_without_sandbox_returns_404() {
+    async fn run_without_sandbox_runtime_returns_planned_sandbox_details() {
         let state = test_app_state();
         let app = build_test_router(state.clone());
         let run_id = RunId::new();
@@ -1359,15 +1366,10 @@ mod retrieve_sandbox_tests {
             .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
-        assert!(
-            body["errors"][0]["detail"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("Run has no sandbox"),
-            "unexpected body: {body}"
-        );
+        assert_eq!(body["sandbox"]["provider"], "local");
+        assert!(body["sandbox"]["runtime"].is_null());
     }
 
     #[tokio::test]
@@ -1389,9 +1391,12 @@ mod retrieve_sandbox_tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
-        assert_eq!(body["provider"], "local");
-        assert_eq!(body["id"], "local:sandbox-id");
-        assert_eq!(body["working_directory"], "/workspace");
+        assert_eq!(body["sandbox"]["provider"], "local");
+        assert_eq!(body["sandbox"]["runtime"]["id"], "local:sandbox-id");
+        assert_eq!(
+            body["sandbox"]["runtime"]["working_directory"],
+            "/workspace"
+        );
         assert_eq!(body["state"], "running");
         assert!(body.get("name").is_none());
         assert!(body.get("identifier").is_none());

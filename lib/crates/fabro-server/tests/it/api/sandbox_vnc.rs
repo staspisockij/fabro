@@ -51,7 +51,7 @@ async fn vnc_for_run_without_sandbox_returns_conflict() {
 
     response_status(
         response,
-        StatusCode::CONFLICT,
+        StatusCode::NOT_IMPLEMENTED,
         format!("POST /api/v1/runs/{run_id}/sandbox/vnc"),
     )
     .await;

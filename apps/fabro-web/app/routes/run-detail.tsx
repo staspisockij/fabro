@@ -147,7 +147,7 @@ function runHasSandbox(runState: unknown): boolean {
 
 function buildRunDetailRun(summary: RunSummary): RunDetailRun {
   const item = mapRunSummaryToRunItem(summary);
-  const rawStatus = summary.status;
+  const rawStatus = summary.lifecycle.status;
   const statusKind = rawStatus.kind;
   const display = isRunStatus(statusKind)
     ? runStatusDisplay[statusKind]
@@ -171,7 +171,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const runQuery = useRun(params.id);
   const runStateQuery = useRunState(params.id);
   const run = runQuery.data ? buildRunDetailRun(runQuery.data) : null;
-  const statusKind = runQuery.data?.status?.kind;
+  const statusKind = runQuery.data?.lifecycle.status.kind;
   const isBlocked = statusKind === "blocked";
   const questionsQuery = useRunQuestions(params.id, isBlocked);
   const pendingQuestions = questionsQuery.data ?? [];
@@ -188,7 +188,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const { push, dismiss } = useToast();
-  const filesCount = runQuery.data?.diff_summary?.files_changed ?? null;
+  const filesCount = runQuery.data?.diff?.files_changed ?? null;
   const hasSandbox = runHasSandbox(runStateQuery.data);
   const tabs = allTabs
     .map((tab) =>

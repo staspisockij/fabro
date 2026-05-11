@@ -1275,8 +1275,8 @@ export default function RunStages() {
   const selectedStageId = selectedStage?.id;
   const runStart =
     selectedStage?.startedAt ??
-    runQuery.data?.start_time ??
-    runQuery.data?.created_at;
+    runQuery.data?.timestamps.started_at ??
+    runQuery.data?.timestamps.created_at;
   const stageEventsQuery = useRunStageEvents(id, selectedStageId);
   const turns = useMemo(
     () =>

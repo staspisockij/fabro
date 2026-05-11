@@ -21,9 +21,6 @@ import type { BlockedReason } from './blocked-reason';
 import type { FailureReason } from './failure-reason';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunStatusArchived } from './run-status-archived';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { RunStatusBlocked } from './run-status-blocked';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -52,14 +49,11 @@ import type { RunStatusSubmitted } from './run-status-submitted';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { RunStatusSucceeded } from './run-status-succeeded';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { TerminalStatus } from './terminal-status';
 
 /**
  * @type RunStatus
- * Lifecycle status of a run. `archived` is a terminal status reached by an explicit user action on a previously terminal (`succeeded`, `failed`, or `dead`) run; archived runs are hidden from default listings and are read-only until unarchived. 
+ * Execution status of a run. Archive state is represented separately on `RunLifecycle.archived` so terminal status payloads remain intact. 
  */
-export type RunStatus = { kind: 'archived' } & RunStatusArchived | { kind: 'blocked' } & RunStatusBlocked | { kind: 'dead' } & RunStatusDead | { kind: 'failed' } & RunStatusFailed | { kind: 'paused' } & RunStatusPaused | { kind: 'queued' } & RunStatusQueued | { kind: 'removing' } & RunStatusRemoving | { kind: 'running' } & RunStatusRunning | { kind: 'starting' } & RunStatusStarting | { kind: 'submitted' } & RunStatusSubmitted | { kind: 'succeeded' } & RunStatusSucceeded;
+export type RunStatus = { kind: 'blocked' } & RunStatusBlocked | { kind: 'dead' } & RunStatusDead | { kind: 'failed' } & RunStatusFailed | { kind: 'paused' } & RunStatusPaused | { kind: 'queued' } & RunStatusQueued | { kind: 'removing' } & RunStatusRemoving | { kind: 'running' } & RunStatusRunning | { kind: 'starting' } & RunStatusStarting | { kind: 'submitted' } & RunStatusSubmitted | { kind: 'succeeded' } & RunStatusSucceeded;
 
 

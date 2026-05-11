@@ -105,8 +105,7 @@ async fn control_run(
             RunStatus::Failed { .. }
             | RunStatus::Succeeded { .. }
             | RunStatus::Removing
-            | RunStatus::Dead
-            | RunStatus::Archived { .. } => {
+            | RunStatus::Dead => {
                 let code = if matches!(&control, RunControlRequest::Interrupt) {
                     "run_not_interruptible"
                 } else {

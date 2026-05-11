@@ -17,7 +17,8 @@
 /**
  * Persisted record of a pull request created for a run.
  */
-export interface PullRequestRecord {
+export interface PullRequest {
+    'provider': PullRequestProviderEnum;
     'html_url': string;
     'number': number;
     'owner': string;
@@ -26,4 +27,11 @@ export interface PullRequestRecord {
     'head_branch': string;
     'title': string;
 }
+
+export const PullRequestProviderEnum = {
+    GITHUB: 'github'
+} as const;
+
+export type PullRequestProviderEnum = typeof PullRequestProviderEnum[keyof typeof PullRequestProviderEnum];
+
 

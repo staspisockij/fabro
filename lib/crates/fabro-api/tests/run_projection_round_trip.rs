@@ -36,11 +36,13 @@ fn run_projection_round_trips_populated_projection() {
         "conclusion": null,
         "sandbox": {
             "provider": "docker",
-            "id": "container-abc123",
-            "working_directory": "/workspace",
-            "repo_cloned": true,
-            "clone_origin_url": "https://github.com/fabro-sh/fabro.git",
-            "clone_branch": "main"
+            "runtime": {
+                "id": "container-abc123",
+                "working_directory": "/workspace",
+                "repo_cloned": true,
+                "clone_origin_url": "https://github.com/fabro-sh/fabro.git",
+                "clone_branch": "main"
+            }
         },
         "pull_request": null,
         "superseded_by": null,

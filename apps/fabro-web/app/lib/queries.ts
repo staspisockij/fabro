@@ -15,7 +15,7 @@ import type {
   RunArtifactListResponse,
   RunBilling,
   RunProjection,
-  RunSummary,
+  Run,
   SandboxDetails,
   SandboxFileListResponse,
   SandboxServiceListResponse,
@@ -102,7 +102,7 @@ export function useBoardsRuns(includeArchived: boolean = false) {
 }
 
 export function useRun(id: string | undefined) {
-  return useSWR<RunSummary | null>(
+  return useSWR<Run | null>(
     id ? queryKeys.runs.detail(id) : null,
     () => apiNullableData(() => runsApi.retrieveRun(id!)),
   );

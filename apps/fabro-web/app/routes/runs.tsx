@@ -21,7 +21,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ciConfig, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
+import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
 import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
@@ -94,8 +94,9 @@ export function buildBoardColumns(response: BoardRunsResponse): Column[] {
     grouped.set(col.id, []);
   }
   for (const apiRun of response.data) {
-    if (grouped.has(apiRun.column)) {
-      grouped.get(apiRun.column)?.push(mapRunListItem(apiRun));
+    const column = columnForRun(apiRun);
+    if (column != null && grouped.has(column)) {
+      grouped.get(column)?.push(mapRunListItem(apiRun));
     }
   }
 

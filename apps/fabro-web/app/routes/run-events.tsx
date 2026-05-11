@@ -44,7 +44,10 @@ export default function RunEvents() {
         events={eventsQuery.data}
         error={eventsQuery.error}
         onRetry={() => void eventsQuery.mutate()}
-        runStart={runQuery.data?.start_time ?? runQuery.data?.created_at}
+        runStart={
+          runQuery.data?.timestamps.started_at ??
+          runQuery.data?.timestamps.created_at
+        }
       />
     </div>
   );

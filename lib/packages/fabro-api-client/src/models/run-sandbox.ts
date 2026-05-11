@@ -15,37 +15,19 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxProvider } from './sandbox-provider';
+import type { RunSandboxRuntime } from './run-sandbox-runtime';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxResources } from './sandbox-resources';
+import type { SandboxProvider } from './sandbox-provider';
 
 /**
  * Canonical sandbox environment record for a run.
  */
 export interface RunSandbox {
     'provider': SandboxProvider;
-    /**
-     * Fabro sandbox control identifier used for reconnect, terminal, and delete operations.
-     */
-    'id': string;
-    /**
-     * Path where the run executed inside the sandbox.
-     */
-    'working_directory': string;
-    /**
-     * Whether the provider cloned the repository into the sandbox, or null while unknown.
-     */
-    'repo_cloned'?: boolean | null;
-    /**
-     * Repository origin cloned into the sandbox when available.
-     */
-    'clone_origin_url'?: string | null;
-    /**
-     * Repository branch cloned into the sandbox when available.
-     */
-    'clone_branch'?: string | null;
-    'resources'?: SandboxResources | null;
+    'image': string | null;
+    'snapshot': string | null;
+    'runtime': RunSandboxRuntime | null;
 }
 
 

@@ -146,7 +146,10 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "status": match state.status {
+            "status": if state.archived_at.is_some() {
+                "archived"
+            } else {
+                match state.status {
                 fabro_types::RunStatus::Submitted => "submitted",
                 fabro_types::RunStatus::Queued => "queued",
                 fabro_types::RunStatus::Starting => "starting",
@@ -157,7 +160,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
                 fabro_types::RunStatus::Succeeded { .. } => "succeeded",
                 fabro_types::RunStatus::Failed { .. } => "failed",
                 fabro_types::RunStatus::Dead => "dead",
-                fabro_types::RunStatus::Archived { .. } => "archived",
+                }
             },
             "has_conclusion": state.conclusion.is_some(),
         }),

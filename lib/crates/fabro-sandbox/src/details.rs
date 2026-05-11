@@ -44,16 +44,13 @@ pub async fn sandbox_details(
 
 fn local_details(record: &RunSandbox) -> SandboxDetails {
     SandboxDetails {
-        provider:          SandboxProvider::Local,
-        id:                record.id.clone(),
-        working_directory: record.working_directory.clone(),
-        state:             SandboxState::Running,
-        native_state:      None,
-        region:            None,
-        image:             None,
-        resources:         SandboxResources::default(),
-        labels:            BTreeMap::new(),
-        timestamps:        SandboxTimestamps::default(),
+        sandbox:      record.clone(),
+        state:        SandboxState::Running,
+        native_state: None,
+        region:       None,
+        resources:    SandboxResources::default(),
+        labels:       BTreeMap::new(),
+        timestamps:   SandboxTimestamps::default(),
     }
 }
 
@@ -67,8 +64,7 @@ mod docker {
     use bollard::models::{ContainerInspectResponse, ContainerStateStatusEnum, HostConfig};
     use chrono::{DateTime, Utc};
     use fabro_types::{
-        RunId, RunSandbox, SandboxDetails, SandboxProvider, SandboxResources, SandboxState,
-        SandboxTimestamps,
+        RunId, RunSandbox, SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps,
     };
 
     pub(super) async fn docker_details(
@@ -77,10 +73,14 @@ mod docker {
     ) -> Result<SandboxDetails> {
         let docker =
             Docker::connect_with_local_defaults().context("Failed to connect to Docker daemon")?;
+        let runtime = record
+            .runtime
+            .as_ref()
+            .context("Docker run sandbox missing runtime metadata")?;
         let inspect = docker
-            .inspect_container(&record.id, None::<InspectContainerOptions>)
+            .inspect_container(&runtime.id, None::<InspectContainerOptions>)
             .await
-            .map_err(|err| anyhow!("Failed to inspect Docker container '{}': {err}", record.id))?;
+            .map_err(|err| anyhow!("Failed to inspect Docker container '{}': {err}", runtime.id))?;
         Ok(map_docker_inspect(inspect, record))
     }
 
@@ -119,13 +119,13 @@ mod docker {
         let created_at = inspect.created.as_deref().and_then(parse_docker_timestamp);
 
         SandboxDetails {
-            provider: SandboxProvider::Docker,
-            id: record.id.clone(),
-            working_directory: record.working_directory.clone(),
+            sandbox: RunSandbox {
+                image: image.or_else(|| record.image.clone()),
+                ..record.clone()
+            },
             state: normalized_state,
             native_state,
             region: None,
-            image,
             resources,
             labels,
             timestamps: SandboxTimestamps {
@@ -171,18 +171,22 @@ mod docker {
     #[cfg(test)]
     mod tests {
         use bollard::models::HostConfig;
+        use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProvider};
 
         use super::*;
 
         fn record() -> RunSandbox {
             RunSandbox {
-                provider:          SandboxProvider::Docker,
-                id:                "container-abc123".to_string(),
-                working_directory: "/workspace".to_string(),
-                repo_cloned:       Some(true),
-                clone_origin_url:  None,
-                clone_branch:      None,
-                resources:         None,
+                provider: SandboxProvider::Docker,
+                image:    None,
+                snapshot: None,
+                runtime:  Some(RunSandboxRuntime {
+                    id:                "container-abc123".to_string(),
+                    working_directory: "/workspace".to_string(),
+                    repo_cloned:       Some(true),
+                    clone_origin_url:  None,
+                    clone_branch:      None,
+                }),
             }
         }
 
@@ -249,8 +253,9 @@ mod docker {
                 ..Default::default()
             };
             let details = map_docker_inspect(inspect, &record());
-            assert_eq!(details.id, "container-abc123");
-            assert_eq!(details.working_directory, "/workspace");
+            let runtime = details.sandbox.runtime.expect("runtime");
+            assert_eq!(runtime.id, "container-abc123");
+            assert_eq!(runtime.working_directory, "/workspace");
         }
 
         #[test]
@@ -338,8 +343,7 @@ mod daytona {
     use chrono::{DateTime, Utc};
     use daytona_api_client::models::SandboxState as DaytonaState;
     use fabro_types::{
-        RunSandbox, SandboxDetails, SandboxProvider, SandboxResources, SandboxState,
-        SandboxTimestamps,
+        RunSandbox, SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps,
     };
 
     use crate::daytona::DaytonaSandbox;
@@ -348,16 +352,20 @@ mod daytona {
         record: &RunSandbox,
         daytona_api_key: Option<String>,
     ) -> Result<SandboxDetails> {
-        let repo_cloned = record
+        let runtime = record
+            .runtime
+            .as_ref()
+            .context("Daytona run sandbox missing runtime metadata")?;
+        let repo_cloned = runtime
             .repo_cloned
             .context("Daytona run sandbox missing clone metadata")?;
 
         let sandbox_handle = DaytonaSandbox::reconnect(
-            &record.id,
+            &runtime.id,
             daytona_api_key,
             repo_cloned,
-            record.clone_origin_url.clone(),
-            record.clone_branch.clone(),
+            runtime.clone_origin_url.clone(),
+            runtime.clone_branch.clone(),
         )
         .await
         .map_err(anyhow::Error::new)?;
@@ -394,13 +402,13 @@ mod daytona {
         };
 
         SandboxDetails {
-            provider: SandboxProvider::Daytona,
-            id: record.id.clone(),
-            working_directory: record.working_directory.clone(),
+            sandbox: RunSandbox {
+                snapshot: sandbox.snapshot.clone().or_else(|| record.snapshot.clone()),
+                ..record.clone()
+            },
             state: normalized_state,
             native_state,
             region,
-            image: sandbox.snapshot.clone(),
             resources,
             labels,
             timestamps: SandboxTimestamps {
@@ -539,21 +547,25 @@ mod tests {
     #[test]
     fn local_details_returns_running_with_no_metadata() {
         let record = RunSandbox {
-            provider:          SandboxProvider::Local,
-            id:                "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z".to_string(),
-            working_directory: "/Users/client/project".to_string(),
-            repo_cloned:       None,
-            clone_origin_url:  None,
-            clone_branch:      None,
-            resources:         None,
+            provider: SandboxProvider::Local,
+            image:    None,
+            snapshot: None,
+            runtime:  Some(fabro_types::RunSandboxRuntime {
+                id:                "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z".to_string(),
+                working_directory: "/Users/client/project".to_string(),
+                repo_cloned:       None,
+                clone_origin_url:  None,
+                clone_branch:      None,
+            }),
         };
         let details = local_details(&record);
-        assert_eq!(details.provider, SandboxProvider::Local);
+        assert_eq!(details.sandbox.provider, SandboxProvider::Local);
         assert_eq!(details.state, SandboxState::Running);
-        assert_eq!(details.id, "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z");
-        assert_eq!(details.working_directory, "/Users/client/project");
+        let runtime = details.sandbox.runtime.as_ref().unwrap();
+        assert_eq!(runtime.id, "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z");
+        assert_eq!(runtime.working_directory, "/Users/client/project");
         assert!(details.region.is_none());
-        assert!(details.image.is_none());
+        assert!(details.sandbox.image.is_none());
         assert!(details.labels.is_empty());
         assert_eq!(details.resources, SandboxResources::default());
         assert_eq!(details.timestamps, SandboxTimestamps::default());

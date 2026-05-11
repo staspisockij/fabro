@@ -11,8 +11,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use fabro_api::types::{
-    BoardColumn, BoardColumnDefinition, RunManifest, RunStatusResponse, SubmitAnswerRequest,
-    UpdateRunRequest,
+    BoardColumn, BoardColumnDefinition, RunManifest, SubmitAnswerRequest, UpdateRunRequest,
 };
 use fabro_config::Storage;
 use fabro_interview::AnswerSubmission;
@@ -89,7 +88,10 @@ impl ListRunsParams {
     }
 }
 
-fn board_column(status: RunStatus) -> Option<BoardColumn> {
+fn board_column(status: RunStatus, archived: bool) -> Option<BoardColumn> {
+    if archived {
+        return Some(BoardColumn::Archived);
+    }
     match status {
         RunStatus::Submitted | RunStatus::Queued => Some(BoardColumn::Queued),
         RunStatus::Starting => Some(BoardColumn::Initializing),
@@ -97,7 +99,6 @@ fn board_column(status: RunStatus) -> Option<BoardColumn> {
         RunStatus::Blocked { .. } => Some(BoardColumn::Blocked),
         RunStatus::Succeeded { .. } => Some(BoardColumn::Succeeded),
         RunStatus::Failed { .. } | RunStatus::Dead => Some(BoardColumn::Failed),
-        RunStatus::Archived { .. } => Some(BoardColumn::Archived),
         RunStatus::Removing => None,
     }
 }
@@ -138,121 +139,6 @@ pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition
     columns
 }
 
-fn board_run_metadata_from_projection(
-    projection: &fabro_store::RunProjection,
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut metadata = serde_json::Map::new();
-
-    if let Some(pull_request) = projection.pull_request.as_ref() {
-        metadata.insert(
-            "pull_request".to_string(),
-            serde_json::json!({
-                "number": pull_request.number,
-                "html_url": pull_request.html_url,
-            }),
-        );
-    }
-
-    if let Some(sandbox) = projection.sandbox.as_ref() {
-        let mut sandbox_metadata = serde_json::Map::new();
-        sandbox_metadata.insert("provider".to_string(), serde_json::json!(sandbox.provider));
-        sandbox_metadata.insert("id".to_string(), serde_json::json!(&sandbox.id));
-        sandbox_metadata.insert(
-            "working_directory".to_string(),
-            serde_json::json!(&sandbox.working_directory),
-        );
-        if let Some(repo_cloned) = sandbox.repo_cloned {
-            sandbox_metadata.insert("repo_cloned".to_string(), serde_json::json!(repo_cloned));
-        }
-        if let Some(clone_origin_url) = sandbox.clone_origin_url.as_ref() {
-            sandbox_metadata.insert(
-                "clone_origin_url".to_string(),
-                serde_json::json!(clone_origin_url),
-            );
-        }
-        if let Some(clone_branch) = sandbox.clone_branch.as_ref() {
-            sandbox_metadata.insert("clone_branch".to_string(), serde_json::json!(clone_branch));
-        }
-        if let Some(resources) = sandbox.resources {
-            sandbox_metadata.insert("resources".to_string(), serde_json::json!(resources));
-        }
-        metadata.insert(
-            "sandbox".to_string(),
-            serde_json::Value::Object(sandbox_metadata),
-        );
-    }
-
-    if let Some((_, record)) =
-        projection
-            .pending_interviews
-            .iter()
-            .min_by(|(left_id, left), (right_id, right)| {
-                left.started_at
-                    .cmp(&right.started_at)
-                    .then_with(|| left_id.cmp(right_id))
-            })
-    {
-        metadata.insert(
-            "question".to_string(),
-            serde_json::json!({
-                "text": &record.question.text,
-            }),
-        );
-    }
-
-    metadata
-}
-
-#[cfg(test)]
-mod tests {
-    use fabro_types::{
-        Graph, PullRequestRecord, RunProjection, RunSpec, WorkflowSettings, fixtures,
-    };
-
-    use super::board_run_metadata_from_projection;
-
-    #[test]
-    fn board_run_metadata_includes_pull_request_url() {
-        let mut projection = RunProjection::new(
-            "Test run".to_string(),
-            RunSpec {
-                run_id:           fixtures::RUN_1,
-                settings:         WorkflowSettings::default(),
-                graph:            Graph::new("test"),
-                graph_source:     None,
-                workflow_slug:    None,
-                source_directory: None,
-                labels:           std::collections::HashMap::default(),
-                provenance:       None,
-                manifest_blob:    None,
-                definition_blob:  None,
-                git:              None,
-                fork_source_ref:  None,
-            },
-            chrono::Utc::now(),
-        );
-        projection.pull_request = Some(PullRequestRecord {
-            html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
-            number:      123,
-            owner:       "fabro-sh".to_string(),
-            repo:        "fabro".to_string(),
-            base_branch: "main".to_string(),
-            head_branch: "fabro/run/demo".to_string(),
-            title:       "Add run PR chip".to_string(),
-        });
-
-        let metadata = board_run_metadata_from_projection(&projection);
-
-        assert_eq!(
-            metadata.get("pull_request"),
-            Some(&serde_json::json!({
-                "number": 123,
-                "html_url": "https://github.com/fabro-sh/fabro/pull/123"
-            }))
-        );
-    }
-}
-
 fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
     let limit = pagination.limit.clamp(1, 100) as usize;
     let offset = pagination.offset.min(MAX_PAGE_OFFSET) as usize;
@@ -282,30 +168,26 @@ async fn list_board_runs(
     let board_summaries: Vec<_> = entries
         .into_iter()
         .filter_map(|entry| {
-            let column = board_column(entry.summary.status)?;
+            let column = board_column(
+                entry.summary.lifecycle.status,
+                entry.summary.lifecycle.archived,
+            )?;
             if column == BoardColumn::Archived && !include_archived {
                 return None;
             }
-            Some((entry, column))
+            Some(entry)
         })
         .collect();
     let (page_summaries, has_more) = paginate_items(board_summaries, &params.pagination());
 
-    let mut data = Vec::with_capacity(page_summaries.len());
-    for (entry, column) in page_summaries {
-        let mut item =
-            serde_json::to_value(&entry.summary).expect("RunSummary serialization is infallible");
-        item["column"] = serde_json::json!(column);
-        if let Some(object) = item.as_object_mut() {
-            object.extend(board_run_metadata_from_projection(&entry.projection));
-        }
-        data.push(item);
-    }
     (
         StatusCode::OK,
         Json(serde_json::json!({
             "columns": board_columns(include_archived),
-            "data": data,
+            "data": page_summaries
+                .into_iter()
+                .map(|entry| entry.summary)
+                .collect::<Vec<_>>(),
             "meta": { "has_more": has_more }
         })),
     )
@@ -327,9 +209,7 @@ async fn list_runs(
             let items = entries
                 .into_iter()
                 .map(|entry| entry.summary)
-                .filter(|summary| {
-                    include_archived || !matches!(summary.status, RunStatus::Archived { .. })
-                })
+                .filter(|summary| include_archived || !summary.lifecycle.archived)
                 .collect::<Vec<_>>();
             let (data, has_more) = paginate_items(items, &params.pagination());
             (
@@ -554,8 +434,8 @@ async fn create_run(
         }
     };
     let created_at = created.run_id.created_at();
-    let title = match state.store.get_cached_run(&created.run_id).await {
-        Ok(Some(cached)) => cached.projection.title().into_owned(),
+    let summary = match state.store.get_cached_summary(&created.run_id).await {
+        Ok(Some(summary)) => summary,
         Ok(None) => return ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -577,20 +457,7 @@ async fn create_run(
         );
     }
 
-    (
-        StatusCode::CREATED,
-        Json(RunStatusResponse {
-            id: run_id.to_string(),
-            title,
-            status: RunStatus::Submitted,
-            error: None,
-            queue_position: None,
-            pending_control: None,
-            created_at,
-            web_url,
-        }),
-    )
-        .into_response()
+    (StatusCode::CREATED, Json(summary)).into_response()
 }
 
 fn run_provenance(headers: &HeaderMap, subject: &UserPrincipal) -> RunProvenance {

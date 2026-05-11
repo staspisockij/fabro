@@ -41,6 +41,11 @@ pub async fn open_terminal_for_run(
     run_id: Option<RunId>,
     size: TerminalSize,
 ) -> crate::Result<Box<dyn TerminalSession>> {
+    #[cfg(any(feature = "daytona", feature = "docker"))]
+    let runtime = record
+        .runtime
+        .as_ref()
+        .ok_or_else(|| crate::Error::message("Run sandbox is missing runtime metadata"))?;
     #[cfg(not(feature = "daytona"))]
     let _ = (&daytona_api_key, &daytona_organization_id);
     #[cfg(not(feature = "docker"))]
@@ -51,15 +56,15 @@ pub async fn open_terminal_for_run(
     match record.provider {
         #[cfg(feature = "daytona")]
         SandboxProvider::Daytona => {
-            let repo_cloned = record.repo_cloned.ok_or_else(|| {
+            let repo_cloned = runtime.repo_cloned.ok_or_else(|| {
                 crate::Error::message("Daytona run sandbox is missing clone metadata")
             })?;
             let sandbox = DaytonaSandbox::reconnect(
-                &record.id,
+                &runtime.id,
                 daytona_api_key.clone(),
                 repo_cloned,
-                record.clone_origin_url.clone(),
-                record.clone_branch.clone(),
+                runtime.clone_origin_url.clone(),
+                runtime.clone_branch.clone(),
             )
             .await?;
             sandbox.start().await?;
@@ -75,16 +80,20 @@ pub async fn open_terminal_for_run(
             .await?;
             Ok(Box::new(session))
         }
+        #[cfg(not(feature = "daytona"))]
+        SandboxProvider::Daytona => Err(crate::Error::message(
+            "Daytona sandbox support is not enabled",
+        )),
         #[cfg(feature = "docker")]
         SandboxProvider::Docker => {
-            let repo_cloned = record.repo_cloned.ok_or_else(|| {
+            let repo_cloned = runtime.repo_cloned.ok_or_else(|| {
                 crate::Error::message("Docker run sandbox is missing clone metadata")
             })?;
             let sandbox = DockerSandbox::reconnect(
-                &record.id,
+                &runtime.id,
                 repo_cloned,
-                record.clone_origin_url.clone(),
-                record.clone_branch.clone(),
+                runtime.clone_origin_url.clone(),
+                runtime.clone_branch.clone(),
                 run_id,
             )
             .await?;
@@ -92,6 +101,10 @@ pub async fn open_terminal_for_run(
             let session = DockerTerminalSession::open(&sandbox, size).await?;
             Ok(Box::new(session))
         }
+        #[cfg(not(feature = "docker"))]
+        SandboxProvider::Docker => Err(crate::Error::message(
+            "Docker sandbox support is not enabled",
+        )),
         SandboxProvider::Local => Err(crate::Error::message(
             "Local sandboxes do not support embedded terminals",
         )),

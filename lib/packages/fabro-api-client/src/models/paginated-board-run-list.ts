@@ -21,14 +21,14 @@ import type { BoardColumnDefinition } from './board-column-definition';
 import type { PaginationMeta } from './pagination-meta';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunListItem } from './run-list-item';
+import type { Run } from './run';
 
 /**
  * Paginated list of board runs with shared canonical fields plus board metadata.
  */
 export interface PaginatedBoardRunList {
     'columns': Array<BoardColumnDefinition>;
-    'data': Array<RunListItem>;
+    'data': Array<Run>;
     'meta': PaginationMeta;
 }
 

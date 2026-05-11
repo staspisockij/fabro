@@ -86,6 +86,39 @@ mock.restore();
 
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
+function sandboxDetails(
+  overrides: Partial<SandboxDetails> & {
+    sandbox?: Partial<SandboxDetails["sandbox"]> & {
+      runtime?: Partial<NonNullable<SandboxDetails["sandbox"]["runtime"]>>;
+    };
+  } = {},
+): SandboxDetails {
+  const sandbox = overrides.sandbox ?? {};
+  return {
+    sandbox: {
+      provider: "docker",
+      image:    null,
+      snapshot: null,
+      runtime:  {
+        id:                null,
+        working_directory: null,
+        repo_cloned:       null,
+        clone_origin_url:  null,
+        clone_branch:      null,
+        ...sandbox.runtime,
+      },
+      ...sandbox,
+    },
+    state:        "running",
+    native_state: null,
+    region:       null,
+    resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
+    labels:       {},
+    timestamps:   { created_at: null, last_activity_at: null },
+    ...overrides,
+  };
+}
+
 function renderRoute(initialPath: string = "/runs/run_1/sandbox") {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
@@ -126,14 +159,18 @@ describe("formatBytesAsMemory", () => {
 
 describe("RunSandbox route", () => {
   test("renders panels for a fully populated sandbox", () => {
-    currentDetails = {
-      provider:          "docker",
-      id:                "abcdef123456",
-      working_directory: "/workspace",
+    currentDetails = sandboxDetails({
+      sandbox:           {
+        provider: "docker",
+        image:    "ghcr.io/fabro/sandbox:latest",
+        runtime:  {
+          id:                "abcdef123456",
+          working_directory: "/workspace",
+        },
+      },
       state:             "running",
       native_state:      "running",
       region:            undefined,
-      image:             "ghcr.io/fabro/sandbox:latest",
       resources:         {
         cpu_cores:    2,
         memory_bytes: 4 * 1024 * 1024 * 1024,
@@ -144,7 +181,7 @@ describe("RunSandbox route", () => {
         created_at:       "2026-05-09T12:00:00Z",
         last_activity_at: undefined,
       },
-    };
+    });
     const renderer = renderRoute();
 
     const panelHeadings = renderer.root
@@ -155,14 +192,17 @@ describe("RunSandbox route", () => {
   });
 
   test("renders without crashing when most fields are null", () => {
-    currentDetails = {
-      provider:          "local",
-      id:                "local:run_1",
-      working_directory: "/tmp/project",
+    currentDetails = sandboxDetails({
+      sandbox:           {
+        provider: "local",
+        runtime:  {
+          id:                "local:run_1",
+          working_directory: "/tmp/project",
+        },
+      },
       state:             "unknown",
       native_state:      undefined,
       region:            undefined,
-      image:             undefined,
       resources:         {
         cpu_cores:    undefined,
         memory_bytes: undefined,
@@ -173,7 +213,7 @@ describe("RunSandbox route", () => {
         created_at:       undefined,
         last_activity_at: undefined,
       },
-    };
+    });
     const renderer = renderRoute();
 
     const labelsHeading = renderer.root.findAll(
@@ -206,18 +246,7 @@ describe("RunSandbox route", () => {
   });
 
   test("Terminal is the default right-column mode", () => {
-    currentDetails = {
-      provider:     "docker",
-      name:         "fabro-run-abc",
-      id:           null,
-      state:        "running",
-      native_state: null,
-      region:       null,
-      image:        null,
-      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
-      labels:       {},
-      timestamps:   { created_at: null, last_activity_at: null },
-    };
+    currentDetails = sandboxDetails({ sandbox: { provider: "docker" } });
     const renderer = renderRoute();
 
     const tabs = renderer.root.findAll(
@@ -233,18 +262,7 @@ describe("RunSandbox route", () => {
   });
 
   test("Daytona provider exposes a VNC tab", () => {
-    currentDetails = {
-      provider:     "daytona",
-      name:         "fabro-run-abc",
-      id:           null,
-      state:        "running",
-      native_state: null,
-      region:       null,
-      image:        null,
-      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
-      labels:       {},
-      timestamps:   { created_at: null, last_activity_at: null },
-    };
+    currentDetails = sandboxDetails({ sandbox: { provider: "daytona" } });
     const renderer = renderRoute();
     const tabs = renderer.root.findAll(
       (node) => node.type === "button" && node.props.role === "tab",
@@ -255,18 +273,7 @@ describe("RunSandbox route", () => {
   });
 
   test("Services mode is selected when ?mode=services is requested", () => {
-    currentDetails = {
-      provider:     "docker",
-      name:         "fabro-run-abc",
-      id:           null,
-      state:        "running",
-      native_state: null,
-      region:       null,
-      image:        null,
-      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
-      labels:       {},
-      timestamps:   { created_at: null, last_activity_at: null },
-    };
+    currentDetails = sandboxDetails({ sandbox: { provider: "docker" } });
     const renderer = renderRoute("/runs/run_1/sandbox?mode=services");
     const tabs = renderer.root.findAll(
       (node) => node.type === "button" && node.props.role === "tab",
@@ -276,18 +283,7 @@ describe("RunSandbox route", () => {
   });
 
   test("Docker provider falls back to terminal when ?mode=vnc is requested", () => {
-    currentDetails = {
-      provider:     "docker",
-      name:         "fabro-run-abc",
-      id:           null,
-      state:        "running",
-      native_state: null,
-      region:       null,
-      image:        null,
-      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
-      labels:       {},
-      timestamps:   { created_at: null, last_activity_at: null },
-    };
+    currentDetails = sandboxDetails({ sandbox: { provider: "docker" } });
     const renderer = renderRoute("/runs/run_1/sandbox?mode=vnc");
     const tabs = renderer.root.findAll(
       (node) => node.type === "button" && node.props.role === "tab",
@@ -297,18 +293,7 @@ describe("RunSandbox route", () => {
   });
 
   test("Filesystem mode keeps sandbox details visible in the left column", () => {
-    currentDetails = {
-      provider:     "docker",
-      name:         "fabro-run-abc",
-      id:           null,
-      state:        "running",
-      native_state: null,
-      region:       null,
-      image:        null,
-      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
-      labels:       {},
-      timestamps:   { created_at: null, last_activity_at: null },
-    };
+    currentDetails = sandboxDetails({ sandbox: { provider: "docker" } });
     const renderer = renderRoute("/runs/run_1/sandbox?mode=filesystem");
 
     const panelHeadings = renderer.root

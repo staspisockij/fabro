@@ -9,7 +9,7 @@ use fabro_github::GitHubCredentials;
     unused_imports,
     reason = "Daytona-enabled builds persist RunId in the sandbox spec."
 )]
-use fabro_types::{RunId, RunSandbox, SandboxProvider};
+use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProvider};
 
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use crate::clone_source;
@@ -84,17 +84,20 @@ impl SandboxSpec {
                 ..
             } => RunSandbox {
                 provider: self.provider(),
-                id,
-                working_directory: working_directory.clone(),
-                repo_cloned: clone_source::repo_cloned_for_record(
-                    config.skip_clone,
-                    clone_origin_url.as_deref(),
-                ),
-                clone_origin_url: clone_source::clean_clone_origin_for_record(
-                    clone_origin_url.as_deref(),
-                ),
-                clone_branch: clone_branch.clone(),
-                resources: None,
+                image:    (!config.image.is_empty()).then(|| config.image.clone()),
+                snapshot: None,
+                runtime:  Some(RunSandboxRuntime {
+                    id,
+                    working_directory: working_directory.clone(),
+                    repo_cloned: clone_source::repo_cloned_for_record(
+                        config.skip_clone,
+                        clone_origin_url.as_deref(),
+                    ),
+                    clone_origin_url: clone_source::clean_clone_origin_for_record(
+                        clone_origin_url.as_deref(),
+                    ),
+                    clone_branch: clone_branch.clone(),
+                }),
             },
             #[cfg(feature = "daytona")]
             Self::Daytona {
@@ -104,26 +107,35 @@ impl SandboxSpec {
                 ..
             } => RunSandbox {
                 provider: self.provider(),
-                id,
-                working_directory: working_directory.clone(),
-                repo_cloned: clone_source::repo_cloned_for_record(
-                    config.skip_clone,
-                    clone_origin_url.as_deref(),
-                ),
-                clone_origin_url: clone_source::clean_clone_origin_for_record(
-                    clone_origin_url.as_deref(),
-                ),
-                clone_branch: clone_branch.clone(),
-                resources: None,
+                image:    None,
+                snapshot: config
+                    .snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.name.clone()),
+                runtime:  Some(RunSandboxRuntime {
+                    id,
+                    working_directory: working_directory.clone(),
+                    repo_cloned: clone_source::repo_cloned_for_record(
+                        config.skip_clone,
+                        clone_origin_url.as_deref(),
+                    ),
+                    clone_origin_url: clone_source::clean_clone_origin_for_record(
+                        clone_origin_url.as_deref(),
+                    ),
+                    clone_branch: clone_branch.clone(),
+                }),
             },
             _ => RunSandbox {
                 provider: self.provider(),
-                id,
-                working_directory,
-                repo_cloned: None,
-                clone_origin_url: None,
-                clone_branch: None,
-                resources: None,
+                image:    None,
+                snapshot: None,
+                runtime:  Some(RunSandboxRuntime {
+                    id,
+                    working_directory,
+                    repo_cloned: None,
+                    clone_origin_url: None,
+                    clone_branch: None,
+                }),
             },
         }
     }

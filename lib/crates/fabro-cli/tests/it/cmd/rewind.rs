@@ -91,10 +91,7 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     assert!(output.status.success(), "rewind should succeed");
 
     let state = run_state(&setup.run.run_dir);
-    assert!(matches!(
-        state.status,
-        fabro_types::RunStatus::Archived { .. }
-    ));
+    assert!(state.archived_at.is_some());
     let new_run_id = state
         .superseded_by
         .expect("rewind should record replacement run");
@@ -156,9 +153,6 @@ fn rewind_archives_source_and_records_superseded_by() {
     );
 
     let state = run_state(&setup.run.run_dir);
-    assert!(matches!(
-        state.status,
-        fabro_types::RunStatus::Archived { .. }
-    ));
+    assert!(state.archived_at.is_some());
     assert!(state.superseded_by.is_some());
 }

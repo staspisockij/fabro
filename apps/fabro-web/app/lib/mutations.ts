@@ -2,8 +2,7 @@ import useSWRMutation from "swr/mutation";
 import { useSWRConfig } from "swr";
 import type {
   PreviewUrlResponse,
-  RunStatusResponse,
-  RunSummary,
+  Run,
   SteerRunRequest,
   SubmitAnswerRequest,
   UpdateRunRequest,
@@ -39,7 +38,7 @@ export type LifecycleMutationResult =
   | {
       intent: LifecycleAction;
       ok: true;
-      run: RunStatusResponse;
+      run: Run;
     }
   | {
       intent: LifecycleAction;
@@ -74,7 +73,7 @@ export function useUnarchiveRun(id: string | undefined) {
 function useLifecycleMutation(
   id: string | undefined,
   intent: LifecycleAction,
-  action: (id: string) => Promise<RunStatusResponse>,
+  action: (id: string) => Promise<Run>,
 ) {
   const { mutate } = useSWRConfig();
   const key = id ? queryKeys.runs[intent](id) : null;
@@ -109,7 +108,7 @@ export function useUpdateRunTitle(id: string | undefined) {
   const { mutate } = useSWRConfig();
   return useSWRMutation(
     id ? queryKeys.runs.updateTitle(id) : null,
-    async (_key, { arg }: { arg: UpdateRunRequest }): Promise<RunSummary> => {
+    async (_key, { arg }: { arg: UpdateRunRequest }): Promise<Run> => {
       if (!id) throw new Error("id is required");
       return apiData(() => runsApi.updateRun(id, arg));
     },

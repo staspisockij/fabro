@@ -62,9 +62,11 @@ pub use outcome::{
 };
 pub use principal::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
 pub use pull_request::{
-    PullRequestDetail, PullRequestGithubDetail, PullRequestRecord, PullRequestRef, PullRequestUser,
+    CheckRun, CheckRunStatus, PullRequest, PullRequestDetails, PullRequestGithubDetail,
+    PullRequestRef, PullRequestTimestamps, PullRequestUser,
 };
-pub use repository::RepositoryReference;
+pub use repository::{RepositoryProvider, RepositoryRef};
+pub type RepositoryReference = RepositoryRef;
 pub use run::{
     DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunClientProvenance, RunProvenance,
     RunServerProvenance, RunSpec,
@@ -78,8 +80,14 @@ pub use run_id::{RunId, fixtures};
 pub use run_projection::{
     CheckpointRecord, PendingInterviewRecord, RunProjection, StageProjection, first_event_seq,
 };
-pub use run_sandbox::RunSandbox;
-pub use run_summary::RunSummary;
+pub use run_sandbox::{RunSandbox, RunSandboxRuntime};
+pub use run_summary::{
+    AutomationRef, Run, RunBillingSummary, RunError, RunLifecycle, RunLinks, RunModel, RunOrigin,
+    RunOriginKind, RunTimestamps, WorkflowRef,
+};
+pub type RunSummary = Run;
+pub type PullRequestRecord = PullRequest;
+pub type PullRequestDetail = PullRequestDetails;
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps};
 pub use sandbox_provider::SandboxProvider;

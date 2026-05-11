@@ -50,8 +50,13 @@ export interface RunProjection {
      */
     'title'?: string;
     'spec': RunSpec;
+    /**
+     * Absolute web UI URL for this run when server web settings are configured.
+     */
+    'web_url'?: string | null;
     'start'?: StartRecord | null;
     'status': RunStatus;
+    'archived_at'?: string | null;
     'status_updated_at': string;
     'last_event_at': string;
     'pending_control'?: RunControlAction | null;

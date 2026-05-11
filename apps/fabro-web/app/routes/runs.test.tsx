@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { BoardColumn, RunListItem } from "@qltysh/fabro-api-client";
+import type { BoardColumn, Run } from "@qltysh/fabro-api-client";
 
 import {
   buildBoardColumns,
@@ -7,17 +7,52 @@ import {
   shouldRefreshBoardForEvent,
 } from "./runs";
 
-function boardRun(id: string, column: BoardColumn, questionText?: string): RunListItem {
+function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
+  const status =
+    column === "blocked"
+      ? { kind: "blocked" as const, reason: "interview", pending_question_id: null }
+      : column === "succeeded"
+        ? { kind: "succeeded" as const, reason: "completed" }
+        : column === "failed"
+          ? { kind: "failed" as const, reason: "error" }
+          : column === "queued"
+            ? { kind: "queued" as const }
+            : column === "initializing"
+              ? { kind: "starting" as const }
+              : { kind: "running" as const };
   return {
-    run_id: id,
-    goal: `Run ${id}`,
-    title: `Run ${id}`,
-    created_at: "2026-04-19T12:00:00Z",
-    status: column,
-    labels: {},
-    repository: { name: "repo" },
-    column,
-    ...(questionText ? { question: { text: questionText } } : {}),
+    id,
+    goal:             `Run ${id}`,
+    title:            `Run ${id}`,
+    workflow:         { slug: "test", name: "Test" },
+    automation:       null,
+    repository:       { name: "repo", origin_url: null, provider: "unknown" },
+    created_by:       null,
+    origin:           { kind: "api" },
+    labels:           {},
+    lifecycle:        {
+      status,
+      pending_control: null,
+      queue_position:  null,
+      error:           null,
+      archived:        column === "archived",
+      archived_at:     column === "archived" ? "2026-04-19T12:05:00Z" : null,
+    },
+    sandbox:          null,
+    models:           [],
+    source_directory: null,
+    timestamps:       {
+      created_at:     "2026-04-19T12:00:00Z",
+      started_at:     null,
+      last_event_at:  null,
+      completed_at:   null,
+    },
+    billing:          null,
+    diff:             null,
+    pull_request:     null,
+    current_question: questionText ? { text: questionText } : null,
+    superseded_by:    null,
+    links:            { web: null },
   };
 }
 

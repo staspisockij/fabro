@@ -437,13 +437,17 @@ pub async fn initialize(
         let run_sandbox = options
             .sandbox
             .to_run_sandbox(&*sandbox, options.run_options.run_id);
+        let runtime = run_sandbox
+            .runtime
+            .as_ref()
+            .ok_or_else(|| Error::engine("initialized sandbox missing runtime metadata"))?;
         options.emitter.emit(&Event::SandboxInitialized {
-            working_directory: run_sandbox.working_directory.clone(),
+            working_directory: runtime.working_directory.clone(),
             provider:          run_sandbox.provider,
-            id:                run_sandbox.id.clone(),
-            repo_cloned:       run_sandbox.repo_cloned,
-            clone_origin_url:  run_sandbox.clone_origin_url.clone(),
-            clone_branch:      run_sandbox.clone_branch.clone(),
+            id:                runtime.id.clone(),
+            repo_cloned:       runtime.repo_cloned,
+            clone_origin_url:  runtime.clone_origin_url.clone(),
+            clone_branch:      runtime.clone_branch.clone(),
         });
     }
 

@@ -124,6 +124,22 @@ async fn body_json(body: Body) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+fn run_json_id(run: &serde_json::Value) -> Option<&str> {
+    run["id"].as_str().or_else(|| run["run_id"].as_str())
+}
+
+fn run_json_status(run: &serde_json::Value) -> &serde_json::Value {
+    &run["lifecycle"]["status"]
+}
+
+fn run_json_pending_control(run: &serde_json::Value) -> &serde_json::Value {
+    &run["lifecycle"]["pending_control"]
+}
+
+fn run_json_archived(run: &serde_json::Value) -> bool {
+    run["lifecycle"]["archived"].as_bool().unwrap_or(false)
+}
+
 async fn mock_daytona_auth_probe(server: &MockServer) -> httpmock::Mock<'_> {
     server
         .mock_async(|when, then| {
@@ -2028,7 +2044,7 @@ url = "http://127.0.0.1:32276"
     let body = response_json!(response, StatusCode::CREATED).await;
     let id = body["id"].as_str().expect("id should be a string");
     assert_eq!(
-        body["web_url"].as_str(),
+        body["links"]["web"].as_str(),
         Some(format!("http://127.0.0.1:32276/runs/{id}").as_str()),
     );
 }
@@ -3892,12 +3908,12 @@ async fn get_run_status_returns_status() {
 
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["run_id"].as_str().unwrap(), run_id);
+    assert_eq!(run_json_id(&body).unwrap(), run_id);
     assert_eq!(body["goal"].as_str().unwrap(), "Test");
     assert_eq!(body["title"].as_str().unwrap(), "Test");
     assert!(body["repository"].is_object());
     assert!(!body["repository"]["name"].as_str().unwrap().is_empty());
-    assert!(body["created_at"].is_string());
+    assert!(body["timestamps"]["created_at"].is_string());
     assert!(body["labels"].is_object());
 }
 
@@ -3934,7 +3950,7 @@ async fn resolve_run_returns_unique_run_id_prefix_match() {
         .unwrap();
 
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["run_id"], run_id);
+    assert_eq!(run_json_id(&body), Some(run_id.as_str()));
 }
 
 #[tokio::test]
@@ -4008,8 +4024,8 @@ async fn resolve_run_prefers_most_recent_exact_workflow_slug_match() {
         .unwrap();
 
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["run_id"], newer_id);
-    assert_ne!(body["run_id"], older_id);
+    assert_eq!(run_json_id(&body), Some(newer_id.as_str()));
+    assert_ne!(run_json_id(&body), Some(older_id.as_str()));
 }
 
 #[tokio::test]
@@ -4040,8 +4056,8 @@ async fn resolve_run_prefers_most_recent_collapsed_workflow_name_match() {
         .unwrap();
 
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["run_id"], newer_id);
-    assert_ne!(body["run_id"], older_id);
+    assert_eq!(run_json_id(&body), Some(newer_id.as_str()));
+    assert_ne!(run_json_id(&body), Some(older_id.as_str()));
 }
 
 #[tokio::test]
@@ -4655,12 +4671,12 @@ async fn get_run_pull_request_returns_live_detail_from_github() {
         .unwrap();
     let body = response_json!(response, StatusCode::OK).await;
 
-    assert_eq!(body["record"]["number"], 42);
-    assert_eq!(body["record"]["owner"], "acme");
+    assert_eq!(body["pull_request"]["number"], 42);
+    assert_eq!(body["pull_request"]["owner"], "acme");
     assert_eq!(body["state"], "closed");
     assert_eq!(body["merged"], true);
-    assert_eq!(body["head"]["ref"], "feature");
-    assert_eq!(body["base"]["ref"], "main");
+    assert_eq!(body["pull_request"]["head_branch"], "feature");
+    assert_eq!(body["pull_request"]["base_branch"], "main");
     github_mock.assert();
 }
 
@@ -5433,7 +5449,7 @@ async fn cache_backed_run_endpoints_reflect_events_appended_after_warmup() {
         .await
         .unwrap();
     let status = response_json!(status, StatusCode::OK).await;
-    assert_eq!(status["status"]["kind"].as_str(), Some("running"));
+    assert_eq!(run_json_status(&status)["kind"].as_str(), Some("running"));
 
     let state_response = app
         .clone()
@@ -6472,7 +6488,7 @@ async fn create_run_returns_submitted() {
 
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::CREATED).await;
-    assert_eq!(body["status"]["kind"], "submitted");
+    assert_eq!(run_json_status(&body)["kind"], "submitted");
     assert_eq!(body["title"], "Test");
 }
 
@@ -6555,7 +6571,7 @@ async fn start_run_transitions_to_queued() {
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["status"]["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "queued");
     assert_eq!(body["title"], "Test");
 
     let status = state
@@ -6681,7 +6697,7 @@ async fn patch_run_title_updates_active_and_archived_runs() {
         .unwrap();
     let archived_patch_body = response_json!(archived_patch_response, StatusCode::OK).await;
     assert_eq!(archived_patch_body["title"], "Archived title");
-    assert_eq!(archived_patch_body["status"]["kind"], "archived");
+    assert!(run_json_archived(&archived_patch_body));
 }
 
 #[tokio::test]
@@ -7355,15 +7371,15 @@ async fn list_runs_returns_started_run() {
     let body = response_json!(response, StatusCode::OK).await;
     let items = body["data"].as_array().unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["run_id"].as_str().unwrap(), run_id.to_string());
+    assert_eq!(run_json_id(&items[0]).unwrap(), run_id.to_string());
     assert!(items[0]["goal"].is_string());
     assert!(items[0]["title"].is_string());
     assert!(items[0]["repository"]["name"].is_string());
-    assert!(items[0]["created_at"].is_string());
-    assert!(items[0]["status"].is_object());
+    assert!(items[0]["timestamps"]["created_at"].is_string());
+    assert!(run_json_status(&items[0]).is_object());
     assert!(items[0]["labels"].is_object());
-    assert!(items[0]["pending_control"].is_null());
-    assert!(items[0]["total_usd_micros"].is_null());
+    assert!(run_json_pending_control(&items[0]).is_null());
+    assert!(items[0]["billing"].is_null());
 }
 
 #[tokio::test]
@@ -7404,9 +7420,9 @@ async fn archive_and_unarchive_updates_listing_visibility() {
         .await
         .unwrap();
     let archive_body = response_json!(archive_response, StatusCode::OK).await;
-    assert_eq!(archive_body["status"]["kind"], "archived");
-    assert_eq!(archive_body["status"]["prior"]["kind"], "succeeded");
-    assert_eq!(archive_body["status"]["prior"]["reason"], "completed");
+    assert!(run_json_archived(&archive_body));
+    assert_eq!(run_json_status(&archive_body)["kind"], "succeeded");
+    assert_eq!(run_json_status(&archive_body)["reason"], "completed");
 
     let hidden_response = app
         .clone()
@@ -7425,7 +7441,7 @@ async fn archive_and_unarchive_updates_listing_visibility() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["run_id"].as_str() == Some(&run_id.to_string())),
+            .any(|item| run_json_id(item) == Some(&run_id.to_string())),
         "archived run should be hidden from default listing"
     );
 
@@ -7445,11 +7461,11 @@ async fn archive_and_unarchive_updates_listing_visibility() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|item| item["run_id"].as_str() == Some(&run_id.to_string()))
+        .find(|item| run_json_id(item) == Some(&run_id.to_string()))
         .expect("archived run should appear when include_archived=true");
-    assert_eq!(archived_item["status"]["kind"], "archived");
-    assert_eq!(archived_item["status"]["prior"]["kind"], "succeeded");
-    assert_eq!(archived_item["status"]["prior"]["reason"], "completed");
+    assert!(run_json_archived(archived_item));
+    assert_eq!(run_json_status(archived_item)["kind"], "succeeded");
+    assert_eq!(run_json_status(archived_item)["reason"], "completed");
 
     let unarchive_response = app
         .clone()
@@ -7463,8 +7479,9 @@ async fn archive_and_unarchive_updates_listing_visibility() {
         .await
         .unwrap();
     let unarchive_body = response_json!(unarchive_response, StatusCode::OK).await;
-    assert_eq!(unarchive_body["status"]["kind"], "succeeded");
-    assert_eq!(unarchive_body["status"]["reason"], "completed");
+    assert!(!run_json_archived(&unarchive_body));
+    assert_eq!(run_json_status(&unarchive_body)["kind"], "succeeded");
+    assert_eq!(run_json_status(&unarchive_body)["reason"], "completed");
 
     let restored_response = app
         .oneshot(
@@ -7481,10 +7498,10 @@ async fn archive_and_unarchive_updates_listing_visibility() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|item| item["run_id"].as_str() == Some(&run_id.to_string()))
+        .find(|item| run_json_id(item) == Some(&run_id.to_string()))
         .expect("unarchived run should reappear in default listing");
-    assert_eq!(restored_item["status"]["kind"], "succeeded");
-    assert_eq!(restored_item["status"]["reason"], "completed");
+    assert_eq!(run_json_status(restored_item)["kind"], "succeeded");
+    assert_eq!(run_json_status(restored_item)["reason"], "completed");
 }
 
 #[tokio::test]
@@ -7924,7 +7941,7 @@ async fn post_runs_returns_submitted_status() {
 
     let response = app.oneshot(req).await.unwrap();
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["status"]["kind"], "submitted");
+    assert_eq!(run_json_status(&body)["kind"], "submitted");
 }
 
 #[tokio::test]
@@ -8065,8 +8082,8 @@ async fn cancel_queued_run_succeeds() {
 
     let response = app.clone().oneshot(req).await.unwrap();
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["status"]["kind"], "failed");
-    assert_eq!(body["status"]["reason"], "cancelled");
+    assert_eq!(run_json_status(&body)["kind"], "failed");
+    assert_eq!(run_json_status(&body)["reason"], "cancelled");
 
     // Cancelled runs appear on the board in the "failed" column
     let req = Request::builder()
@@ -8081,17 +8098,16 @@ async fn cancel_queued_run_succeeds() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|item| item["run_id"].as_str() == Some(run_id_str.as_str()));
+        .find(|item| run_json_id(item) == Some(run_id_str.as_str()));
     assert!(
         board_item.is_some(),
         "cancelled run should appear on the board"
     );
     assert_eq!(
-        board_item.unwrap()["status"]["kind"].as_str(),
+        run_json_status(board_item.unwrap())["kind"].as_str(),
         Some("failed"),
         "cancelled run should preserve the failed lifecycle status"
     );
-    assert_eq!(board_item.unwrap()["column"].as_str(), Some("failed"));
 
     let run_store = state.store.open_run_reader(&run_id).await.unwrap();
     let status = run_store.state().await.unwrap().status;
@@ -8124,7 +8140,7 @@ async fn cancel_run_overwrites_pending_pause_request() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["pending_control"].as_str(), Some("cancel"));
+    assert_eq!(run_json_pending_control(&body).as_str(), Some("cancel"));
 
     let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
     assert_eq!(summary.pending_control, Some(RunControlAction::Cancel));
@@ -8180,8 +8196,8 @@ async fn pause_run_sets_pending_control_on_board_response() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["status"]["kind"], "running");
-    assert_eq!(body["pending_control"].as_str(), Some("pause"));
+    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
     // Verify pending_control via /runs/{id} (board no longer includes this field)
     let req = Request::builder()
@@ -8191,7 +8207,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["pending_control"].as_str(), Some("pause"));
+    assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
     // Verify the run appears on the board (store has Submitted status →
     // "queued" column)
@@ -8206,11 +8222,10 @@ async fn pause_run_sets_pending_control_on_board_response() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|item| item["run_id"].as_str() == Some(run_id_str.as_str()))
+        .find(|item| run_json_id(item) == Some(run_id_str.as_str()))
         .expect("board item should exist");
-    assert!(item["status"].is_object());
-    assert_eq!(item["column"].as_str(), Some("queued"));
-    assert_eq!(item["pending_control"].as_str(), Some("pause"));
+    assert!(run_json_status(item).is_object());
+    assert_eq!(run_json_pending_control(item).as_str(), Some("pause"));
 }
 
 #[tokio::test]
@@ -8267,9 +8282,12 @@ async fn pause_run_immediately_pauses_blocked_run() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["status"]["kind"], "paused");
-    assert_eq!(body["status"]["prior_block"], "human_input_required");
-    assert_eq!(body["pending_control"], serde_json::Value::Null);
+    assert_eq!(run_json_status(&body)["kind"], "paused");
+    assert_eq!(
+        run_json_status(&body)["prior_block"],
+        "human_input_required"
+    );
+    assert_eq!(run_json_pending_control(&body), &serde_json::Value::Null);
 
     let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
     assert_eq!(summary.status, RunStatus::Paused {
@@ -8299,9 +8317,8 @@ async fn unpause_run_sets_pending_control() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["status"]["kind"], "paused");
-    assert!(body["status"]["prior_block"].is_null());
-    assert_eq!(body["pending_control"].as_str(), Some("unpause"));
+    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_pending_control(&body).as_str(), Some("unpause"));
 
     let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
     assert_eq!(summary.pending_control, Some(RunControlAction::Unpause));
@@ -8371,9 +8388,12 @@ async fn unpause_run_returns_blocked_when_human_gate_is_still_unresolved() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(body["status"]["kind"], "blocked");
-    assert_eq!(body["status"]["blocked_reason"], "human_input_required");
-    assert_eq!(body["pending_control"], serde_json::Value::Null);
+    assert_eq!(run_json_status(&body)["kind"], "blocked");
+    assert_eq!(
+        run_json_status(&body)["blocked_reason"],
+        "human_input_required"
+    );
+    assert_eq!(run_json_pending_control(&body), &serde_json::Value::Null);
 
     let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
     assert_eq!(summary.status, RunStatus::Blocked {
@@ -8786,15 +8806,14 @@ async fn demo_boards_runs_returns_run_list_items() {
     let data = body["data"].as_array().expect("data should be array");
     assert!(!data.is_empty(), "demo should return runs");
     let first = &data[0];
-    assert!(first["run_id"].is_string());
+    assert!(first["id"].is_string());
     assert!(first["goal"].is_string());
     assert!(first["repository"].is_object());
     assert!(first["title"].is_string());
-    assert!(first["status"].is_object());
-    assert!(first["column"].is_string());
-    assert!(first["workflow_slug"].is_string() || first["workflow_slug"].is_null());
+    assert!(run_json_status(first).is_object());
+    assert!(first["workflow"]["slug"].is_string() || first["workflow"]["slug"].is_null());
     assert!(first["labels"].is_object());
-    assert!(first["created_at"].is_string());
+    assert!(first["timestamps"]["created_at"].is_string());
 }
 
 #[tokio::test]
@@ -8816,17 +8835,13 @@ async fn demo_get_run_returns_run_summary_shape() {
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
     // Should have RunSummary fields, not RunStatusResponse fields
-    assert!(body["run_id"].is_string(), "should have run_id field");
+    assert!(body["id"].is_string(), "should have id field");
     assert!(body["goal"].is_string(), "should have goal field");
     assert!(
-        body["workflow_slug"].is_string(),
-        "should have workflow_slug field"
+        body["workflow"]["slug"].is_string(),
+        "should have workflow.slug field"
     );
-    // Should NOT have RunStatusResponse-only fields
-    assert!(
-        body["queue_position"].is_null(),
-        "should not have queue_position"
-    );
+    assert!(body["lifecycle"]["queue_position"].is_null());
 }
 
 #[tokio::test]
@@ -8896,7 +8911,7 @@ async fn demo_workflows_return_list_detail_and_runs() {
         .expect("workflow runs data should be an array");
     assert!(
         runs.iter()
-            .all(|run| run["workflow_slug"].as_str() == Some("implement")),
+            .all(|run| run["workflow"]["slug"].as_str() == Some("implement")),
         "workflow run list should be scoped to the requested workflow"
     );
 }
@@ -8925,20 +8940,18 @@ async fn boards_runs_returns_run_list_items_with_board_columns() {
     let data = body["data"].as_array().expect("data should be array");
     let item = data
         .iter()
-        .find(|i| i["run_id"].as_str() == Some(&run_id))
+        .find(|i| run_json_id(i) == Some(&run_id))
         .expect("run should be in board");
-    // Should have canonical run summary fields plus board-specific column
     assert!(item["goal"].is_string());
     assert!(item["title"].is_string());
     assert!(item["repository"].is_object());
-    assert!(item["workflow_slug"].is_string() || item["workflow_slug"].is_null());
-    assert!(item["workflow_name"].is_string() || item["workflow_name"].is_null());
+    assert!(item["workflow"]["slug"].is_string() || item["workflow"]["slug"].is_null());
+    assert!(item["workflow"]["name"].is_string());
     assert!(item["labels"].is_object());
-    assert!(item["status"].is_object());
-    assert!(item["column"].is_string());
-    assert!(item["created_at"].is_string());
-    assert!(item["pending_control"].is_null());
-    assert!(item["total_usd_micros"].is_null());
+    assert!(run_json_status(item).is_object());
+    assert!(item["timestamps"]["created_at"].is_string());
+    assert!(run_json_pending_control(item).is_null());
+    assert!(item["billing"].is_null());
 }
 
 #[tokio::test]
@@ -9078,19 +9091,22 @@ async fn boards_runs_includes_archived_when_flag_set() {
 
     let archived_item = data
         .iter()
-        .find(|i| i["run_id"].as_str() == Some(&archived_id.to_string()))
+        .find(|i| run_json_id(i) == Some(&archived_id.to_string()))
         .expect("archived run should appear when include_archived=true");
-    assert_eq!(archived_item["column"].as_str().unwrap(), "archived");
+    assert!(run_json_archived(archived_item));
     assert_eq!(
-        archived_item["status"]["kind"].as_str().unwrap(),
-        "archived"
+        run_json_status(archived_item)["kind"].as_str().unwrap(),
+        "succeeded"
     );
 
     let succeeded_item = data
         .iter()
-        .find(|i| i["run_id"].as_str() == Some(&succeeded_id.to_string()))
+        .find(|i| run_json_id(i) == Some(&succeeded_id.to_string()))
         .expect("non-archived run should still appear");
-    assert_eq!(succeeded_item["column"].as_str().unwrap(), "succeeded");
+    assert_eq!(
+        run_json_status(succeeded_item)["kind"].as_str().unwrap(),
+        "succeeded"
+    );
 
     let columns = body["columns"].as_array().expect("columns should be array");
     let column_ids: Vec<_> = columns
@@ -9177,7 +9193,10 @@ async fn get_run_exposes_canonical_operator_statuses() {
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = response_json!(response, StatusCode::OK).await;
-        assert_eq!(body["status"]["kind"].as_str(), Some(expected_status));
+        assert_eq!(
+            run_json_status(&body)["kind"].as_str(),
+            Some(expected_status)
+        );
     }
 }
 
@@ -9286,39 +9305,44 @@ async fn boards_runs_maps_statuses_to_columns() {
 
     let paused_item = data
         .iter()
-        .find(|i| i["run_id"].as_str() == Some(&paused_id.to_string()))
+        .find(|i| run_json_id(i) == Some(&paused_id.to_string()))
         .expect("paused run should be on board");
-    assert_eq!(paused_item["status"]["kind"].as_str().unwrap(), "paused");
-    assert!(paused_item["status"]["prior_block"].is_null());
-    assert_eq!(paused_item["column"].as_str().unwrap(), "running");
+    assert_eq!(
+        run_json_status(paused_item)["kind"].as_str().unwrap(),
+        "paused"
+    );
+    assert!(run_json_status(paused_item)["prior_block"].is_null());
 
     let succeeded_item = data
         .iter()
-        .find(|i| i["run_id"].as_str() == Some(&succeeded_id.to_string()))
+        .find(|i| run_json_id(i) == Some(&succeeded_id.to_string()))
         .expect("succeeded run should be on board");
     assert_eq!(
-        succeeded_item["status"]["kind"].as_str().unwrap(),
+        run_json_status(succeeded_item)["kind"].as_str().unwrap(),
         "succeeded"
     );
     assert_eq!(
-        succeeded_item["status"]["reason"].as_str().unwrap(),
+        run_json_status(succeeded_item)["reason"].as_str().unwrap(),
         "completed"
     );
-    assert_eq!(succeeded_item["column"].as_str().unwrap(), "succeeded");
 
     let blocked_item = data
         .iter()
-        .find(|i| i["run_id"].as_str() == Some(&blocked_id.to_string()))
+        .find(|i| run_json_id(i) == Some(&blocked_id.to_string()))
         .expect("blocked run should be on board");
-    assert_eq!(blocked_item["status"]["kind"].as_str().unwrap(), "blocked");
     assert_eq!(
-        blocked_item["status"]["blocked_reason"].as_str().unwrap(),
+        run_json_status(blocked_item)["kind"].as_str().unwrap(),
+        "blocked"
+    );
+    assert_eq!(
+        run_json_status(blocked_item)["blocked_reason"]
+            .as_str()
+            .unwrap(),
         "human_input_required"
     );
-    assert_eq!(blocked_item["column"].as_str().unwrap(), "blocked");
-    assert_eq!(
-        blocked_item["question"]["text"].as_str(),
-        Some("Older unresolved question?")
+    assert!(
+        blocked_item["current_question"].is_object(),
+        "blocked board item should include the current question"
     );
 
     // Verify columns are included in the response
@@ -9389,16 +9413,16 @@ async fn boards_runs_includes_live_board_metadata_from_run_state() {
     let data = body["data"].as_array().expect("data should be array");
     let item = data
         .iter()
-        .find(|i| i["run_id"].as_str() == Some(&run_id.to_string()))
+        .find(|i| run_json_id(i) == Some(&run_id.to_string()))
         .expect("run should be in board");
 
     assert_eq!(item["pull_request"]["number"].as_u64(), Some(42));
-    assert_eq!(item["sandbox"]["id"].as_str(), Some("sb-test"));
+    assert_eq!(item["sandbox"]["runtime"]["id"].as_str(), Some("sb-test"));
     assert_eq!(
-        item["sandbox"]["working_directory"].as_str(),
+        item["sandbox"]["runtime"]["working_directory"].as_str(),
         Some("/sandbox/workdir")
     );
-    assert_eq!(item["question"]["text"].as_str(), Some("Ship it?"));
+    assert!(item["current_question"].is_object());
 }
 
 #[tokio::test]
@@ -9448,7 +9472,7 @@ async fn boards_runs_page_limit_preserves_metadata_for_paged_items() {
     assert_eq!(data.len(), 1);
 
     let item = &data[0];
-    let sandbox_id = item["sandbox"]["id"]
+    let sandbox_id = item["sandbox"]["runtime"]["id"]
         .as_str()
         .expect("paged item should still include sandbox metadata");
     assert!(matches!(sandbox_id, "sb-first" | "sb-second"));

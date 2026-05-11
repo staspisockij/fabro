@@ -374,7 +374,7 @@ export default function RunFiles() {
   const runQuery = useRun(params.id);
   const { push } = useToast();
   const narrow = useNarrowViewport();
-  const runStatus = runQuery.data?.status?.kind;
+  const runStatus = runQuery.data?.lifecycle.status.kind;
 
   // Preserve the last successful payload so a failed revalidation can keep
   // rendering the previous files while surfacing an inline banner.

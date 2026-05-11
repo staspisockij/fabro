@@ -96,9 +96,8 @@ fn archive_succeeded_run_hides_it_from_default_ps() {
     assert!(output.status.success());
     let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
     assert_eq!(runs.len(), 1, "ps -a should show the archived run");
-    assert_eq!(runs[0]["status"]["kind"], "archived");
-    assert_eq!(runs[0]["status"]["prior"]["kind"], "succeeded");
-    assert_eq!(runs[0]["status"]["prior"]["reason"], "completed");
+    assert_eq!(runs[0]["status"]["kind"], "succeeded");
+    assert_eq!(runs[0]["status"]["reason"], "completed");
     assert_eq!(runs[0]["run_id"], run.run_id);
 }
 

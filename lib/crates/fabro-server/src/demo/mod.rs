@@ -62,7 +62,7 @@ pub(crate) async fn list_board_runs(
     State(_state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
-    let items = runs::board_items();
+    let items = runs::summaries();
     let limit = pagination.limit.clamp(1, 100) as usize;
     let offset = pagination.offset as usize;
     let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
@@ -1045,6 +1045,8 @@ mod runs {
             labels(entries),
             Some(format!("/demo/{repo_name}")),
             Some(format!("https://github.com/demo/{repo_name}.git")),
+            None,
+            Some(created_at),
             Some(created_at),
             Some(created_at),
             parse_run_status(status, status_reason)
@@ -1053,6 +1055,11 @@ mod runs {
             elapsed_secs.and_then(duration_ms_from_secs),
             total_usd_micros,
             None,
+            None,
+            None,
+            None,
+            None,
+            Vec::new(),
             None,
             None,
         )
@@ -1109,85 +1116,6 @@ mod runs {
     fn duration_ms_from_secs(secs: f64) -> Option<u64> {
         let duration = Duration::try_from_secs_f64(secs).ok()?;
         duration.as_millis().try_into().ok()
-    }
-
-    fn take_summary(summaries: &mut HashMap<RunId, RunSummary>, run_id: RunId) -> RunSummary {
-        summaries
-            .remove(&run_id)
-            .unwrap_or_else(|| panic!("missing demo summary: {run_id}"))
-    }
-
-    fn board_item(
-        summary: RunSummary,
-        column: BoardColumn,
-        pull_request: Option<RunPullRequest>,
-        sandbox: Option<RunSandbox>,
-        question: Option<RunQuestion>,
-    ) -> RunListItem {
-        RunListItem {
-            column,
-            created_at: summary.created_at,
-            last_event_at: summary.last_event_at,
-            duration_ms: summary.duration_ms.and_then(|ms| i64::try_from(ms).ok()),
-            elapsed_secs: summary.elapsed_secs,
-            goal: summary.goal,
-            source_directory: summary.source_directory,
-            repo_origin_url: summary.repo_origin_url,
-            labels: summary.labels,
-            pending_control: summary.pending_control,
-            pull_request,
-            question,
-            repository: summary.repository,
-            run_id: summary.run_id.to_string(),
-            sandbox,
-            start_time: summary.start_time,
-            status: summary.status,
-            title: summary.title,
-            total_usd_micros: summary.total_usd_micros,
-            workflow_name: summary.workflow_name,
-            workflow_slug: summary.workflow_slug,
-        }
-    }
-
-    fn check(name: &str, status: CheckRunStatus, duration_secs: Option<f64>) -> CheckRun {
-        CheckRun {
-            name: name.into(),
-            status,
-            duration_secs,
-        }
-    }
-
-    fn sandbox(id: &str, cpu_cores: u32, memory_gib: u32) -> RunSandbox {
-        RunSandbox {
-            provider:          SandboxProvider::Docker,
-            id:                id.to_string(),
-            working_directory: "/workspace".to_string(),
-            repo_cloned:       Some(true),
-            clone_origin_url:  None,
-            clone_branch:      None,
-            resources:         Some(SandboxResources {
-                cpu_cores:    Some(f64::from(cpu_cores)),
-                memory_bytes: Some(u64::from(memory_gib) * 1024 * 1024 * 1024),
-                disk_bytes:   None,
-            }),
-        }
-    }
-
-    fn pull_request(
-        number: i64,
-        additions: i64,
-        deletions: i64,
-        comments: i64,
-        checks: Vec<CheckRun>,
-    ) -> RunPullRequest {
-        RunPullRequest {
-            number,
-            html_url: Some(format!("https://github.com/demo/fabro/pull/{number}")),
-            additions: Some(additions),
-            deletions: Some(deletions),
-            comments: Some(comments),
-            checks,
-        }
     }
 
     pub(super) fn columns() -> Vec<BoardColumnDefinition> {
@@ -1318,81 +1246,6 @@ mod runs {
                 None,
                 None,
                 &[("owner", "platform")],
-            ),
-        ]
-    }
-
-    pub(super) fn board_items() -> Vec<RunListItem> {
-        let mut summaries = summaries()
-            .into_iter()
-            .map(|summary| (summary.run_id, summary))
-            .collect::<HashMap<_, _>>();
-
-        vec![
-            board_item(
-                take_summary(&mut summaries, demo_run_id(1)),
-                BoardColumn::Running,
-                None,
-                Some(sandbox("sb-a1b2c3d4", 4, 8)),
-                None,
-            ),
-            board_item(
-                take_summary(&mut summaries, demo_run_id(2)),
-                BoardColumn::Running,
-                None,
-                Some(sandbox("sb-e5f6g7h8", 8, 16)),
-                None,
-            ),
-            board_item(
-                take_summary(&mut summaries, demo_run_id(3)),
-                BoardColumn::Initializing,
-                Some(pull_request(0, 567, 234, 0, vec![])),
-                Some(sandbox("sb-q7r8s9t0", 4, 8)),
-                Some(RunQuestion {
-                    text: "Accept or push for another round?".into(),
-                }),
-            ),
-            board_item(
-                take_summary(&mut summaries, demo_run_id(4)),
-                BoardColumn::Blocked,
-                Some(pull_request(0, 145, 23, 0, vec![])),
-                Some(sandbox("sb-u1v2w3x4", 4, 8)),
-                Some(RunQuestion {
-                    text: "Proceed from investigation to fix?".into(),
-                }),
-            ),
-            board_item(
-                take_summary(&mut summaries, demo_run_id(5)),
-                BoardColumn::Failed,
-                Some(pull_request(889, 234, 67, 4, vec![
-                    check("lint", CheckRunStatus::Success, Some(23.0)),
-                    check("typecheck", CheckRunStatus::Success, Some(72.0)),
-                    check("unit-tests", CheckRunStatus::Success, Some(154.0)),
-                    check("integration-tests", CheckRunStatus::Failure, Some(296.0)),
-                    check("build", CheckRunStatus::Success, Some(105.0)),
-                ])),
-                None,
-                None,
-            ),
-            board_item(
-                take_summary(&mut summaries, demo_run_id(6)),
-                BoardColumn::Succeeded,
-                Some(pull_request(1249, 189, 45, 7, vec![
-                    check("lint", CheckRunStatus::Success, Some(21.0)),
-                    check("typecheck", CheckRunStatus::Success, Some(68.0)),
-                    check("unit-tests", CheckRunStatus::Success, Some(192.0)),
-                    check("integration-tests", CheckRunStatus::Success, Some(334.0)),
-                    check("deploy-preview", CheckRunStatus::Success, Some(93.0)),
-                ])),
-                None,
-                None,
-            ),
-            board_item(
-                take_summary(&mut summaries, demo_run_id(7)),
-                BoardColumn::Queued,
-                None,
-                None,
-                None,
             ),
         ]
     }

@@ -312,8 +312,22 @@ async fn get_run_pull_request(
     .await
     {
         Ok(github) => Json(fabro_types::PullRequestDetail {
-            record: ctx.record,
-            github,
+            pull_request:  ctx.record,
+            state:         github.state,
+            draft:         github.draft,
+            merged:        github.merged,
+            merged_at:     github.merged_at,
+            mergeable:     github.mergeable,
+            additions:     github.additions,
+            deletions:     github.deletions,
+            changed_files: github.changed_files,
+            comments:      0,
+            checks:        Vec::new(),
+            author:        github.user,
+            timestamps:    fabro_types::PullRequestTimestamps {
+                created_at: github.created_at,
+                updated_at: github.updated_at,
+            },
         })
         .into_response(),
         Err(fabro_github::PullRequestApiError::NotFound { .. }) => {

@@ -1853,13 +1853,16 @@ async fn daytona_cp_upload_download_round_trip() {
 
     // 2. Build a RunSandbox (same as `fabro run` would persist)
     let record = RunSandbox {
-        provider:          SandboxProvider::Daytona,
-        id:                sandbox_name.clone(),
-        working_directory: env.working_directory().to_string(),
-        repo_cloned:       Some(false),
-        clone_origin_url:  None,
-        clone_branch:      None,
-        resources:         None,
+        provider: SandboxProvider::Daytona,
+        image:    None,
+        snapshot: None,
+        runtime:  Some(fabro_types::RunSandboxRuntime {
+            id:                sandbox_name.clone(),
+            working_directory: env.working_directory().to_string(),
+            repo_cloned:       Some(false),
+            clone_origin_url:  None,
+            clone_branch:      None,
+        }),
     };
 
     // 3. Reconnect via the real cp::reconnect path

@@ -14,13 +14,7 @@
 
 
 
-/**
- * Reference to a repository by name.
- */
-export interface RepositoryReference {
-    /**
-     * Repository name.
-     */
-    'name': string;
+export interface RunLinks {
+    'web': string | null;
 }
 

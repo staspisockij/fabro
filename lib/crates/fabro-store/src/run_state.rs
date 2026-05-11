@@ -6,12 +6,13 @@ use fabro_types::run_event::{
     AgentCliStartedProps, AgentSessionActivatedProps, CheckpointCompletedProps, RunCompletedProps,
     RunFailedProps, StageCompletedProps, StagePromptProps,
 };
+use fabro_types::settings::run::RunSandboxSettings;
 use fabro_types::{
     BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination, Conclusion, EventBody,
     FailureSignature, InterviewQuestionRecord, Outcome, PendingInterviewRecord, PullRequestRecord,
-    RunControlAction, RunDiff, RunEvent, RunId, RunProjection, RunSandbox, RunSpec, RunStatus,
-    RunSummary, StageCompletion, StageHandler, StageId, StageOutcome, StageProjection, StageState,
-    StartRecord, TerminalStatus, first_event_seq,
+    RunControlAction, RunDiff, RunEvent, RunId, RunModel, RunProjection, RunSandbox,
+    RunSandboxRuntime, RunSpec, RunStatus, RunSummary, SandboxProvider, StageCompletion,
+    StageHandler, StageId, StageOutcome, StageProjection, StageState, StartRecord, first_event_seq,
 };
 use fabro_util::error::render_with_causes;
 use serde_json::Value;
@@ -158,25 +159,20 @@ impl RunProjectionReducer for RunProjection {
                 self.superseded_by = Some(props.new_run_id);
             }
             EventBody::RunArchived(_props) => {
-                let current = self.status;
-                if matches!(current, RunStatus::Archived { .. }) {
+                if self.archived_at.is_some() {
                     return Ok(());
                 }
-                let Some(prior) = current.terminal_status() else {
+                if !self.status.is_terminal() {
                     return Err(fabro_types::InvalidTransition {
-                        from: current,
-                        to:   RunStatus::Archived {
-                            prior: TerminalStatus::Dead,
-                        },
+                        from: self.status,
+                        to:   self.status,
                     }
                     .into());
-                };
-                self.try_apply_status(RunStatus::Archived { prior }, ts)?;
+                }
+                self.archived_at = Some(ts);
             }
             EventBody::RunUnarchived(_props) => {
-                if let RunStatus::Archived { prior } = self.status {
-                    self.try_apply_status(prior.into(), ts)?;
-                }
+                self.archived_at = None;
             }
             EventBody::RunTitleUpdated(props) => {
                 self.title.clone_from(&props.title);
@@ -220,18 +216,24 @@ impl RunProjectionReducer for RunProjection {
                 });
             }
             EventBody::SandboxInitialized(props) => {
-                self.sandbox = Some(RunSandbox {
-                    provider:          props.provider,
+                let sandbox = self.sandbox.get_or_insert(RunSandbox {
+                    provider: props.provider,
+                    image:    None,
+                    snapshot: None,
+                    runtime:  None,
+                });
+                sandbox.provider = props.provider;
+                sandbox.runtime = Some(RunSandboxRuntime {
                     id:                props.id.clone(),
                     working_directory: props.working_directory.clone(),
                     repo_cloned:       props.repo_cloned,
                     clone_origin_url:  props.clone_origin_url.clone(),
                     clone_branch:      props.clone_branch.clone(),
-                    resources:         None,
                 });
             }
             EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestRecord {
+                    provider:    "github".to_string(),
                     html_url:    props.pr_url.clone(),
                     number:      props.pr_number,
                     owner:       props.owner.clone(),
@@ -468,7 +470,31 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
         fork_source_ref: props.fork_source_ref.clone(),
     };
 
-    Ok(RunProjection::new(title, spec, stored.ts))
+    let mut projection = RunProjection::new(title, spec, stored.ts);
+    projection.web_url.clone_from(&props.web_url);
+    projection.sandbox = Some(planned_sandbox(&projection.spec.settings.run.sandbox));
+    Ok(projection)
+}
+
+fn planned_sandbox(settings: &RunSandboxSettings) -> RunSandbox {
+    let provider = settings
+        .provider
+        .parse::<SandboxProvider>()
+        .unwrap_or(SandboxProvider::Local);
+    RunSandbox {
+        provider,
+        image: settings
+            .docker
+            .as_ref()
+            .map(|docker| docker.image.clone())
+            .filter(|image| !image.is_empty()),
+        snapshot: settings
+            .daytona
+            .as_ref()
+            .and_then(|daytona| daytona.snapshot.as_ref())
+            .map(|snapshot| snapshot.name.clone()),
+        runtime: None,
+    }
 }
 
 fn stage_at_visit<'a>(
@@ -558,6 +584,22 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
                 .find_map(|checkpoint| checkpoint.diff.summary)
         });
 
+    let current_question = state
+        .pending_interviews
+        .iter()
+        .min_by(|(left_id, left), (right_id, right)| {
+            left.started_at
+                .cmp(&right.started_at)
+                .then_with(|| left_id.cmp(right_id))
+        })
+        .map(|(_, record)| record.question.clone());
+    let models = run_models(state);
+    let created_by = state
+        .spec
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.subject.clone());
+
     RunSummary::new(
         *run_id,
         workflow_name,
@@ -567,8 +609,13 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
         state.spec.labels.clone(),
         state.spec.source_directory.clone(),
         state.spec.git.as_ref().map(|git| git.origin_url.clone()),
+        created_by,
         state.start.as_ref().map(|start| start.start_time),
         Some(state.last_event_at),
+        state
+            .conclusion
+            .as_ref()
+            .map(|conclusion| conclusion.timestamp),
         state.status,
         state.pending_control,
         state
@@ -583,7 +630,30 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> RunSummary
         state.superseded_by,
         diff_summary,
         state.pull_request.clone(),
+        state.archived_at,
+        state.sandbox.clone(),
+        models,
+        current_question,
+        state.web_url.clone(),
     )
+}
+
+fn run_models(state: &RunProjection) -> Vec<RunModel> {
+    let mut models = state
+        .iter_stages()
+        .filter_map(|(_, stage)| stage.model.as_ref())
+        .map(|model| RunModel {
+            provider: Some(model.provider.to_string()),
+            name:     model.model_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|left, right| {
+        left.provider
+            .cmp(&right.provider)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    models.dedup_by(|left, right| left.provider == right.provider && left.name == right.name);
+    models
 }
 
 fn checkpoint_from_props(props: &CheckpointCompletedProps, timestamp: DateTime<Utc>) -> Checkpoint {
@@ -787,8 +857,7 @@ mod tests {
         BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint, CheckpointRecord,
         CommandTermination, EventBody, FailureCategory, FailureDetail, FailureReason, Graph,
         Outcome, QuestionType, RunBlobId, RunControlAction, RunDiff, RunEvent, RunSpec, RunStatus,
-        StageOutcome, StageState, SuccessReason, TerminalStatus, WorkflowSettings, first_event_seq,
-        fixtures,
+        StageOutcome, StageState, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -1625,7 +1694,7 @@ mod tests {
         let summary = build_summary(&state, &fixtures::RUN_1);
         let summary_json = serde_json::to_value(summary).unwrap();
         assert_eq!(
-            summary_json["status"],
+            summary_json["lifecycle"]["status"],
             json!({
                 "kind": "paused",
                 "prior_block": "human_input_required"
@@ -1755,7 +1824,10 @@ mod tests {
         };
 
         let summary_json = serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap();
-        assert_eq!(summary_json["status"], json!({ "kind": "submitted" }));
+        assert_eq!(
+            summary_json["lifecycle"]["status"],
+            json!({ "kind": "submitted" })
+        );
     }
 
     #[test]
@@ -1963,7 +2035,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(
-            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff"],
             json!({
                 "files_changed": 2,
                 "additions": 10,
@@ -1984,8 +2056,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(
-            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"]
-                ["files_changed"],
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff"]["files_changed"],
             2
         );
 
@@ -2008,7 +2079,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(
-            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap()["diff"],
             json!({
                 "files_changed": 4,
                 "additions": 18,
@@ -2041,7 +2112,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(
-            serde_json::to_value(build_summary(&failed_state, &fixtures::RUN_1)).unwrap()["diff_summary"],
+            serde_json::to_value(build_summary(&failed_state, &fixtures::RUN_1)).unwrap()["diff"],
             json!({
                 "files_changed": 5,
                 "additions": 20,
@@ -2110,11 +2181,10 @@ mod tests {
             ))
             .unwrap();
 
-        assert_eq!(state.status(), RunStatus::Archived {
-            prior: TerminalStatus::Succeeded {
-                reason: SuccessReason::Completed,
-            },
+        assert_eq!(state.status(), RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
         });
+        assert!(state.archived_at.is_some());
     }
 
     #[test]

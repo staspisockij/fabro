@@ -242,7 +242,9 @@ fn inspect_created_run_shows_run_spec_without_start_or_conclusion() {
         "start_record": null,
         "conclusion": null,
         "checkpoint": null,
-        "sandbox": null
+        "sandbox": {
+          "provider": "local"
+        }
       }
     ]
     "#);

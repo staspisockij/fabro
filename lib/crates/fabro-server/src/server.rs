@@ -1702,7 +1702,11 @@ async fn delete_run_sandbox_resource(
             sandbox_preserved: true,
             sandbox:           DeleteRunSandbox {
                 provider: record.provider,
-                id:       record.id,
+                id:       record
+                    .runtime
+                    .as_ref()
+                    .map(|runtime| runtime.id.clone())
+                    .unwrap_or_default(),
             },
         }));
     }
@@ -1759,11 +1763,13 @@ async fn reject_active_delete_without_force(
     }
 
     match state.store.runs().find(run_id).await {
-        Ok(Some(summary)) if summary.status.requires_force_to_delete() => Err(ApiError::new(
-            StatusCode::CONFLICT,
-            active_run_delete_message(*run_id, summary.status),
-        )
-        .into_response()),
+        Ok(Some(summary)) if summary.lifecycle.status.requires_force_to_delete() => {
+            Err(ApiError::new(
+                StatusCode::CONFLICT,
+                active_run_delete_message(*run_id, summary.lifecycle.status),
+            )
+            .into_response())
+        }
         Ok(_) => Ok(()),
         Err(err) => {
             Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())
@@ -2034,18 +2040,18 @@ pub(crate) async fn reconcile_incomplete_runs_on_startup(
     let mut reconciled = 0usize;
 
     for summary in summaries {
-        if !should_reconcile_run_on_startup(summary.status) {
+        if !should_reconcile_run_on_startup(summary.lifecycle.status) {
             continue;
         }
 
-        let run_store = state.store.open_run(&summary.run_id).await?;
+        let run_store = state.store.open_run(&summary.id).await?;
         let (error, reason) = failure_for_incomplete_run(
-            summary.pending_control,
+            summary.lifecycle.pending_control,
             "Fabro server restarted before the run reached a terminal state.".to_string(),
         );
         workflow_event::append_event(
             &run_store,
-            &summary.run_id,
+            &summary.id,
             &workflow_event::Event::WorkflowRunFailed {
                 error,
                 duration_ms: 0,
@@ -2379,16 +2385,6 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
             managed_run.error = Some(props.error.clone());
             managed_run.active_api_stages.clear();
             managed_run.active_cli_stages.clear();
-        }
-        EventBody::RunArchived(_) => {
-            if let Some(prior) = managed_run.status.terminal_status() {
-                managed_run.status = RunStatus::Archived { prior };
-            }
-        }
-        EventBody::RunUnarchived(_) => {
-            if let RunStatus::Archived { prior } = managed_run.status {
-                managed_run.status = prior.into();
-            }
         }
         // Track API-mode steerable sessions. Activated/deactivated are
         // leased by session id so stale deactivations cannot clear a newer
@@ -3440,8 +3436,7 @@ async fn append_control_request(
 async fn reject_if_archived(state: &AppState, run_id: &RunId) -> Option<Response> {
     let run_store = state.store.open_run_reader(run_id).await.ok()?;
     let projection = run_store.state().await.ok()?;
-    let status = projection.status;
-    matches!(status, RunStatus::Archived { .. }).then(|| {
+    projection.archived_at.is_some().then(|| {
         ApiError::new(
             StatusCode::CONFLICT,
             operations::archived_rejection_message(run_id),

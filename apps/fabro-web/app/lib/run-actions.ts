@@ -1,4 +1,4 @@
-import type { ErrorResponseEntry, RunStatusResponse } from "@qltysh/fabro-api-client";
+import type { ErrorResponseEntry, Run } from "@qltysh/fabro-api-client";
 
 import {
   ApiError,
@@ -31,15 +31,15 @@ const ARCHIVABLE_STATUSES = new Set<RunStatus>([
   "dead",
 ]);
 
-export async function cancelRun(id: string, request?: Request): Promise<RunStatusResponse> {
+export async function cancelRun(id: string, request?: Request): Promise<Run> {
   return runLifecycleAction(id, "cancel", request);
 }
 
-export async function archiveRun(id: string, request?: Request): Promise<RunStatusResponse> {
+export async function archiveRun(id: string, request?: Request): Promise<Run> {
   return runLifecycleAction(id, "archive", request);
 }
 
-export async function unarchiveRun(id: string, request?: Request): Promise<RunStatusResponse> {
+export async function unarchiveRun(id: string, request?: Request): Promise<Run> {
   return runLifecycleAction(id, "unarchive", request);
 }
 
@@ -68,8 +68,9 @@ export function canDelete(status: string | null | undefined): boolean {
   return status === "archived";
 }
 
-export function isTerminalCancelledRun(run: RunStatusResponse): boolean {
-  return run.status.kind === "failed" && run.status.reason === "cancelled";
+export function isTerminalCancelledRun(run: Run): boolean {
+  const status = run.lifecycle.status;
+  return status.kind === "failed" && status.reason === "cancelled";
 }
 
 export function deleteErrorMessage(error: unknown): string {
@@ -119,7 +120,7 @@ async function runLifecycleAction(
   id: string,
   action: LifecycleAction,
   request?: Request,
-): Promise<RunStatusResponse> {
+): Promise<Run> {
   try {
     switch (action) {
       case "cancel":

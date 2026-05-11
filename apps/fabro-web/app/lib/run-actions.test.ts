@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AxiosAdapter } from "axios";
+import type { Run, RunStatus } from "@qltysh/fabro-api-client";
 
 import {
   archiveRun,
@@ -20,6 +21,43 @@ type StubResponseInit = {
 };
 
 const originalAdapter = generatedAxios.defaults.adapter;
+
+function makeRun(status: RunStatus, archived = false): Run {
+  return {
+    id:               "run-1",
+    goal:             "Fix the build",
+    title:            "Fix the build",
+    workflow:         { slug: "fix_build", name: "Fix Build" },
+    automation:       null,
+    repository:       null,
+    created_by:       null,
+    origin:           { kind: "api" },
+    labels:           {},
+    lifecycle:        {
+      status,
+      pending_control: null,
+      queue_position:  null,
+      error:           null,
+      archived,
+      archived_at:     archived ? "2026-04-20T12:05:00Z" : null,
+    },
+    sandbox:          null,
+    models:           [],
+    source_directory: null,
+    timestamps:       {
+      created_at:     "2026-04-20T12:00:00Z",
+      started_at:     null,
+      last_event_at:  null,
+      completed_at:   null,
+    },
+    billing:          null,
+    diff:             null,
+    pull_request:     null,
+    current_question: null,
+    superseded_by:    null,
+    links:            { web: null },
+  };
+}
 
 function stubGeneratedAxiosOnce(init: StubResponseInit) {
   generatedAxios.defaults.adapter = (async (config) => {
@@ -65,49 +103,36 @@ describe("run lifecycle actions", () => {
   test("cancelRun parses a 200 response", async () => {
     stubGeneratedAxiosOnce({
       status: 200,
-      body: {
-        id: "run-1",
-        status: { kind: "failed", reason: "cancelled" },
-        created_at: "2026-04-20T12:00:00Z",
-      },
+      body: makeRun({ kind: "failed", reason: "cancelled" }),
     });
 
     const result = await cancelRun("run-1");
-    expect(result.status.kind).toBe("failed");
-    if (result.status.kind === "failed") {
-      expect(result.status.reason).toBe("cancelled");
+    expect(result.lifecycle.status.kind).toBe("failed");
+    if (result.lifecycle.status.kind === "failed") {
+      expect(result.lifecycle.status.reason).toBe("cancelled");
     }
   });
 
   test("archiveRun parses a 200 response", async () => {
     stubGeneratedAxiosOnce({
       status: 200,
-      body: {
-        id: "run-1",
-        status: {
-          kind: "archived",
-          prior: { kind: "succeeded", reason: "completed" },
-        },
-        created_at: "2026-04-20T12:00:00Z",
-      },
+      body: makeRun({ kind: "succeeded", reason: "completed" }, true),
     });
 
     const result = await archiveRun("run-1");
-    expect(result.status.kind).toBe("archived");
+    expect(result.lifecycle.status.kind).toBe("succeeded");
+    expect(result.lifecycle.archived).toBe(true);
   });
 
   test("unarchiveRun parses a 200 response", async () => {
     stubGeneratedAxiosOnce({
       status: 200,
-      body: {
-        id: "run-1",
-        status: { kind: "succeeded", reason: "completed" },
-        created_at: "2026-04-20T12:00:00Z",
-      },
+      body: makeRun({ kind: "succeeded", reason: "completed" }),
     });
 
     const result = await unarchiveRun("run-1");
-    expect(result.status.kind).toBe("succeeded");
+    expect(result.lifecycle.status.kind).toBe("succeeded");
+    expect(result.lifecycle.archived).toBe(false);
   });
 
   test("404 and 409 preserve the parsed error envelope", async () => {
@@ -173,19 +198,12 @@ describe("run lifecycle actions", () => {
 
   test("isTerminalCancelledRun distinguishes immediate cancel success from in-flight cancellation", () => {
     expect(
-      isTerminalCancelledRun({
-        id: "run-1",
-        status: { kind: "failed", reason: "cancelled" },
-        created_at: "2026-04-20T12:00:00Z",
-      }),
+      isTerminalCancelledRun(makeRun({ kind: "failed", reason: "cancelled" })),
     ).toBe(true);
     expect(
-      isTerminalCancelledRun({
-        id: "run-1",
-        status: { kind: "running" },
-        pending_control: "cancel",
-        created_at: "2026-04-20T12:00:00Z",
-      }),
+      isTerminalCancelledRun(
+        makeRun({ kind: "running" }, false),
+      ),
     ).toBe(false);
   });
 });

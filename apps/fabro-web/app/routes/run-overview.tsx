@@ -31,15 +31,13 @@ export default function RunOverview() {
     [stagesQuery.data],
   );
   const graphSvg = graphQuery.data;
-  const apiStatus = runQuery.data?.status;
+  const apiStatus = runQuery.data?.lifecycle.status;
   const terminalOutcome: "succeeded" | "failed" | "dead" | null =
-    apiStatus?.kind === "archived"
-      ? apiStatus.prior.kind
-      : apiStatus?.kind === "succeeded" ||
-          apiStatus?.kind === "failed" ||
-          apiStatus?.kind === "dead"
-        ? apiStatus.kind
-        : null;
+    apiStatus?.kind === "succeeded" ||
+    apiStatus?.kind === "failed" ||
+    apiStatus?.kind === "dead"
+      ? apiStatus.kind
+      : null;
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);

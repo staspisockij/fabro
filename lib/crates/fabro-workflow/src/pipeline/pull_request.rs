@@ -535,6 +535,7 @@ pub async fn maybe_open_pull_request(
     }
 
     let record = PullRequestRecord {
+        provider: "github".to_string(),
         html_url: created.html_url,
         number: created.number,
         owner,

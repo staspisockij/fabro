@@ -15,8 +15,12 @@ pub struct RunProjection {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title:              String,
     pub spec:               RunSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_url:            Option<String>,
     pub start:              Option<StartRecord>,
     pub status:             RunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at:        Option<DateTime<Utc>>,
     pub status_updated_at:  DateTime<Utc>,
     pub last_event_at:      DateTime<Utc>,
     pub pending_control:    Option<RunControlAction>,
@@ -153,8 +157,10 @@ impl RunProjection {
         Self {
             title,
             spec,
+            web_url: None,
             start: None,
             status: RunStatus::Submitted,
+            archived_at: None,
             status_updated_at: created_at,
             last_event_at: created_at,
             pending_control: None,
@@ -239,6 +245,10 @@ impl RunProjection {
 
     pub fn is_terminal(&self) -> bool {
         self.status().is_terminal()
+    }
+
+    pub fn is_archived(&self) -> bool {
+        self.archived_at.is_some()
     }
 
     pub fn current_checkpoint(&self) -> Option<&Checkpoint> {

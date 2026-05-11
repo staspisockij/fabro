@@ -63,18 +63,52 @@ function makeRunSummary(
   pullRequest: any = null,
   title = "Run 1",
 ) {
+  const apiStatus =
+    status === "succeeded"
+      ? { kind: "succeeded", reason: "completed" }
+      : status === "failed"
+        ? { kind: "failed", reason: "error" }
+        : status === "dead"
+          ? { kind: "dead" }
+          : status === "blocked"
+            ? { kind: "blocked", reason: "interview", pending_question_id: null }
+            : { kind: status };
+  const archived = status === "archived";
   return {
-    run_id:          "run_1",
+    id:               "run_1",
+    goal:             "Run 1",
     title,
-    repository:      { name: "fabro" },
-    status:          { kind: status },
-    workflow_slug:   "default",
-    workflow_name:   "Default",
-    duration_ms:     null,
-    elapsed_secs:    null,
+    workflow:         { slug: "default", name: "Default" },
+    automation:       null,
+    repository:       { name: "fabro", origin_url: null, provider: "unknown" },
+    created_by:       null,
+    origin:           { kind: "api" },
+    labels:           {},
+    lifecycle:        {
+      status:          archived ? { kind: "succeeded", reason: "completed" } : apiStatus,
+      pending_control: null,
+      queue_position:  null,
+      error:           null,
+      archived,
+      archived_at:     archived ? "2026-04-20T12:05:00Z" : null,
+    },
+    sandbox:          null,
+    models:           [],
     source_directory: null,
-    diff_summary:    diffSummary,
-    pull_request:    pullRequest,
+    timestamps:       {
+      created_at:     "2026-04-20T12:00:00Z",
+      started_at:     null,
+      last_event_at:  null,
+      completed_at:   null,
+      duration_ms:    null,
+      elapsed_secs:   null,
+    },
+    billing:          null,
+    diff:             diffSummary,
+    pull_request:     pullRequest ? { provider: "github", ...pullRequest } : null,
+    current_question: null,
+    superseded_by:    null,
+    links:            { web: null },
   };
 }
 
@@ -242,12 +276,9 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "cancel",
       ok: true,
-      run: {
-        id: "run-1",
-        status: { kind: "failed", reason: "cancelled" },
-        created_at: "2026-04-20T12:00:00Z",
-      },
+      run: makeRunSummary("failed"),
     };
+    result.run.lifecycle.status = { kind: "failed", reason: "cancelled" };
 
     const firstState = handleLifecycleToastResult("cancel", result, initialState, api);
 
@@ -266,7 +297,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "cancel",
       ok: true,
-      run: { id: "run-1", status: { kind: "running" }, created_at: "2026-04-20T12:00:00Z" },
+      run: makeRunSummary("running"),
     };
 
     handleLifecycleToastResult("cancel", result, initialState, api);
@@ -279,14 +310,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "archive",
       ok: true,
-      run: {
-        id: "run-1",
-        status: {
-          kind: "archived",
-          prior: { kind: "succeeded", reason: "completed" },
-        },
-        created_at: "2026-04-20T12:00:00Z",
-      },
+      run: makeRunSummary("archived"),
     };
 
     const firstState = handleLifecycleToastResult("archive", result, initialState, api);
@@ -306,11 +330,7 @@ describe("handleLifecycleToastResult", () => {
     const result: RunDetailActionResult = {
       intent: "unarchive",
       ok: true,
-      run: {
-        id: "run-1",
-        status: { kind: "succeeded", reason: "completed" },
-        created_at: "2026-04-20T12:00:00Z",
-      },
+      run: makeRunSummary("succeeded"),
     };
     const stateWithActiveToast: LifecycleToastState = {
       activeArchiveToastId: "toast-9",
