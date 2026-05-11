@@ -78,7 +78,7 @@ pub(crate) async fn search_runs(
 ) -> ToolResult<SearchRunsResult> {
     let status = params.status;
     let raw = params.raw;
-    let mut runs = if let Some(run_ids) = raw.run_ids.as_ref() {
+    let runs = if let Some(run_ids) = raw.run_ids.as_ref() {
         resolve_requested_runs(&client, run_ids).await?
     } else {
         client
@@ -86,18 +86,24 @@ pub(crate) async fn search_runs(
             .await
             .map_err(|err| ToolError::from_anyhow(&err))?
     };
-    runs.sort_by(|a, b| {
-        let a_sort_time = a.timestamps.started_at.unwrap_or(a.timestamps.created_at);
-        let b_sort_time = b.timestamps.started_at.unwrap_or(b.timestamps.created_at);
-        b_sort_time.cmp(&a_sort_time).then_with(|| b.id.cmp(&a.id))
-    });
+    let page = filter_sort_and_page_runs(runs, &raw, status.as_deref())?;
 
-    if let Some(after) = raw.after.as_deref() {
-        if let Some(position) = runs.iter().position(|run| run.id.to_string() == after) {
-            runs = runs.into_iter().skip(position + 1).collect();
-        }
-    }
+    Ok(SearchRunsResult {
+        runs:        page.runs.iter().map(common::run_summary_result).collect(),
+        next_cursor: page.next_cursor,
+    })
+}
 
+struct RunSearchPage {
+    runs:        Vec<Run>,
+    next_cursor: Option<String>,
+}
+
+fn filter_sort_and_page_runs(
+    mut runs: Vec<Run>,
+    raw: &FabroRunSearchParams,
+    status: Option<&[RunStatusKind]>,
+) -> ToolResult<RunSearchPage> {
     if let Some(workflow) = raw.workflow.as_deref() {
         runs.retain(|run| {
             run.workflow.name == workflow || run.workflow.slug.as_deref() == Some(workflow)
@@ -110,7 +116,7 @@ pub(crate) async fn search_runs(
                 .all(|(key, value)| run.labels.get(key) == Some(value))
         });
     }
-    if let Some(status) = status.as_ref() {
+    if let Some(status) = status {
         runs.retain(|run| {
             status
                 .iter()
@@ -129,14 +135,26 @@ pub(crate) async fn search_runs(
         runs.retain(|run| run.timestamps.created_at <= cutoff);
     }
 
+    runs.sort_by(|a, b| {
+        let a_sort_time = a.timestamps.started_at.unwrap_or(a.timestamps.created_at);
+        let b_sort_time = b.timestamps.started_at.unwrap_or(b.timestamps.created_at);
+        b_sort_time.cmp(&a_sort_time).then_with(|| b.id.cmp(&a.id))
+    });
+
+    if let Some(after) = raw.after.as_deref() {
+        if let Some(position) = runs.iter().position(|run| run.id.to_string() == after) {
+            runs = runs.into_iter().skip(position + 1).collect();
+        }
+    }
+
     let first = raw.first.unwrap_or(20).min(100);
     let has_more = runs.len() > first;
     let page = runs.into_iter().take(first).collect::<Vec<_>>();
     let next_cursor = has_more
         .then(|| page.last().map(|run| run.id.to_string()))
         .flatten();
-    Ok(SearchRunsResult {
-        runs: page.iter().map(common::run_summary_result).collect(),
+    Ok(RunSearchPage {
+        runs: page,
         next_cursor,
     })
 }
@@ -162,4 +180,88 @@ async fn resolve_requested_runs(client: &Arc<Client>, run_ids: &[String]) -> Too
         unique.entry(run.id).or_insert(run);
     }
     Ok(unique.into_values().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use chrono::{TimeZone, Utc};
+    use fabro_types::{RunLifecycle, RunLinks, RunOrigin, RunStatus, RunTimestamps, WorkflowRef};
+
+    use super::*;
+
+    #[test]
+    fn cursor_is_applied_after_filters() {
+        let matching_newer = run("01KRBZW5C00000000000000001", "keep", 30);
+        let unrelated_cursor = run("01KRBZW4DW0000000000000002", "skip", 20);
+        let matching_older = run("01KRBZW3EF0000000000000003", "keep", 10);
+
+        let result = filter_sort_and_page_runs(
+            vec![
+                matching_older.clone(),
+                unrelated_cursor.clone(),
+                matching_newer.clone(),
+            ],
+            &FabroRunSearchParams {
+                run_ids:        None,
+                workflow:       None,
+                labels:         Some(HashMap::from([("group".to_string(), "keep".to_string())])),
+                status:         None,
+                archived:       None,
+                created_after:  None,
+                created_before: None,
+                first:          Some(10),
+                after:          Some(unrelated_cursor.id.to_string()),
+            },
+            None,
+        )
+        .expect("filtering should succeed");
+
+        let ids = result.runs.iter().map(|run| run.id).collect::<Vec<_>>();
+        assert_eq!(ids, vec![matching_newer.id, matching_older.id]);
+    }
+
+    fn run(id: &str, group: &str, seconds: u32) -> Run {
+        let created_at = Utc.with_ymd_and_hms(2026, 5, 11, 12, 0, seconds).unwrap();
+        Run {
+            id:               id.parse().expect("test run id should parse"),
+            title:            "test".to_string(),
+            goal:             "test".to_string(),
+            workflow:         WorkflowRef {
+                slug: Some("simple".to_string()),
+                name: "Simple".to_string(),
+            },
+            automation:       None,
+            repository:       None,
+            created_by:       None,
+            origin:           RunOrigin::default(),
+            labels:           HashMap::from([("group".to_string(), group.to_string())]),
+            lifecycle:        RunLifecycle {
+                status:          RunStatus::Submitted,
+                pending_control: None,
+                queue_position:  None,
+                error:           None,
+                archived:        false,
+                archived_at:     None,
+            },
+            sandbox:          None,
+            models:           Vec::new(),
+            source_directory: None,
+            timestamps:       RunTimestamps {
+                created_at,
+                started_at: None,
+                last_event_at: None,
+                completed_at: None,
+                duration_ms: None,
+                elapsed_secs: None,
+            },
+            billing:          None,
+            diff:             None,
+            pull_request:     None,
+            current_question: None,
+            superseded_by:    None,
+            links:            RunLinks { web: None },
+        }
+    }
 }
