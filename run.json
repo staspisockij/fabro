@@ -397,15 +397,72 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KRC5KAKC6ATZ1P2CMNQHA7NJ",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-11T18:43:29.474265Z",
+    "run_branch": "fabro/run/01KRC5KAKC6ATZ1P2CMNQHA7NJ",
+    "base_sha": "503601f8be41604d2b9e031b2174392dd4114c3d"
   },
-  "status_updated_at": "2026-05-11T18:43:10.090796Z",
-  "last_event_at": "2026-05-11T18:43:28.652126Z",
+  "status": {
+    "kind": "blocked",
+    "blocked_reason": "human_input_required"
+  },
+  "status_updated_at": "2026-05-11T18:43:32.213999Z",
+  "last_event_at": "2026-05-11T18:43:32.213999Z",
   "pending_control": null,
-  "checkpoints": [],
-  "conclusion": null,
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-11T18:43:32.213708Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_class": "",
+          "current_node": "start",
+          "internal.retry_count.start": 0,
+          "internal.fidelity": "compact",
+          "outcome": "succeeded",
+          "graph.rankdir": "LR",
+          "internal.thread_id": null,
+          "internal.work_dir": "/home/daytona/workspace",
+          "failure_signature": "",
+          "graph.goal": "QA the answer payload shapes",
+          "internal.node_visit_count": 1,
+          "internal.run_id": "01KRC5KAKC6ATZ1P2CMNQHA7NJ"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "yes_no",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
+  "conclusion": {
+    "timestamp": "2026-05-11T18:47:22.745586Z",
+    "status": "failed",
+    "duration_ms": 233266,
+    "failure_reason": "Cancelled",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      }
+    ],
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "image": "buildpack-deps:noble",
@@ -420,6 +477,80 @@
   },
   "pull_request": null,
   "superseded_by": null,
-  "pending_interviews": {},
-  "stages": {}
+  "pending_interviews": {
+    "01KRC5M07NFGHTGZ8KGP6XXAQ5": {
+      "question": {
+        "id": "01KRC5M07NFGHTGZ8KGP6XXAQ5",
+        "text": "Is this interview workflow easy to follow so far?",
+        "stage": "yes_no",
+        "question_type": "yes_no",
+        "options": [
+          {
+            "key": "Y",
+            "label": "[Y] Yes"
+          },
+          {
+            "key": "N",
+            "label": "[N] No"
+          }
+        ],
+        "allow_freeform": false
+      },
+      "started_at": "2026-05-11T18:43:32.213957Z"
+    }
+  },
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-11T18:43:32.122083Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T18:43:32.121919Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "yes_no@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T18:43:32.213892Z",
+      "handler": "human",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
