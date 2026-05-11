@@ -13,9 +13,9 @@
 ## User-Visible Behavior
 
 - `backend="acp"` on `agent` / `agent_loop` nodes runs an ACP agent turn instead of Fabro's API agent or legacy CLI subprocess parser.
-- `backend="acp"` on `prompt` / `one_shot` nodes also runs an ACP prompt turn. ACP cannot universally enforce "no tools" across third-party agents, so the user-visible contract is "ACP prompt turn with text aggregation", not "provider API one-shot with tool use disabled". This removes the current CLI inconsistency where prompt-node backend selection is ignored.
-- `backend="api"` and missing `backend` continue to use the API backend.
-- `backend="cli"` continues to use the existing CLI backend unchanged except for shared helper extraction.
+- `backend="acp"` on `prompt` / `one_shot` nodes also runs an ACP prompt turn. ACP cannot universally enforce "no tools" across third-party agents, so the user-visible contract is "ACP prompt turn with text aggregation", not "provider API one-shot with tool use disabled".
+- `backend="api"` uses the API backend. A missing `backend` keeps the existing router behavior: API by default, with the current `is_cli_only_model(...)` escape hatch if that list is ever populated.
+- `backend="cli"` continues to use the existing CLI backend unchanged except for shared helper extraction. In particular, prompt nodes with `backend="cli"` keep today's API one-shot fallback for compatibility; the router test suite must document that behavior so it is no longer accidental.
 - Any other `backend` value fails validation with a clear `unsupported LLM backend` error. Silent fallback to API for misspellings is too risky now that backend choice has behavioral and isolation consequences.
 - Default ACP command mapping mirrors current CLI provider mapping:
   - Anthropic: `npx -y @zed-industries/claude-code-acp@latest`
@@ -71,10 +71,12 @@
 - Modify `lib/crates/fabro-workflow/src/transforms/import.rs`: treat `acp_command` as a semantic default attribute when imported workflow placeholders carry it.
 - Create `lib/crates/fabro-validate/src/rules/backend_valid.rs` and modify `lib/crates/fabro-validate/src/rules/mod.rs`: validate node `backend` values are absent or one of `api`, `cli`, `acp`.
 - Modify `lib/crates/fabro-workflow/src/pipeline/initialize.rs`: construct `AgentAcpBackend` alongside API and CLI backends.
-- Modify event files: `lib/crates/fabro-workflow/src/event/events.rs`, `names.rs`, `convert.rs`, `stored_fields.rs` as needed for `agent.acp.*`.
-- Modify run event/projection files: `lib/crates/fabro-types/src/run_event/mod.rs` and `lib/crates/fabro-store/src/run_state.rs`.
+- Modify event files: `lib/crates/fabro-workflow/src/event/events.rs`, `names.rs`, `convert.rs`, and `stored_fields.rs` for `agent.acp.*`.
+- Modify fork replay: `lib/crates/fabro-workflow/src/operations/fork.rs` so ACP provider metadata and terminal status survive fork projection rebuilds.
+- Modify run event/projection files: `lib/crates/fabro-types/src/run_event/mod.rs`, `lib/crates/fabro-types/src/run_event/misc.rs`, and `lib/crates/fabro-store/src/run_state.rs`.
+- Modify server steerability tracking: `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-server/src/server/handler/steer.rs`, and `lib/crates/fabro-server/src/server/tests.rs` so currently running ACP stages are treated as non-steerable like CLI-backed stages instead of allowing buffered API steering.
 - Modify docs: `docs/public/reference/dot-language.mdx`, `docs/public/core-concepts/agents.mdx`, and any CLI/backend reference that currently says only `api`/`cli`.
-- Add/update tests in `lib/crates/fabro-acp/tests/`, `lib/crates/fabro-sandbox` unit tests, `lib/crates/fabro-workflow/tests/it/integration.rs`, `lib/crates/fabro-store/src/run_state.rs`, and `lib/crates/fabro-cli/tests/it/workflow/`.
+- Add/update tests in `lib/crates/fabro-acp/tests/`, `lib/crates/fabro-sandbox` unit tests, `lib/crates/fabro-workflow/tests/it/integration.rs`, `lib/crates/fabro-store/src/run_state.rs`, `lib/crates/fabro-server/src/server/tests.rs`, and `lib/crates/fabro-cli/tests/it/workflow/`.
 
 ## Task 1: Read Strategy Docs And Pin Protocol API
 
@@ -211,6 +213,9 @@ Expected: FAIL because `fabro-acp` and `default_acp_command` do not exist.
 Add dependencies:
 
 ```toml
+[features]
+test-support = []
+
 [dependencies]
 agent-client-protocol.workspace = true
 agent-client-protocol-tokio.workspace = true
@@ -882,10 +887,16 @@ git commit -m "feat: route workflow stages to ACP backend"
 - Modify: `lib/crates/fabro-workflow/src/event/events.rs`
 - Modify: `lib/crates/fabro-workflow/src/event/names.rs`
 - Modify: `lib/crates/fabro-workflow/src/event/convert.rs`
+- Modify: `lib/crates/fabro-workflow/src/event/stored_fields.rs`
+- Modify: `lib/crates/fabro-workflow/src/operations/fork.rs`
 - Modify: `lib/crates/fabro-types/src/run_event/mod.rs`
+- Modify: `lib/crates/fabro-types/src/run_event/misc.rs`
 - Modify: `lib/crates/fabro-store/src/run_state.rs`
+- Modify: `lib/crates/fabro-server/src/server.rs`
+- Modify: `lib/crates/fabro-server/src/server/handler/steer.rs`
 - Test: `lib/crates/fabro-workflow/src/event/convert.rs`
 - Test: `lib/crates/fabro-store/src/run_state.rs`
+- Test: `lib/crates/fabro-server/src/server/tests.rs`
 
 - [ ] **Step 1: Write failing event conversion tests**
 
@@ -898,6 +909,8 @@ agent.acp.cancelled
 agent.acp.timed_out
 ```
 
+Also assert converted/stored ACP events carry `node_id`, `stage_id`, and visit-derived stage scope fields just like `agent.cli.*`. This catches missing `stored_fields.rs` wiring, which otherwise makes run projection updates fail to find the active stage.
+
 - [ ] **Step 2: Write failing projection tests**
 
 Add store tests proving:
@@ -907,18 +920,31 @@ Add store tests proving:
 - `agent.acp.completed` sets stage output to aggregated text/stderr payload
 - cancelled and timed out terminal events set `CommandTermination::{Cancelled,TimedOut}`
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [ ] **Step 3: Write failing fork and steerability tests**
+
+Add a fork replay test proving ACP provider metadata survives replay:
+
+- `agent.acp.started` is included by `replay_event_for_fork_projection`
+- `agent.acp.cancelled` and `agent.acp.timed_out` are included for terminal metadata, matching the existing CLI terminal-event behavior
+
+Add server tests proving an active ACP stage is non-steerable:
+
+- after `agent.acp.started`, `/runs/{id}/steer` returns a conflict when no API-mode session is active
+- after `agent.acp.completed`, `agent.acp.cancelled`, `agent.acp.timed_out`, `stage.completed`, or `stage.failed`, the non-steerable active-stage marker is cleared
+
+- [ ] **Step 4: Run tests to verify they fail**
 
 Run:
 
 ```bash
 ulimit -n 4096 && cargo nextest run -p fabro-workflow -E 'test(agent_acp)' && \
-ulimit -n 4096 && cargo nextest run -p fabro-store -E 'test(agent_acp)'
+ulimit -n 4096 && cargo nextest run -p fabro-store -E 'test(agent_acp)' && \
+ulimit -n 4096 && cargo nextest run -p fabro-server -E 'test(acp.*steer|steer.*acp)'
 ```
 
 Expected: FAIL because event variants do not exist.
 
-- [ ] **Step 4: Implement event variants**
+- [ ] **Step 5: Implement event variants**
 
 Use fields parallel to CLI events, with ACP-specific additions, and wire `AgentAcpBackend` to emit them around `fabro_acp::run_acp_turn(...)`:
 
@@ -943,37 +969,50 @@ AgentAcpCompleted {
 
 Cancelled/timed-out events mirror CLI terminal payloads.
 
-- [ ] **Step 5: Implement projection logic**
+- [ ] **Step 6: Implement stored fields, projection, and fork replay logic**
+
+Update `stored_fields.rs` so every `AgentAcp*` event gets the same node/stage fields as its `AgentCli*` counterpart. Without this, `stage_at_current_visit` and `stage_at_stored_or_visit` cannot reliably attach ACP event data to the active stage.
 
 Do not reuse `provider_used_from_agent_cli_started`; create `provider_used_from_agent_acp_started` so event names and mode cannot drift.
 
-- [ ] **Step 6: Run tests to verify they pass**
+Update `operations/fork.rs` to replay `AgentAcpStarted`, `AgentAcpCancelled`, and `AgentAcpTimedOut` for fork projections, mirroring the existing CLI started/cancelled/timed-out replay behavior. Do not add `AgentAcpCompleted` unless the implementation also intentionally changes the existing CLI completed replay policy.
+
+- [ ] **Step 7: Implement server steerability tracking**
+
+Treat ACP-backed stages as active non-steerable agent stages while they are running:
+
+- add `EventBody::AgentAcpStarted(_)` to the same active-stage set currently used for CLI-backed stages, or rename the set to a neutral `active_non_steerable_agent_stages` if the surrounding code becomes clearer
+- remove the stage on `AgentAcpCompleted`, `AgentAcpCancelled`, `AgentAcpTimedOut`, `StageCompleted`, and `StageFailed`
+- update the conflict message/code only if needed to avoid saying "CLI-mode" for an ACP-only active stage; tests should assert the API returns a clear non-steerable-agent conflict
+
+- [ ] **Step 8: Run tests to verify they pass**
 
 Run:
 
 ```bash
 ulimit -n 4096 && cargo nextest run -p fabro-workflow -E 'test(agent_acp)' && \
-ulimit -n 4096 && cargo nextest run -p fabro-store -E 'test(agent_acp)'
+ulimit -n 4096 && cargo nextest run -p fabro-store -E 'test(agent_acp)' && \
+ulimit -n 4096 && cargo nextest run -p fabro-server -E 'test(acp.*steer|steer.*acp)'
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Refactor and verify**
+- [ ] **Step 9: Refactor and verify**
 
 Check event JSON field names against existing CLI event style. Do not expose raw credentials, environment variables, full JSON-RPC logs, or prompt contents in events.
 
 Run:
 
 ```bash
-cargo build -p fabro-types -p fabro-workflow -p fabro-store
+cargo build -p fabro-types -p fabro-workflow -p fabro-store -p fabro-server
 ```
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add lib/crates/fabro-workflow/src/event lib/crates/fabro-types/src/run_event/mod.rs lib/crates/fabro-store/src/run_state.rs
+git add lib/crates/fabro-workflow/src/event lib/crates/fabro-workflow/src/operations/fork.rs lib/crates/fabro-types/src/run_event lib/crates/fabro-store/src/run_state.rs lib/crates/fabro-server/src/server.rs lib/crates/fabro-server/src/server/handler/steer.rs lib/crates/fabro-server/src/server/tests.rs
 git commit -m "feat: project ACP backend events"
 ```
 
@@ -1175,6 +1214,7 @@ ulimit -n 4096 && cargo nextest run -p fabro-sandbox -E 'test(stdio)'
 ulimit -n 4096 && cargo nextest run -p fabro-workflow -E 'test(router_) | test(acp_backend) | test(agent_acp) | test(initialize.*acp)'
 ulimit -n 4096 && cargo nextest run -p fabro-validate -E 'test(backend_valid)'
 ulimit -n 4096 && cargo nextest run -p fabro-store -E 'test(agent_acp)'
+ulimit -n 4096 && cargo nextest run -p fabro-server -E 'test(acp.*steer|steer.*acp)'
 ulimit -n 4096 && cargo nextest run -p fabro-cli -E 'test(acp_backend_workflow)'
 ```
 
@@ -1241,4 +1281,6 @@ Expected: clean worktree.
 - **Prompt backend ambiguity:** `backend="acp"` on prompt nodes must route to ACP or fail clearly. It must not silently use API.
 - **Model drift:** stable ACP does not standardize model selection. Do not pretend node `model` was sent to the ACP agent unless the implementation actually supports it through an explicit command/config mechanism.
 - **Event projection drift:** ACP events must set `mode="acp"` independently from CLI projection helpers.
+- **Missing stored fields or fork replay:** ACP events must populate stage-scoped stored fields and fork replay rules. Otherwise provider metadata may be emitted correctly but fail to attach to the stage projection or disappear after a fork.
+- **Incorrect steerability while ACP is running:** ACP-backed stages are not API-mode steerable in this cutover. The server must treat active ACP stages as non-steerable agent stages so steer requests do not get buffered as if an API session might appear.
 - **Credential regression:** ACP must use the same credential resolver path as CLI mode so vault-backed installs do not fall back to missing host env vars.
