@@ -12,11 +12,10 @@ use fabro_model::Provider;
 use fabro_util::time::elapsed_ms;
 use tokio_util::sync::CancellationToken;
 
-use super::super::agent::{CodergenBackend, CodergenResult, OneShotRequest};
+use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
 use super::changed_files;
 use super::cli::AgentCli;
 use super::launch_env::{AgentLaunchEnvRequest, resolve_agent_launch_env};
-use crate::context::Context;
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 
@@ -199,25 +198,15 @@ impl AgentAcpBackend {
 
 #[async_trait]
 impl CodergenBackend for AgentAcpBackend {
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        context: &Context,
-        _thread_id: Option<&str>,
-        emitter: &Arc<Emitter>,
-        sandbox: &Arc<dyn Sandbox>,
-        _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        cancel_token: CancellationToken,
-    ) -> Result<CodergenResult, Error> {
-        let stage_scope = StageScope::for_handler(context, &node.id);
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+        let stage_scope = StageScope::for_handler(request.context, &request.node.id);
         self.run_turn(
-            node,
-            prompt.to_string(),
-            emitter,
+            request.node,
+            request.prompt.to_string(),
+            request.emitter,
             &stage_scope,
-            sandbox,
-            cancel_token,
+            request.sandbox,
+            request.cancel_token,
         )
         .await
     }
@@ -294,7 +283,9 @@ mod tests {
     use super::AgentAcpBackend;
     use crate::context::Context;
     use crate::event::{Emitter, StageScope};
-    use crate::handler::agent::{CodergenBackend, CodergenResult, OneShotRequest};
+    use crate::handler::agent::{
+        CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest,
+    };
 
     #[tokio::test]
     async fn acp_backend_run_sends_prompt_and_returns_text() {
@@ -329,17 +320,19 @@ mod tests {
                 HashMap::from([("ACP_MODE".to_string(), "write_file".to_string())]),
             );
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
+        let emitter = Arc::new(Emitter::default());
+        let context = Context::new();
         let result = backend
-            .run(
-                &node,
-                "write hello",
-                &Context::new(),
-                None,
-                &Arc::new(Emitter::default()),
-                &sandbox,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "write hello",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await
             .unwrap();
 
@@ -441,17 +434,19 @@ mod tests {
                 HashMap::from([("ACP_STOP_REASON".to_string(), "cancelled".to_string())]),
             );
         let sandbox: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(tempdir.path().to_path_buf()));
+        let emitter = Arc::new(Emitter::default());
+        let context = Context::new();
         let result = backend
-            .run(
-                &node,
-                "cancel",
-                &Context::new(),
-                None,
-                &Arc::new(Emitter::default()),
-                &sandbox,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "cancel",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await;
         let Err(err) = result else {
             panic!("expected cancellation error");
@@ -497,17 +492,18 @@ mod tests {
             move |event| events.lock().unwrap().push(event.clone())
         });
 
+        let context = Context::new();
         backend
-            .run(
-                &node,
-                "write hello",
-                &Context::new(),
-                None,
-                &emitter,
-                &sandbox,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "write hello",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await
             .unwrap();
 
@@ -540,17 +536,19 @@ mod tests {
             .insert("backend".to_string(), AttrValue::String("acp".to_string()));
 
         let backend = AgentAcpBackend::new_from_env("fake-acp".to_string(), Provider::OpenAi);
+        let emitter = Arc::new(Emitter::default());
+        let context = Context::new();
         let result = backend
-            .run(
-                &node,
-                "write hello",
-                &Context::new(),
-                None,
-                &Arc::new(Emitter::default()),
-                &sandbox_dyn,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "write hello",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox_dyn,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await;
         let Err(err) = result else {
             panic!("ACP without acp_command should fail");

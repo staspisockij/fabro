@@ -5,7 +5,7 @@ use fabro_graphviz::graph::{AttrValue, Node};
 use fabro_llm::provider::Provider;
 use fabro_workflow::context::Context;
 use fabro_workflow::event::Emitter;
-use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult};
+use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
 use fabro_workflow::handler::llm::cli::AgentCliBackend;
 
 /// Run a real CLI tool via LocalSandbox and verify the full flow.
@@ -26,16 +26,16 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());
     let result = backend
-        .run(
-            &node,
-            "What is 2+2? Reply with just the number.",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            tokio_util::sync::CancellationToken::new(),
-        )
+        .run(CodergenRunRequest {
+            node:         &node,
+            prompt:       "What is 2+2? Reply with just the number.",
+            context:      &context,
+            thread_id:    None,
+            emitter:      &emitter,
+            sandbox:      &env,
+            tool_hooks:   None,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+        })
         .await
         .unwrap_or_else(|_| panic!("CLI backend ({provider}/{model}) should succeed"));
 

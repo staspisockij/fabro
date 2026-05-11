@@ -995,7 +995,7 @@ async fn daytona_parallel_git_branching_e2e() {
 // CLI Backend on Daytona — real CLI tools via exec_command
 // ---------------------------------------------------------------------------
 
-use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult};
+use fabro_workflow::handler::agent::{CodergenBackend, CodergenResult, CodergenRunRequest};
 use fabro_workflow::handler::llm::AgentCliBackend;
 
 /// Helper: run a real CLI backend test on Daytona.
@@ -1072,16 +1072,16 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
-            &node,
-            "What is 2+2? Reply with just the number.",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(CodergenRunRequest {
+            node:         &node,
+            prompt:       "What is 2+2? Reply with just the number.",
+            context:      &context,
+            thread_id:    None,
+            emitter:      &emitter,
+            sandbox:      &env,
+            tool_hooks:   None,
+            cancel_token: CancellationToken::new(),
+        })
         .await;
 
     match result {

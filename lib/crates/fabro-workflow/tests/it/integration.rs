@@ -38,7 +38,9 @@ use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
 use fabro_workflow::error::{Error, FailureSignatureExt};
 use fabro_workflow::event::{Emitter, Event};
-use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
+use fabro_workflow::handler::agent::{
+    AgentHandler, CodergenBackend, CodergenResult, CodergenRunRequest,
+};
 use fabro_workflow::handler::command::CommandHandler;
 use fabro_workflow::handler::conditional::ConditionalHandler;
 use fabro_workflow::handler::exit::ExitHandler;
@@ -63,6 +65,25 @@ fn local_env() -> Arc<dyn fabro_agent::Sandbox> {
     Arc::new(fabro_agent::LocalSandbox::new(
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
     ))
+}
+
+fn codergen_run_request<'a>(
+    node: &'a Node,
+    prompt: &'a str,
+    context: &'a Context,
+    emitter: &'a Arc<Emitter>,
+    sandbox: &'a Arc<dyn fabro_agent::Sandbox>,
+) -> CodergenRunRequest<'a> {
+    CodergenRunRequest {
+        node,
+        prompt,
+        context,
+        thread_id: None,
+        emitter,
+        sandbox,
+        tool_hooks: None,
+        cancel_token: CancellationToken::new(),
+    }
 }
 
 fn test_run_id(label: &str) -> RunId {
@@ -1606,22 +1627,12 @@ struct MockCodergenBackend;
 
 #[async_trait::async_trait]
 impl CodergenBackend for MockCodergenBackend {
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        _context: &Context,
-        _thread_id: Option<&str>,
-        _emitter: &Arc<Emitter>,
-        _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-        _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        _cancel_token: tokio_util::sync::CancellationToken,
-    ) -> Result<CodergenResult, Error> {
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
         Ok(CodergenResult::Text {
             text:              format!(
                 "Response for {}: processed prompt '{}'",
-                node.id,
-                &prompt[..prompt.len().min(50)]
+                request.node.id,
+                &request.prompt[..request.prompt.len().min(50)]
             ),
             usage:             None,
             files_touched:     Vec::new(),
@@ -6283,10 +6294,9 @@ mod real_llm {
     use fabro_llm::providers::OpenAiAdapter;
     use fabro_llm::types::{Message, Request};
     use fabro_types::WorkflowSettings;
-    use fabro_workflow::context::Context;
     use fabro_workflow::error::Error;
     use fabro_workflow::handler::agent::{
-        AgentHandler, CodergenBackend, CodergenResult, OneShotRequest,
+        AgentHandler, CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest,
     };
     use tokio_util::sync::CancellationToken;
 
@@ -6298,18 +6308,8 @@ mod real_llm {
 
     #[async_trait]
     impl CodergenBackend for LlmCodergenBackend {
-        async fn run(
-            &self,
-            _node: &Node,
-            prompt: &str,
-            _context: &Context,
-            _thread_id: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-            _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            _cancel_token: tokio_util::sync::CancellationToken,
-        ) -> Result<CodergenResult, Error> {
-            self.complete(prompt).await
+        async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+            self.complete(request.prompt).await
         }
 
         async fn one_shot(&self, request: OneShotRequest<'_>) -> Result<CodergenResult, Error> {
@@ -9804,16 +9804,13 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "Fix the authentication bug",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("CLI backend should succeed");
 
@@ -9878,16 +9875,13 @@ async fn cli_backend_run_detects_changed_files() {
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "Add a new feature",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("CLI backend should succeed");
 
@@ -9912,16 +9906,13 @@ async fn cli_backend_run_with_codex_provider() {
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "Build the API",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("CLI backend should succeed");
 
@@ -10080,16 +10071,13 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
     let _ = env; // unused, just for the above struct
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "do something",
             &context,
-            None,
             &emitter,
             &failing_env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await;
 
     let err = match result {
@@ -10118,16 +10106,13 @@ async fn cli_backend_run_fails_on_unparseable_output() {
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
+        .run(codergen_run_request(
             &node,
             "do something",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await;
 
     let err = match result {
@@ -10160,16 +10145,9 @@ async fn cli_backend_run_uses_node_model_override() {
     let emitter = Arc::new(Emitter::default());
 
     backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "test", &context, &emitter, &env,
+        ))
         .await
         .expect("should succeed");
 
@@ -10210,16 +10188,9 @@ async fn cli_backend_run_uses_node_provider_override() {
     let emitter = Arc::new(Emitter::default());
 
     backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "test", &context, &emitter, &env,
+        ))
         .await
         .expect("should succeed");
 
@@ -10244,16 +10215,9 @@ async fn cli_backend_run_returns_text_and_usage() {
     let emitter = Arc::new(Emitter::default());
 
     let result = backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "test", &context, &emitter, &env,
+        ))
         .await
         .expect("should succeed");
 
@@ -10297,16 +10261,13 @@ async fn backend_router_delegates_to_cli_for_cli_node() {
     let emitter = Arc::new(Emitter::default());
 
     let result = router
-        .run(
+        .run(codergen_run_request(
             &node,
             "Fix the bug",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("router should succeed");
 
@@ -10340,16 +10301,13 @@ async fn backend_router_delegates_to_api_for_normal_node() {
     let emitter = Arc::new(Emitter::default());
 
     let result = router
-        .run(
+        .run(codergen_run_request(
             &node,
             "Plan the work",
             &context,
-            None,
             &emitter,
             &env,
-            None,
-            CancellationToken::new(),
-        )
+        ))
         .await
         .expect("router should succeed");
 
@@ -10386,16 +10344,9 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     let emitter = Arc::new(Emitter::default());
 
     let result = router
-        .run(
-            &node,
-            "Build it",
-            &context,
-            None,
-            &emitter,
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "Build it", &context, &emitter, &env,
+        ))
         .await
         .expect("router should succeed");
 
@@ -10448,17 +10399,13 @@ async fn backend_router_delegates_to_acp_for_acp_node() {
         )),
     );
 
+    let context = Context::new();
+    let emitter = Arc::new(Emitter::default());
+
     let result = router
-        .run(
-            &node,
-            "Build it",
-            &Context::new(),
-            None,
-            &Arc::new(Emitter::default()),
-            &env,
-            None,
-            CancellationToken::new(),
-        )
+        .run(codergen_run_request(
+            &node, "Build it", &context, &emitter, &env,
+        ))
         .await
         .expect("router should succeed");
 

@@ -210,10 +210,10 @@ mod tests {
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use tempfile::TempDir;
-    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::event::Emitter;
+    use crate::handler::agent::CodergenRunRequest;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -311,23 +311,11 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_handler_dispatches_to_backend_one_shot() {
-        use fabro_agent::Sandbox;
-
         struct OneShotBackend;
 
         #[async_trait]
         impl CodergenBackend for OneShotBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
 
@@ -370,23 +358,11 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_handler_projects_provider_used_from_prompt_events() {
-        use fabro_agent::Sandbox;
-
         struct ProviderOneShotBackend;
 
         #[async_trait]
         impl CodergenBackend for ProviderOneShotBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<Emitter>,
-                _sandbox: &Arc<dyn Sandbox>,
-                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-                _cancel_token: CancellationToken,
-            ) -> Result<CodergenResult, Error> {
+            async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
                 panic!("run() should not be called for prompt handler");
             }
 
@@ -432,17 +408,7 @@ mod tests {
 
     #[async_trait]
     impl CodergenBackend for OneShotCapturingBackend {
-        async fn run(
-            &self,
-            _node: &Node,
-            _prompt: &str,
-            _context: &Context,
-            _thread_id: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _sandbox: &Arc<dyn fabro_agent::Sandbox>,
-            _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            _cancel_token: CancellationToken,
-        ) -> Result<CodergenResult, Error> {
+        async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
             panic!("run() should not be called for prompt handler");
         }
 

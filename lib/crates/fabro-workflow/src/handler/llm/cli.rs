@@ -38,11 +38,10 @@ fn cli_failure_detail(stdout: &str, stderr: &str, command: &str) -> String {
     }
 }
 
-use super::super::agent::{CodergenBackend, CodergenResult, OneShotRequest};
+use super::super::agent::{CodergenBackend, CodergenResult, CodergenRunRequest, OneShotRequest};
 use super::acp::AgentAcpBackend;
 use super::changed_files;
 use super::launch_env::{AgentLaunchEnvRequest, resolve_agent_launch_env};
-use crate::context::Context;
 use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
@@ -390,17 +389,14 @@ impl AgentCliBackend {
 
 #[async_trait]
 impl CodergenBackend for AgentCliBackend {
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        context: &Context,
-        _thread_id: Option<&str>,
-        emitter: &Arc<Emitter>,
-        sandbox: &Arc<dyn Sandbox>,
-        _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        cancel_token: CancellationToken,
-    ) -> Result<CodergenResult, Error> {
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+        let node = request.node;
+        let prompt = request.prompt;
+        let context = request.context;
+        let emitter = request.emitter;
+        let sandbox = request.sandbox;
+        let cancel_token = request.cancel_token;
+
         // 1. Snapshot git state before the CLI run
         let files_before = changed_files::detect_changed_files(sandbox).await;
 
@@ -722,60 +718,11 @@ fn unsupported_backend_error(raw: &str) -> Error {
 
 #[async_trait]
 impl CodergenBackend for BackendRouter {
-    async fn run(
-        &self,
-        node: &Node,
-        prompt: &str,
-        context: &Context,
-        thread_id: Option<&str>,
-        emitter: &Arc<Emitter>,
-        sandbox: &Arc<dyn Sandbox>,
-        tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        cancel_token: CancellationToken,
-    ) -> Result<CodergenResult, Error> {
-        match Self::select_backend(node)? {
-            LlmBackend::Api => {
-                self.api
-                    .run(
-                        node,
-                        prompt,
-                        context,
-                        thread_id,
-                        emitter,
-                        sandbox,
-                        tool_hooks,
-                        cancel_token,
-                    )
-                    .await
-            }
-            LlmBackend::Cli => {
-                self.cli
-                    .run(
-                        node,
-                        prompt,
-                        context,
-                        thread_id,
-                        emitter,
-                        sandbox,
-                        tool_hooks,
-                        cancel_token,
-                    )
-                    .await
-            }
-            LlmBackend::Acp => {
-                self.acp
-                    .run(
-                        node,
-                        prompt,
-                        context,
-                        thread_id,
-                        emitter,
-                        sandbox,
-                        tool_hooks,
-                        cancel_token,
-                    )
-                    .await
-            }
+    async fn run(&self, request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
+        match Self::select_backend(request.node)? {
+            LlmBackend::Api => self.api.run(request).await,
+            LlmBackend::Cli => self.cli.run(request).await,
+            LlmBackend::Acp => self.acp.run(request).await,
         }
     }
 
@@ -800,6 +747,7 @@ mod tests {
     use fabro_graphviz::graph::AttrValue;
 
     use super::*;
+    use crate::context::Context;
 
     // -- AgentCli --
 
@@ -1348,17 +1296,7 @@ mod tests {
 
     #[async_trait]
     impl CodergenBackend for StubBackend {
-        async fn run(
-            &self,
-            _node: &Node,
-            _prompt: &str,
-            _context: &Context,
-            _thread_id: Option<&str>,
-            _emitter: &Arc<Emitter>,
-            _sandbox: &Arc<dyn Sandbox>,
-            _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            _cancel_token: CancellationToken,
-        ) -> Result<CodergenResult, Error> {
+        async fn run(&self, _request: CodergenRunRequest<'_>) -> Result<CodergenResult, Error> {
             Ok(CodergenResult::Text {
                 text:              "stub".to_string(),
                 usage:             None,
@@ -1518,16 +1456,16 @@ mod tests {
         let events = collect_events(&emitter);
 
         let result = backend
-            .run(
-                &node,
-                "Do something",
-                &context,
-                None,
-                &emitter,
-                &sandbox,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "Do something",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await;
 
         let Err(err) = result else {
@@ -1571,16 +1509,16 @@ mod tests {
         let events = collect_events(&emitter);
 
         let result = backend
-            .run(
-                &node,
-                "Do something slow",
-                &context,
-                None,
-                &emitter,
-                &sandbox,
-                None,
-                CancellationToken::new(),
-            )
+            .run(CodergenRunRequest {
+                node:         &node,
+                prompt:       "Do something slow",
+                context:      &context,
+                thread_id:    None,
+                emitter:      &emitter,
+                sandbox:      &sandbox,
+                tool_hooks:   None,
+                cancel_token: CancellationToken::new(),
+            })
             .await;
 
         let Err(err) = result else {
