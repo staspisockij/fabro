@@ -26,6 +26,7 @@
 - ACP receives the same provider credentials and workflow tool env currently forwarded to CLI agents. Model selection is recorded in Fabro events/projections, but stable ACP v1 has no portable model-selection request. Users who need model-specific ACP behavior must encode that in their chosen ACP command until ACP model/session config stabilizes.
 - ACP stages emit `agent.acp.started`, `agent.acp.completed`, `agent.acp.cancelled`, and `agent.acp.timed_out`; run projections expose `provider_used.mode == "acp"`.
 - ACP support is implemented for local and Docker sandboxes in this cutover. Daytona gets an explicit unsupported-provider error for ACP because the current Daytona command API does not expose raw bidirectional stdio; legacy `backend="cli"` remains available there. This is deliberate: running ACP on the host or over a PTY would violate isolation or corrupt JSON-RPC framing.
+- Fabro handles ACP `session/request_permission` requests by auto-selecting an allow option, matching the trust model of existing CLI mode flags such as `--full-auto`, `--yolo`, and `--dangerously-skip-permissions`. Prefer an `AllowAlways` option when present, then `AllowOnce`, then the first non-reject option; if no allow option exists, return `RequestPermissionOutcome::Cancelled`.
 - Fabro advertises no ACP client filesystem or terminal capabilities in this cutover. ACP agents that need those client-side APIs may fail with method-not-found; the supported path is ACP adapters that operate through their own process in the sandbox, which matches Fabro's existing CLI-agent isolation model.
 
 ## Contracts And Invariants
@@ -36,7 +37,8 @@
 - Do not accept an `acp_command` by validating it with the ACP Tokio helper and then executing the original raw string. Store the parsed stdio server command, args, env, and display string; use the parsed representation for execution so JSON stdio configs and shell-word overrides behave consistently.
 - The new `fabro-acp` crate must use `agent-client-protocol` schema/session/message types for initialization, session creation, prompt turns, updates, cancellation, and fake-agent tests. Do not hand-roll ACP request/response structs.
 - `fabro-acp` must not depend on `fabro-workflow`; otherwise `fabro-workflow` cannot instantiate it without a dependency cycle. The workflow adapter is intentionally thin and delegates all protocol behavior to `fabro-acp`.
-- ACP response text is the concatenation of `SessionUpdate::AgentMessageChunk(ContentBlock::Text(...))` chunks until the prompt response stop reason arrives. Thought chunks, plans, tool call updates, and custom updates are ignored for `CodergenResult::Text` but must keep the stall watchdog alive.
+- ACP response text is the concatenation of `SessionUpdate::AgentMessageChunk(ContentChunk { content: ContentBlock::Text(...), .. })` chunks until the prompt response stop reason arrives. Thought chunks, plans, tool call updates, and custom updates are ignored for `CodergenResult::Text` but must keep the stall watchdog alive.
+- ACP permission requests must be handled through the official `RequestPermissionRequest` / `RequestPermissionResponse` schema types. Do not ignore them: real coding-agent adapters may request permission before file edits even when filesystem and terminal client capabilities are not advertised.
 - Stop reason handling:
   - `EndTurn` and `Refusal`: return text as the stage response.
   - `Cancelled`: emit `agent.acp.cancelled` and return `Error::Cancelled`.
@@ -521,7 +523,7 @@ session/new
 session/prompt
 ```
 
-It must also assert that `SessionUpdate::AgentMessageChunk(ContentBlock::Text(...))` chunks are concatenated into the returned text.
+It must also assert that `SessionUpdate::AgentMessageChunk(ContentChunk { content: ContentBlock::Text(...), .. })` chunks are concatenated into the returned text.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -574,13 +576,51 @@ Use `tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt}` wh
 
 - [ ] **Step 5: Implement ACP lifecycle**
 
-Use the official SDK:
+Use the official SDK and register a client-side permission handler before connecting:
 
 ```rust
-use agent_client_protocol::schema::{InitializeRequest, ProtocolVersion};
+use agent_client_protocol::schema::{
+    InitializeRequest, PermissionOptionKind, ProtocolVersion, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+};
 
+let permission_cancel_token = request.cancel_token.clone();
 Client.builder()
     .name("fabro")
+    .on_receive_request(
+        async move |request: RequestPermissionRequest, responder, _connection| {
+            if permission_cancel_token.is_cancelled() {
+                return responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ));
+            }
+            let selected = request
+                .options
+                .iter()
+                .find(|option| option.kind == PermissionOptionKind::AllowAlways)
+                .or_else(|| {
+                    request
+                        .options
+                        .iter()
+                        .find(|option| option.kind == PermissionOptionKind::AllowOnce)
+                })
+                .or_else(|| {
+                    request.options.iter().find(|option| {
+                        !matches!(
+                            option.kind,
+                            PermissionOptionKind::RejectOnce | PermissionOptionKind::RejectAlways
+                        )
+                    })
+                });
+            let outcome = selected.map_or(RequestPermissionOutcome::Cancelled, |option| {
+                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                    option.option_id.clone(),
+                ))
+            });
+            responder.respond(RequestPermissionResponse::new(outcome))
+        },
+        agent_client_protocol::on_receive_request!(),
+    )
     .connect_with(SandboxAcpTransport::new(&request), async |cx| {
         cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
             .block_task()
@@ -606,10 +646,14 @@ When reading updates, handle cancellation with `tokio::select!`:
 
 The initialize request should use `InitializeRequest::new(ProtocolVersion::V1)` and the default empty `ClientCapabilities`; do not advertise filesystem or terminal support until handlers for those requests are implemented.
 
+Permission approval is intentionally automatic in this cutover because Fabro's legacy CLI backend already runs coding CLIs with all tool approvals bypassed. If cancellation has already fired when a permission request arrives, respond with `RequestPermissionOutcome::Cancelled`.
+
 - [ ] **Step 6: Add cancellation and timeout tests**
 
 Tests must cover:
 
+- permission requests select an allow option and let the ACP turn continue
+- permission requests after cancellation respond with `RequestPermissionOutcome::Cancelled`
 - cancellation before prompt completion sends `CancelNotification::new(session_id)` / `session/cancel` when a session exists and returns `AcpError::Cancelled`
 - timeout terminates the stdio process and returns `AcpError::TimedOut`
 - malformed JSON-RPC from the agent returns a protocol error with stderr tail if present
@@ -757,7 +801,7 @@ Mirror CLI credential behavior in the workflow adapter before calling `fabro_acp
 
 - [ ] **Step 8: Implement `AgentAcpBackend`**
 
-The adapter owns model/provider/resolver/tool env configuration like `AgentCliBackend`, builds `AcpRunRequest` with the active sandbox, cancellation token, and an `on_activity` callback that calls `Emitter::touch`, emits workflow events, and delegates to `fabro_acp`.
+The adapter owns model/provider/resolver/tool env configuration like `AgentCliBackend`, builds `AcpRunRequest` with the active sandbox, cancellation token, and an `on_activity` callback that calls `Emitter::touch`, then delegates to `fabro_acp`. Defer ACP-specific started/completed/cancelled/timed-out event emission to Task 6, where the event variants and projection support are added in the same commit.
 
 For `one_shot`, build the ACP prompt as:
 
@@ -834,6 +878,7 @@ git commit -m "feat: route workflow stages to ACP backend"
 ## Task 6: Add ACP Events And Run Projection Support
 
 **Files:**
+- Modify: `lib/crates/fabro-workflow/src/handler/llm/acp.rs`
 - Modify: `lib/crates/fabro-workflow/src/event/events.rs`
 - Modify: `lib/crates/fabro-workflow/src/event/names.rs`
 - Modify: `lib/crates/fabro-workflow/src/event/convert.rs`
@@ -875,7 +920,7 @@ Expected: FAIL because event variants do not exist.
 
 - [ ] **Step 4: Implement event variants**
 
-Use fields parallel to CLI events, with ACP-specific additions:
+Use fields parallel to CLI events, with ACP-specific additions, and wire `AgentAcpBackend` to emit them around `fabro_acp::run_acp_turn(...)`:
 
 ```rust
 AgentAcpStarted {
@@ -1190,6 +1235,7 @@ Expected: clean worktree.
 - **Missing Node runtime:** default ACP commands use `npx`. Without the shared Node bootstrap, fresh local/Docker sandboxes that currently work with `backend="cli"` may fail immediately with `npx: command not found`.
 - **Crate cycle:** `fabro-acp` cannot implement workflow's `CodergenBackend` directly without making `fabro-workflow` and `fabro-acp` depend on each other. Keep protocol implementation in `fabro-acp` and the trait adapter in workflow.
 - **PTY corruption:** ACP JSON-RPC must not use terminal sessions. Docker stdio uses `tty=false`; Daytona remains unsupported until raw stdio exists.
+- **Permission deadlock:** ACP agents can send `session/request_permission` before performing edits. Without an automatic permission handler, real adapters may fail with method-not-found or stall even though legacy CLI mode already grants full-auto permissions.
 - **Docker orphaned processes:** Bollard does not provide a simple kill-exec primitive. Docker stdio must use a controlled wrapper/stop-file or equivalent process-group cleanup so timeout and cancellation do not leave ACP adapters running inside the container.
 - **Decorator capability loss:** `delegate_sandbox!`, `WorktreeSandbox`, read/write guards, and test-support sandboxes must forward `spawn_stdio_process`; otherwise ACP works on the base local sandbox but fails once wrapped by normal workflow setup.
 - **Prompt backend ambiguity:** `backend="acp"` on prompt nodes must route to ACP or fail clearly. It must not silently use API.
