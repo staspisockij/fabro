@@ -205,14 +205,106 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KRC06KV7MFNE2S22R2TAS10P",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-11T17:09:05.695209Z",
+    "run_branch": "fabro/run/01KRC06KV7MFNE2S22R2TAS10P",
+    "base_sha": "9ea00185dc565e0ebd84e1e6cca231a32b7ad927"
   },
-  "status_updated_at": "2026-05-11T17:08:50.691474Z",
-  "last_event_at": "2026-05-11T17:09:05.345308Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-11T17:09:05.695255Z",
+  "last_event_at": "2026-05-11T17:09:08.324136Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-11T17:09:08.324038Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.rankdir": "LR",
+          "outcome": "succeeded",
+          "graph.retry_target": "exit",
+          "internal.fidelity": "compact",
+          "failure_signature": "",
+          "internal.node_visit_count": 1,
+          "graph.goal": "Verify the Daytona daytona-medium sandbox starts with standard tooling",
+          "internal.run_id": "01KRC06KV7MFNE2S22R2TAS10P",
+          "internal.work_dir": "/home/daytona/workspace",
+          "current_node": "start",
+          "internal.thread_id": null,
+          "internal.retry_count.start": 0,
+          "failure_class": ""
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "inspect",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-11T17:09:10.151568Z",
+        "current_node": "inspect",
+        "completed_nodes": [
+          "start",
+          "inspect"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.rankdir": "LR",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "failure_class": "",
+          "internal.run_id": "01KRC06KV7MFNE2S22R2TAS10P",
+          "failure_signature": "",
+          "graph.goal": "Verify the Daytona daytona-medium sandbox starts with standard tooling",
+          "graph.retry_target": "exit",
+          "internal.thread_id": "start",
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "thread.start.current_node": "inspect",
+          "current_node": "inspect",
+          "internal.retry_count.inspect": 0,
+          "command.output": "blob://sha256/b366510186718414b48dcc6f64b5fc479dafd86e46623d16d0b51dc67d231725"
+        },
+        "node_outcomes": {
+          "inspect": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/b366510186718414b48dcc6f64b5fc479dafd86e46623d16d0b51dc67d231725"
+            },
+            "notes": "Script completed: set -e\nprintf 'cwd: '; pwd\nprintf 'user: '; whoami\nprintf 'git: '; git --version\nif command -v python3 >/dev/null; then printf 'python: '; python3 --version; else echo 'python: not installed'; fi\nif command -v node >/dev/null; then printf 'node: '; node --version; else echo 'node: not installed'; fi\nprintf 'top-level files:\\n'; ls -la | sed -n '1,40p'",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "exit",
+        "node_visits": {
+          "start": 1,
+          "inspect": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -229,5 +321,62 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-11T17:09:08.323926Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T17:09:08.323819Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "inspect@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "set -e\nprintf 'cwd: '; pwd\nprintf 'user: '; whoami\nprintf 'git: '; git --version\nif command -v python3 >/dev/null; then printf 'python: '; python3 --version; else echo 'python: not installed'; fi\nif command -v node >/dev/null; then printf 'node: '; node --version; else echo 'node: not installed'; fi\nprintf 'top-level files:\\n'; ls -la | sed -n '1,40p'",
+        "command": "exec 2>&1\nset -e\nprintf 'cwd: '; pwd\nprintf 'user: '; whoami\nprintf 'git: '; git --version\nif command -v python3 >/dev/null; then printf 'python: '; python3 --version; else echo 'python: not installed'; fi\nif command -v node >/dev/null; then printf 'node: '; node --version; else echo 'node: not installed'; fi\nprintf 'top-level files:\\n'; ls -la | sed -n '1,40p'",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T17:09:08.324113Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
