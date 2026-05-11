@@ -56,7 +56,7 @@
 - Create `lib/crates/fabro-acp/src/error.rs`: ACP-specific error type that converts cleanly into workflow handler errors.
 - Create `lib/crates/fabro-acp/src/test_support.rs` behind `#[cfg(any(test, feature = "test-support"))]`: fake ACP agent/transport helpers using `agent-client-protocol` types.
 - Modify root `Cargo.toml`: add workspace dependencies for `agent-client-protocol` and `agent-client-protocol-tokio` and include `fabro-acp` through the existing `lib/crates/*` workspace glob.
-- Modify `lib/crates/fabro-agent/src/sandbox.rs`, `lib/crates/fabro-agent/src/lib.rs`, and `lib/crates/fabro-sandbox/src/sandbox.rs`: expose sandbox stdio process types through the existing sandbox API re-export path.
+- Modify `lib/crates/fabro-agent/src/sandbox.rs`, `lib/crates/fabro-agent/src/lib.rs`, and `lib/crates/fabro-sandbox/src/sandbox.rs`: expose the new sandbox stdio process API and public process/handle/stderr-tail types through the existing sandbox API re-export path so callers using either `fabro_sandbox::*` or `fabro_agent::sandbox::*` can compile without reaching into private modules.
 - Modify `lib/crates/fabro-sandbox/src/local.rs`: implement bidirectional stdio process spawning.
 - Modify `lib/crates/fabro-sandbox/src/docker.rs`: implement bidirectional Docker exec stdio without TTY.
 - Modify `lib/crates/fabro-sandbox/src/daytona/mod.rs`: return an explicit unsupported error for bidirectional stdio.
@@ -375,7 +375,8 @@ Add a local sandbox test that starts a line-oriented process and round-trips std
 ```rust
 #[tokio::test]
 async fn stdio_process_round_trips_lines() {
-    let sandbox = LocalSandbox::new(tempfile::tempdir().unwrap().path().to_path_buf());
+    let tempdir = tempfile::tempdir().unwrap();
+    let sandbox = LocalSandbox::new(tempdir.path().to_path_buf());
     let mut process = sandbox
         .spawn_stdio_process(
             "python3 -u -c 'import sys; [print(line.strip()[::-1], flush=True) for line in sys.stdin]'",
@@ -473,7 +474,7 @@ Add Docker unit tests around the option-builder/control wrapper proving:
 
 - [ ] **Step 5: Implement provider forwarding and unsupported Daytona**
 
-Forward through `WorktreeSandbox`, read/write decorators, test-support sandboxes, and the `delegate_sandbox!` macro. A decorator must not inherit the default unsupported implementation when its inner sandbox supports stdio. Daytona should return an unsupported error like:
+Forward through `WorktreeSandbox`, read/write decorators, test-support sandboxes, and the `delegate_sandbox!` macro. Re-export the new public stdio process types from both `fabro-sandbox/src/lib.rs` and `fabro-agent/src/sandbox.rs` / `fabro-agent/src/lib.rs` alongside the existing sandbox exports. A decorator must not inherit the default unsupported implementation when its inner sandbox supports stdio. Daytona should return an unsupported error like:
 
 ```text
 ACP backend requires bidirectional stdio; the Daytona sandbox provider does not support it yet
@@ -504,7 +505,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add lib/crates/fabro-sandbox lib/crates/fabro-agent/src/lib.rs
+git add lib/crates/fabro-sandbox lib/crates/fabro-agent/src/lib.rs lib/crates/fabro-agent/src/sandbox.rs
 git commit -m "feat: add sandbox stdio processes"
 ```
 
@@ -570,7 +571,7 @@ Keep usage optional/absent for now because stable ACP v1 does not provide portab
 
 Implement a `SandboxAcpTransport` in `transport.rs` that implements `agent_client_protocol::ConnectTo<agent_client_protocol::Client>` by:
 
-- merging `request.env` with `request.command.env()`, with explicit request env taking precedence only for duplicate keys already resolved by workflow credentials
+- building the launch environment from `request.command.env()` first, then overlaying `request.env` from the workflow adapter so Fabro-managed credentials, login results, and tool env win over duplicate keys supplied in an `acp_command` JSON config. This matches the legacy CLI backend's launch-env behavior and prevents a command override from accidentally shadowing refreshed credentials.
 - calling `request.sandbox.spawn_stdio_process(request.command.to_shell_command(), ...)`
 - adapting process stdout/stdin into `agent_client_protocol::Lines` or `agent_client_protocol::ByteStreams`
 - collecting stderr concurrently into a bounded tail for errors
