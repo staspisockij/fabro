@@ -327,7 +327,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-11T21:10:47.215543Z",
-  "last_event_at": "2026-05-11T21:14:31.578680Z",
+  "last_event_at": "2026-05-11T21:17:19.923828Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -575,9 +575,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 57,
       "checkpoint": {
-        "timestamp": "2026-05-11T21:17:12.697204Z",
+        "timestamp": "2026-05-11T21:17:19.920870Z",
         "current_node": "lint_rust",
         "completed_nodes": [
           "start",
@@ -588,26 +588,122 @@
         ],
         "node_retries": {},
         "context_values": {
-          "internal.retry_count.compile_typescript": 0,
+          "thread.compile_rust.current_node": "compile_typescript",
+          "outcome": "succeeded",
+          "failure_signature": "",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.retry_count.start": 0,
+          "failure_class": "",
+          "internal.thread_id": "compile_typescript",
+          "thread.compile_typescript.current_node": "lint_rust",
+          "graph.rankdir": "LR",
+          "graph.retry_target": "exit",
+          "internal.work_dir": "/home/daytona/workspace",
+          "thread.start.current_node": "toolchain",
+          "internal.retry_count.compile_rust": 0,
+          "internal.run_id": "01KRCDY500EQ8F2AW29842BGGG",
           "current_node": "lint_rust",
+          "internal.node_visit_count": 1,
+          "graph.goal": "Verify the sandbox can lint and test the project",
+          "internal.retry_count.lint_rust": 0,
+          "internal.fidelity": "compact",
+          "internal.retry_count.compile_typescript": 0,
+          "internal.retry_count.toolchain": 0,
+          "thread.toolchain.current_node": "compile_rust"
+        },
+        "node_outcomes": {
+          "compile_rust": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "compile_typescript": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/c467fa7b97e5ecd693b1bf91fbdcd6901333eb14fbe99369a52cba2a8a56ef39"
+            },
+            "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+            "usage": null
+          },
+          "lint_rust": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a"
+            },
+            "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "test_rust",
+        "git_commit_sha": "d0f469e714cda2fac1fb4c4fc44182e9671dc6cf",
+        "node_visits": {
+          "start": 1,
+          "toolchain": 1,
+          "compile_typescript": 1,
+          "compile_rust": 1,
+          "lint_rust": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-11T21:19:47.996843Z",
+        "current_node": "test_rust",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "compile_rust",
+          "compile_typescript",
+          "lint_rust",
+          "test_rust"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.retry_count.compile_typescript": 0,
+          "current_node": "test_rust",
           "thread.toolchain.current_node": "compile_rust",
+          "thread.lint_rust.current_node": "test_rust",
           "internal.work_dir": "/home/daytona/workspace",
           "internal.node_visit_count": 1,
-          "failure_signature": "",
+          "failure_signature": "test_rust|canceled|script failed with exit code: <n> ## output fail [ <n>.231s] ( <n>/<n>) fabro-cli::it cmd::mcp::mcp_create_and_search_manage_real_runs_with_cli_auth stdout ─── running <n> test ━━━━━━━━━━━━━━━━━━━",
           "internal.retry_count.toolchain": 0,
           "thread.compile_rust.current_node": "compile_typescript",
+          "internal.retry_count.test_rust": 0,
           "graph.goal": "Verify the sandbox can lint and test the project",
           "thread.compile_typescript.current_node": "lint_rust",
-          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "command.output": "blob://sha256/fa86112879510032d396ab50735eae1462c48eaa2a60c8cc1ca3be734daf042b",
           "graph.rankdir": "LR",
           "graph.retry_target": "exit",
           "internal.fidelity": "compact",
-          "outcome": "succeeded",
+          "outcome": "failed",
           "internal.run_id": "01KRCDY500EQ8F2AW29842BGGG",
           "thread.start.current_node": "toolchain",
-          "internal.thread_id": "compile_typescript",
+          "internal.thread_id": "lint_rust",
           "internal.retry_count.start": 0,
-          "failure_class": "",
+          "failure_class": "canceled",
           "internal.retry_count.compile_rust": 0,
           "internal.retry_count.lint_rust": 0
         },
@@ -640,6 +736,17 @@
             "status": "succeeded",
             "usage": null
           },
+          "test_rust": {
+            "status": "failed",
+            "context_updates": {
+              "command.output": "blob://sha256/fa86112879510032d396ab50735eae1462c48eaa2a60c8cc1ca3be734daf042b"
+            },
+            "failure": {
+              "message": "Script failed with exit code: 100\n\n## output\n FAIL [   0.231s] ( 723/5480) fabro-cli::it cmd::mcp::mcp_create_and_search_manage_real_runs_with_cli_auth\n  stdout ───\n\n    running 1 test\n    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Snapshot Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n    Snapshot: mcp_create_and_search_manage_real_runs_with_cli_auth\n    Source: lib/crates/fabro-cli/tests/it/cmd/mcp.rs:554\n    ────────────────────────────────────────────────────────────────────────────────\n    Expression: rendered\n    ────────────────────────────────────────────────────────────────────────────────\n    -old snapshot\n    +new results\n    ────────────┬───────────────────────────────────────────────────────────────────\n       13    13 │         \"source\": \"mcp-test\"\n       14    14 │       },\n       15    15 │       \"source_directory\": \"[SOURCE_DIRECTORY]\",\n       16    16 │       \"repo_origin_url\": null,\n       17       │-      \"goal\": \"Run tests and report results\"\n             17 │+      \"goal_preview\": \"Run tests and report results\",\n             18 │+      \"goal_truncated\": false\n       18    19 │     }\n       19    20 │   ],\n       20    21 │   \"next_cursor\": null\n       21    22 │ }\n    ────────────┴───────────────────────────────────────────────────────────────────\n    To update snapshots run `cargo insta review`\n    Stopped on the first failure. Run `cargo insta test` to run all snapshots.\n    test cmd::mcp::mcp_create_and_search_manage_real_runs_with_cli_auth ... FAILED\n\n    failures:\n\n    failures:\n        cmd::mcp::mcp_create_and_search_manage_real_runs_with_cli_auth\n\n    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 467 filtered out; finished in 0.22s\n\n  stderr ───\n\n    thread 'cmd::mcp::mcp_create_and_search_manage_real_runs_with_cli_auth' (64070) panicked at /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/insta-1.46.3/src/runtime.rs:719:13:\n    snapshot assertion for 'mcp_create_and_search_manage_real_runs_with_cli_auth' failed in line 554\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n  Cancelling due to test failure: 7 tests still running\n        FAIL [   0.046s] ( 726/5480) fabro-cli::it cmd::mcp::mcp_search_includes_archived_runs_by_default\n  stdout ───\n\n    running 1 test\n    test cmd::mcp::mcp_search_includes_archived_runs_by_default ... FAILED\n\n    failures:\n\n    failures:\n        cmd::mcp::mcp_search_includes_archived_runs_by_default\n\n    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 467 filtered out; finished in 0.03s\n\n  stderr ───\n\n    thread 'cmd::mcp::mcp_search_includes_archived_runs_by_default' (64521) panicked at lib/crates/fabro-cli/tests/it/cmd/mcp.rs:823:5:\n    assertion `left == right` failed\n      left: 1\n     right: 2\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n────────────\n     Summary [   4.956s] 730/5480 tests run: 728 passed, 2 failed, 182 skipped\n        FAIL [   0.231s] ( 723/5480) fabro-cli::it cmd::mcp::mcp_create_and_search_manage_real_runs_with_cli_auth\n        FAIL [   0.046s] ( 726/5480) fabro-cli::it cmd::mcp::mcp_search_includes_archived_runs_by_default\nwarning: 4750/5480 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)\nerror: test run failed\n",
+              "failure_class": "canceled"
+            },
+            "usage": null
+          },
           "lint_rust": {
             "status": "succeeded",
             "context_updates": {
@@ -649,13 +756,14 @@
             "usage": null
           }
         },
-        "next_node_id": "test_rust",
+        "next_node_id": "test_typescript",
         "node_visits": {
           "start": 1,
           "lint_rust": 1,
           "compile_rust": 1,
           "toolchain": 1,
-          "compile_typescript": 1
+          "compile_typescript": 1,
+          "test_rust": 1
         }
       },
       "diff": {}
@@ -793,6 +901,33 @@
       },
       "state": "succeeded"
     },
+    "test_rust@1": {
+      "first_event_seq": 60,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "ulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
+        "command": "exec 2>&1\nulimit -n 4096 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-11T21:17:19.923444Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    },
     "compile_rust@1": {
       "first_event_seq": 30,
       "prompt": null,
@@ -840,7 +975,12 @@
       "first_event_seq": 50,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-11T21:17:12.696226Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -848,11 +988,22 @@
         "command": "exec 2>&1\ncargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 161110,
+        "termination": "exited",
+        "output_bytes": 0,
+        "live_streaming": false
+      },
       "parallel_results": null,
       "output": null,
+      "output_bytes": 0,
+      "live_streaming": false,
+      "termination": "exited",
       "started_at": "2026-05-11T21:14:31.578241Z",
       "handler": "command",
+      "duration_ms": 161116,
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -861,7 +1012,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     }
   }
 }
