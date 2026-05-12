@@ -340,7 +340,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-12T19:56:39.884008Z",
-  "last_event_at": "2026-05-12T20:04:07.219194Z",
+  "last_event_at": "2026-05-12T20:04:17.444108Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -789,9 +789,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 76,
       "checkpoint": {
-        "timestamp": "2026-05-12T20:04:13.073142Z",
+        "timestamp": "2026-05-12T20:04:17.444035Z",
         "current_node": "test_typescript",
         "completed_nodes": [
           "start",
@@ -804,32 +804,32 @@
         ],
         "node_retries": {},
         "context_values": {
-          "internal.retry_count.start": 0,
-          "graph.goal": "Verify the sandbox can lint and test the project",
-          "internal.retry_count.compile_rust": 0,
-          "failure_class": "",
-          "current_node": "test_typescript",
-          "outcome": "succeeded",
-          "thread.start.current_node": "toolchain",
-          "thread.compile_rust.current_node": "compile_typescript",
+          "thread.test_rust.current_node": "test_typescript",
+          "graph.rankdir": "LR",
           "internal.node_visit_count": 1,
-          "internal.retry_count.test_rust": 0,
+          "internal.retry_count.compile_typescript": 0,
+          "internal.retry_count.toolchain": 0,
           "internal.work_dir": "/home/daytona/workspace",
-          "graph.retry_target": "exit",
           "internal.fidelity": "compact",
+          "failure_signature": "",
+          "internal.thread_id": "test_rust",
+          "internal.run_id": "01KREW63WYMPRXBV1B25Z4DK2H",
+          "outcome": "succeeded",
+          "thread.compile_rust.current_node": "compile_typescript",
+          "current_node": "test_typescript",
+          "internal.retry_count.lint_rust": 0,
+          "failure_class": "",
           "thread.compile_typescript.current_node": "lint_rust",
           "thread.lint_rust.current_node": "test_rust",
-          "internal.retry_count.test_typescript": 0,
-          "internal.retry_count.toolchain": 0,
           "thread.toolchain.current_node": "compile_rust",
-          "internal.run_id": "01KREW63WYMPRXBV1B25Z4DK2H",
-          "thread.test_rust.current_node": "test_typescript",
-          "failure_signature": "",
+          "graph.goal": "Verify the sandbox can lint and test the project",
+          "graph.retry_target": "exit",
+          "thread.start.current_node": "toolchain",
           "command.output": "blob://sha256/7221d941cbf83e557cfb7343a15ad8e0e47b44c83f38009786c1957ccb5fa3ce",
-          "internal.retry_count.lint_rust": 0,
-          "internal.thread_id": "test_rust",
-          "internal.retry_count.compile_typescript": 0,
-          "graph.rankdir": "LR"
+          "internal.retry_count.start": 0,
+          "internal.retry_count.test_typescript": 0,
+          "internal.retry_count.test_rust": 0,
+          "internal.retry_count.compile_rust": 0
         },
         "node_outcomes": {
           "compile_typescript": {
@@ -838,6 +838,17 @@
               "command.output": "blob://sha256/8baa025f8699023191eb510e5e60529a3bec7afdeaa67d9882798726169f08e0"
             },
             "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+            "usage": null
+          },
+          "test_rust": {
+            "status": "failed",
+            "context_updates": {
+              "command.output": "blob://sha256/86f964b96c01b1f9d0c250860e384abf7a1da7824a098fa76c67cd4e808de395"
+            },
+            "failure": {
+              "message": "Script failed with exit code: 100\n\n## output\n────────────\n Nextest run ID b900e70a-2835-45c1-9d50-68857a80b590 with nextest profile: default\n    Starting 5638 tests across 117 binaries (182 tests skipped)\n        FAIL [   0.037s] (5603/5638) twin-openai::debug_ui debug_page_renders_in_headless_chrome\n  stdout ───\n\n    running 1 test\n    test debug_page_renders_in_headless_chrome ... FAILED\n\n    failures:\n\n    failures:\n        debug_page_renders_in_headless_chrome\n\n    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.03s\n\n  stderr ───\n\n    thread 'debug_page_renders_in_headless_chrome' (85670) panicked at test/twin/openai/tests/debug_ui.rs:340:5:\n    Chrome exited with non-success status: exit status: 1\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n  Cancelling due to test failure: 7 tests still running\n────────────\n     Summary [  19.604s] 5610/5638 tests run: 5609 passed, 1 failed, 182 skipped\n        FAIL [   0.037s] (5603/5638) twin-openai::debug_ui debug_page_renders_in_headless_chrome\nwarning: 28/5638 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)\nerror: test run failed\n",
+              "failure_class": "canceled"
+            },
             "usage": null
           },
           "compile_rust": {
@@ -854,17 +865,6 @@
               "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
             },
             "notes": "Script completed: cargo +nightly-2026-04-14 fmt --check --all 2>&1 && cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
-            "usage": null
-          },
-          "test_rust": {
-            "status": "failed",
-            "context_updates": {
-              "command.output": "blob://sha256/86f964b96c01b1f9d0c250860e384abf7a1da7824a098fa76c67cd4e808de395"
-            },
-            "failure": {
-              "message": "Script failed with exit code: 100\n\n## output\n────────────\n Nextest run ID b900e70a-2835-45c1-9d50-68857a80b590 with nextest profile: default\n    Starting 5638 tests across 117 binaries (182 tests skipped)\n        FAIL [   0.037s] (5603/5638) twin-openai::debug_ui debug_page_renders_in_headless_chrome\n  stdout ───\n\n    running 1 test\n    test debug_page_renders_in_headless_chrome ... FAILED\n\n    failures:\n\n    failures:\n        debug_page_renders_in_headless_chrome\n\n    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.03s\n\n  stderr ───\n\n    thread 'debug_page_renders_in_headless_chrome' (85670) panicked at test/twin/openai/tests/debug_ui.rs:340:5:\n    Chrome exited with non-success status: exit status: 1\n    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n  Cancelling due to test failure: 7 tests still running\n────────────\n     Summary [  19.604s] 5610/5638 tests run: 5609 passed, 1 failed, 182 skipped\n        FAIL [   0.037s] (5603/5638) twin-openai::debug_ui debug_page_renders_in_headless_chrome\nwarning: 28/5638 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)\nerror: test run failed\n",
-              "failure_class": "canceled"
-            },
             "usage": null
           },
           "toolchain": {
@@ -889,20 +889,79 @@
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "9266e13e9202d3fe53136448d5d0b641c6ca8a20",
         "node_visits": {
           "lint_rust": 1,
-          "toolchain": 1,
+          "test_typescript": 1,
+          "compile_typescript": 1,
+          "start": 1,
           "compile_rust": 1,
           "test_rust": 1,
-          "test_typescript": 1,
-          "start": 1,
-          "compile_typescript": 1
+          "toolchain": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-12T20:04:17.466528Z",
+    "status": "failed",
+    "duration_ms": 457556,
+    "failure_reason": "goal gate unsatisfied for node test_rust and no retry target",
+    "final_git_commit_sha": "9266e13e9202d3fe53136448d5d0b641c6ca8a20",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "toolchain",
+        "stage_label": "toolchain",
+        "duration_ms": 1405,
+        "retries": 0
+      },
+      {
+        "stage_id": "compile_rust",
+        "stage_label": "compile_rust",
+        "duration_ms": 126861,
+        "retries": 0
+      },
+      {
+        "stage_id": "compile_typescript",
+        "stage_label": "compile_typescript",
+        "duration_ms": 7215,
+        "retries": 0
+      },
+      {
+        "stage_id": "lint_rust",
+        "stage_label": "lint_rust",
+        "duration_ms": 143691,
+        "retries": 0
+      },
+      {
+        "stage_id": "test_rust",
+        "stage_label": "test_rust",
+        "duration_ms": 143107,
+        "retries": 0
+      },
+      {
+        "stage_id": "test_typescript",
+        "stage_label": "test_typescript",
+        "duration_ms": 5853,
+        "retries": 0
+      }
+    ],
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "image": "buildpack-deps:noble",
@@ -995,7 +1054,12 @@
       "first_event_seq": 69,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cd apps/fabro-web && bun test 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-12T20:04:13.072437Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -1003,11 +1067,22 @@
         "command": "exec 2>&1\ncd apps/fabro-web && bun test 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "output": "blob://sha256/7221d941cbf83e557cfb7343a15ad8e0e47b44c83f38009786c1957ccb5fa3ce",
+        "exit_code": 0,
+        "duration_ms": 5846,
+        "termination": "exited",
+        "output_bytes": 50313,
+        "live_streaming": true
+      },
       "parallel_results": null,
       "output": null,
+      "output_bytes": 50313,
+      "live_streaming": true,
+      "termination": "exited",
       "started_at": "2026-05-12T20:04:07.218823Z",
       "handler": "command",
+      "duration_ms": 5853,
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -1016,7 +1091,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "toolchain@1": {
       "first_event_seq": 19,
