@@ -10,7 +10,9 @@ use agent_client_protocol::{
 };
 use fabro_sandbox::{
     Error as SandboxError, Result as SandboxResult, Sandbox, StderrCollector, StdioProcessHandle,
+    StdioProcessTermination,
 };
+use fabro_types::CommandTermination;
 use futures::io::BufReader;
 use futures::sink::unfold;
 use futures::{AsyncBufReadExt, AsyncWriteExt, Stream};
@@ -19,6 +21,8 @@ use tokio::time::timeout;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::command::AcpCommand;
+
+const CLEAN_EXIT_PROTOCOL_GRACE: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 pub(crate) struct TransportState {
@@ -128,12 +132,12 @@ impl ConnectTo<Client> for SandboxAcpTransport {
             },
         ));
 
-        let protocol = agent_client_protocol::ConnectTo::<Client>::connect_to(
+        let mut protocol = Box::pin(agent_client_protocol::ConnectTo::<Client>::connect_to(
             Lines::new(outgoing_sink, incoming_lines),
             client,
-        );
+        ));
         tokio::select! {
-            result = protocol => {
+            result = &mut protocol => {
                 if let Err(err) = handle.terminate().await {
                     tracing::warn!(error = %err, "Failed to terminate ACP process after protocol completion");
                 }
@@ -143,14 +147,30 @@ impl ConnectTo<Client> for SandboxAcpTransport {
             termination = handle.wait() => {
                 let termination = termination.map_err(ProtocolError::into_internal_error)?;
                 let stderr = stderr.tail_string().await;
-                let exit_code = termination
-                    .exit_code
-                    .map_or_else(|| "unknown".to_string(), |code| code.to_string());
-                Err(internal_error(format!(
-                    "ACP process exited before protocol completed: termination={}, exit_code={exit_code}, stderr={stderr}",
-                    termination.termination,
-                )))
+                if termination.termination == CommandTermination::Exited
+                    && termination.exit_code == Some(0)
+                {
+                    // Stdio agents commonly exit immediately after writing their final response.
+                    // Process wait can observe that exit before the line reader drains stdout.
+                    if let Ok(result) = timeout(CLEAN_EXIT_PROTOCOL_GRACE, &mut protocol).await {
+                        return result;
+                    }
+                }
+                Err(process_exited_before_protocol_completed(termination, &stderr))
             }
         }
     }
+}
+
+fn process_exited_before_protocol_completed(
+    termination: StdioProcessTermination,
+    stderr: &str,
+) -> ProtocolError {
+    let exit_code = termination
+        .exit_code
+        .map_or_else(|| "unknown".to_string(), |code| code.to_string());
+    internal_error(format!(
+        "ACP process exited before protocol completed: termination={}, exit_code={exit_code}, stderr={stderr}",
+        termination.termination,
+    ))
 }

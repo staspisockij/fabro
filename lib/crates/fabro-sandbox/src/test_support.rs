@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_types::CommandTermination;
 use tokio::fs;
-use tokio::io::duplex;
+use tokio::io::{DuplexStream, duplex};
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::sandbox::StdioProcessControl;
@@ -43,6 +45,7 @@ pub struct MockSandbox {
     pub delete_calls:            Mutex<u32>,
     pub event_callback:          Option<SandboxEventCallback>,
     pub stdio_process_error:     Option<String>,
+    pub stdio_process:           Mutex<Option<MockStdioProcess>>,
 }
 
 impl MockSandbox {
@@ -68,6 +71,13 @@ impl MockSandbox {
             .delete_calls
             .lock()
             .expect("delete_calls lock poisoned")
+    }
+
+    pub fn set_stdio_process(&self, process: MockStdioProcess) {
+        *self
+            .stdio_process
+            .lock()
+            .expect("stdio_process lock poisoned") = Some(process);
     }
 }
 
@@ -108,11 +118,48 @@ impl Default for MockSandbox {
             delete_calls:            Mutex::new(0),
             event_callback:          None,
             stdio_process_error:     None,
+            stdio_process:           Mutex::new(None),
         }
     }
 }
 
-struct MockStdioProcessControl;
+type StdioProcessDriver =
+    Box<dyn FnOnce(DuplexStream, DuplexStream, StderrCollector) + Send + 'static>;
+
+pub struct MockStdioProcess {
+    exit_code:  Option<i32>,
+    wait_delay: Duration,
+    driver:     StdioProcessDriver,
+}
+
+impl MockStdioProcess {
+    pub fn new(
+        driver: impl FnOnce(DuplexStream, DuplexStream, StderrCollector) + Send + 'static,
+    ) -> Self {
+        Self {
+            exit_code:  Some(0),
+            wait_delay: Duration::ZERO,
+            driver:     Box::new(driver),
+        }
+    }
+
+    #[must_use]
+    pub fn with_exit_code(mut self, exit_code: Option<i32>) -> Self {
+        self.exit_code = exit_code;
+        self
+    }
+
+    #[must_use]
+    pub fn with_wait_delay(mut self, wait_delay: Duration) -> Self {
+        self.wait_delay = wait_delay;
+        self
+    }
+}
+
+struct MockStdioProcessControl {
+    exit_code:  Option<i32>,
+    wait_delay: Duration,
+}
 
 #[async_trait]
 impl StdioProcessControl for MockStdioProcessControl {
@@ -121,7 +168,10 @@ impl StdioProcessControl for MockStdioProcessControl {
     }
 
     async fn wait(&self) -> crate::Result<StdioProcessTermination> {
-        Ok(StdioProcessTermination::exited(Some(0)))
+        if !self.wait_delay.is_zero() {
+            sleep(self.wait_delay).await;
+        }
+        Ok(StdioProcessTermination::exited(self.exit_code))
     }
 }
 
@@ -233,13 +283,37 @@ impl Sandbox for MockSandbox {
             return Err(crate::Error::message(error.clone()));
         }
 
+        if let Some(process) = self
+            .stdio_process
+            .lock()
+            .expect("stdio_process lock poisoned")
+            .take()
+        {
+            let (stdin, stdin_reader) = duplex(4096);
+            let (stdout_writer, stdout) = duplex(4096);
+            let stderr = StderrCollector::new(DEFAULT_EXEC_OUTPUT_TAIL_BYTES);
+            (process.driver)(stdin_reader, stdout_writer, stderr.clone());
+            return Ok(StdioProcess {
+                stdin: Box::pin(stdin),
+                stdout: Box::pin(stdout),
+                stderr,
+                handle: StdioProcessHandle::new(MockStdioProcessControl {
+                    exit_code:  process.exit_code,
+                    wait_delay: process.wait_delay,
+                }),
+            });
+        }
+
         let (stdin, _stdin_read) = duplex(1024);
         let (_stdout_write, stdout) = duplex(1024);
         Ok(StdioProcess {
             stdin:  Box::pin(stdin),
             stdout: Box::pin(stdout),
             stderr: StderrCollector::new(DEFAULT_EXEC_OUTPUT_TAIL_BYTES),
-            handle: StdioProcessHandle::new(MockStdioProcessControl),
+            handle: StdioProcessHandle::new(MockStdioProcessControl {
+                exit_code:  Some(0),
+                wait_delay: Duration::ZERO,
+            }),
         })
     }
 

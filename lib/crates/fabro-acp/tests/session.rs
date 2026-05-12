@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::StopReason;
 use fabro_acp::{AcpError, AcpRunRequest, AcpRunResult, resolve_acp_command, run_acp_turn};
-use fabro_sandbox::test_support::MockSandbox;
+use fabro_sandbox::test_support::{MockSandbox, MockStdioProcess};
 use fabro_sandbox::{LocalSandbox, Sandbox, shell_quote};
 use fabro_util::error::collect_chain;
 use tokio::fs::{read_to_string, write};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 use tokio::process::Command;
 use tokio::sync::Notify;
 use tokio::time::{sleep, timeout};
@@ -59,6 +60,30 @@ async fn stdio_spawn_failure_returns_sandbox_error() {
         chain.iter().any(|cause| cause == SANDBOX_FAILURE),
         "cause chain should contain sandbox failure, got: {chain:?}"
     );
+}
+
+#[tokio::test]
+async fn clean_stdio_exit_after_final_response_completes_turn() {
+    let sandbox = MockSandbox::linux();
+    sandbox.set_stdio_process(mock_acp_stdio_process("end_turn"));
+    let sandbox: Arc<dyn Sandbox> = Arc::new(sandbox);
+    let command = resolve_acp_command(Some("mock-acp-agent")).expect("resolve ACP command");
+
+    let result = run_acp_turn(AcpRunRequest {
+        command,
+        prompt: "hello".to_string(),
+        cwd: "/workspace".to_string(),
+        timeout_ms: Some(ACP_TEST_TIMEOUT_MS),
+        env: HashMap::new(),
+        sandbox,
+        cancel_token: CancellationToken::new(),
+        on_activity: None,
+    })
+    .await
+    .expect("clean ACP process exit should not preempt final protocol response");
+
+    assert_eq!(result.text, "hello from acp");
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
 }
 
 #[tokio::test]
@@ -446,4 +471,97 @@ async fn process_is_running(pid: &str) -> bool {
         .chars()
         .find(|ch| !ch.is_whitespace())
         .is_none_or(|state| !matches!(state, 'Z' | 'z'))
+}
+
+fn mock_acp_stdio_process(stop_reason: &'static str) -> MockStdioProcess {
+    MockStdioProcess::new(move |stdin, mut stdout, _stderr| {
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdin).lines();
+            while let Some(line) = lines.next_line().await.expect("read mock ACP stdin") {
+                let message: serde_json::Value =
+                    serde_json::from_str(&line).expect("parse mock ACP request");
+                let method = message
+                    .get("method")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("mock ACP request method");
+                let id = message
+                    .get("id")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+
+                match method {
+                    "initialize" => {
+                        write_acp_response(
+                            &mut stdout,
+                            id,
+                            serde_json::json!({
+                                "protocolVersion": 1,
+                                "agentCapabilities": {},
+                            }),
+                        )
+                        .await;
+                    }
+                    "session/new" => {
+                        write_acp_response(
+                            &mut stdout,
+                            id,
+                            serde_json::json!({ "sessionId": "sess-1" }),
+                        )
+                        .await;
+                    }
+                    "session/prompt" => {
+                        write_acp_message(
+                            &mut stdout,
+                            serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "method": "session/update",
+                                "params": {
+                                    "sessionId": "sess-1",
+                                    "update": {
+                                        "sessionUpdate": "agent_message_chunk",
+                                        "content": { "type": "text", "text": "hello from acp" }
+                                    }
+                                }
+                            }),
+                        )
+                        .await;
+                        write_acp_response(
+                            &mut stdout,
+                            id,
+                            serde_json::json!({ "stopReason": stop_reason }),
+                        )
+                        .await;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        });
+    })
+}
+
+async fn write_acp_response(
+    stdout: &mut DuplexStream,
+    id: serde_json::Value,
+    result: serde_json::Value,
+) {
+    write_acp_message(
+        stdout,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        }),
+    )
+    .await;
+}
+
+async fn write_acp_message(stdout: &mut DuplexStream, message: serde_json::Value) {
+    let mut line = serde_json::to_vec(&message).expect("serialize mock ACP message");
+    line.push(b'\n');
+    stdout
+        .write_all(&line)
+        .await
+        .expect("write mock ACP stdout");
+    stdout.flush().await.expect("flush mock ACP stdout");
 }
