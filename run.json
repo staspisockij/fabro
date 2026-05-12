@@ -318,14 +318,106 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KRCY65A9BZ1AJA8Q85ZKY4GM",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-12T01:53:09.961228Z",
+    "run_branch": "fabro/run/01KRCY65A9BZ1AJA8Q85ZKY4GM",
+    "base_sha": "24276d048a1140ac1b50ac7801e981ddc91cb40e"
   },
-  "status_updated_at": "2026-05-12T01:52:53.094569Z",
-  "last_event_at": "2026-05-12T01:53:09.577039Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-12T01:53:09.961265Z",
+  "last_event_at": "2026-05-12T01:53:12.044003Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-12T01:53:12.043913Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.run_id": "01KRCY65A9BZ1AJA8Q85ZKY4GM",
+          "failure_class": "",
+          "graph.retry_target": "exit",
+          "internal.thread_id": null,
+          "outcome": "succeeded",
+          "internal.retry_count.start": 0,
+          "internal.node_visit_count": 1,
+          "internal.work_dir": "/home/daytona/workspace",
+          "failure_signature": "",
+          "current_node": "start",
+          "graph.goal": "Verify the sandbox can lint and test the project",
+          "internal.fidelity": "compact",
+          "graph.rankdir": "LR"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-12T01:53:13.376110Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "command.output": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a",
+          "failure_signature": "",
+          "internal.node_visit_count": 1,
+          "outcome": "succeeded",
+          "failure_class": "",
+          "thread.start.current_node": "toolchain",
+          "internal.fidelity": "compact",
+          "current_node": "toolchain",
+          "internal.thread_id": "start",
+          "graph.retry_target": "exit",
+          "internal.retry_count.toolchain": 0,
+          "internal.work_dir": "/home/daytona/workspace",
+          "internal.run_id": "01KRCY65A9BZ1AJA8Q85ZKY4GM",
+          "internal.retry_count.start": 0,
+          "graph.rankdir": "LR",
+          "graph.goal": "Verify the sandbox can lint and test the project"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/0f445145c30db4edc762837f8ad7fdbcfcf07d57265b2bc38b6b276be718c75a"
+            },
+            "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "compile_rust",
+        "node_visits": {
+          "toolchain": 1,
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -342,5 +434,62 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-12T01:53:12.043790Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-12T01:53:12.043692Z",
+      "handler": "start",
+      "duration_ms": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "toolchain@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "rustc --version && cargo --version && bun --version 2>&1",
+        "command": "exec 2>&1\nrustc --version && cargo --version && bun --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-12T01:53:12.043980Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
