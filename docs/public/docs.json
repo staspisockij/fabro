@@ -41,6 +41,7 @@
               "workflows/stages-and-nodes",
               "workflows/transitions",
               "workflows/variables",
+              "workflows/imports",
               "workflows/human-in-the-loop",
               "workflows/stylesheets"
             ]
