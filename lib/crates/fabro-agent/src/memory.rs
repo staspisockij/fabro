@@ -19,7 +19,7 @@ pub async fn discover_memory(
     let directories = build_directory_walk(git_root, working_dir);
 
     let candidate_filenames: Vec<&str> = match provider {
-        Provider::Anthropic => vec!["AGENTS.md", "CLAUDE.md"],
+        Provider::Anthropic | Provider::Vertex => vec!["AGENTS.md", "CLAUDE.md"],
         Provider::OpenAi
         | Provider::Kimi
         | Provider::Zai

@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use fabro_model::catalog::CatalogProvider;
 use fabro_model::{
-    ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter,
+    AdapterAuthStrategy, ApiKeyHeaderPolicy, Catalog, CredentialRef, HeaderValueRef, Provider,
+    ProviderId, adapter,
 };
 use fabro_static::EnvVars;
 use fabro_vault::Vault;
@@ -88,9 +89,23 @@ fn default_auth_header_for_provider(provider: &ProviderId, key: String) -> ApiKe
 }
 
 fn auth_header_for_catalog_provider(provider: &CatalogProvider, key: String) -> ApiKeyHeader {
-    let policy = adapter::get(&provider.adapter)
-        .map_or(ApiKeyHeaderPolicy::Bearer, |adapter| adapter.api_key_header);
+    let policy =
+        adapter::get(&provider.adapter).map_or(ApiKeyHeaderPolicy::Bearer, |adapter| match adapter
+            .auth_strategy
+        {
+            AdapterAuthStrategy::ApiKey(policy) => policy,
+            AdapterAuthStrategy::GoogleApplicationDefault => ApiKeyHeaderPolicy::Bearer,
+        });
     build_api_key_header(policy, key)
+}
+
+fn adapter_manages_api_auth(provider: &CatalogProvider) -> bool {
+    adapter::get(&provider.adapter).is_some_and(|adapter| {
+        matches!(
+            adapter.auth_strategy,
+            AdapterAuthStrategy::GoogleApplicationDefault
+        )
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +181,15 @@ impl CredentialResolver {
         let Some(catalog_provider) = catalog.provider(&provider_id) else {
             return Err(ResolveError::NotConfigured(provider_id));
         };
+        if usage == CredentialUsage::ApiRequest && adapter_manages_api_auth(catalog_provider) {
+            let vault = self.vault.read().await;
+            if !self.adapter_managed_auth_configured(&vault, &provider_id) {
+                return Err(ResolveError::NotConfigured(provider_id));
+            }
+            return self
+                .adapter_managed_api_credential(&vault, catalog_provider, catalog)
+                .map(ResolvedCredential::Api);
+        }
         let initial_credential = {
             let vault = self.vault.read().await;
             self.find_credential(&vault, catalog_provider, usage)?
@@ -280,8 +304,13 @@ impl CredentialResolver {
             && self
                 .resolved_extra_headers_for_catalog(vault, &provider.id, catalog)
                 .is_ok();
+        let has_adapter_managed_auth = adapter_manages_api_auth(provider)
+            && self.adapter_managed_auth_configured(vault, &provider.id);
 
-        has_declared_credential || has_provider_id_credential || has_header_only_credentials
+        has_declared_credential
+            || has_provider_id_credential
+            || has_header_only_credentials
+            || has_adapter_managed_auth
     }
 
     fn credential_from_ref(
@@ -315,6 +344,9 @@ impl CredentialResolver {
         let env_base_url = match Provider::from_id(provider) {
             Some(Provider::Anthropic) => {
                 self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_BASE_URL)
+            }
+            Some(Provider::Vertex) => {
+                self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_VERTEX_BASE_URL)
             }
             Some(Provider::OpenAi) => self.lookup_env_or_vault(vault, EnvVars::OPENAI_BASE_URL),
             Some(Provider::Gemini) => self.lookup_env_or_vault(vault, EnvVars::GEMINI_BASE_URL),
@@ -405,6 +437,42 @@ impl CredentialResolver {
                 })
             }
         }
+    }
+
+    fn adapter_managed_api_credential(
+        &self,
+        vault: &Vault,
+        provider: &CatalogProvider,
+        catalog: &Catalog,
+    ) -> Result<ApiCredential, ResolveError> {
+        let project_id = if provider.id == Provider::Vertex.id() {
+            self.lookup_env_or_vault(vault, EnvVars::ANTHROPIC_VERTEX_PROJECT_ID)
+                .or_else(|| self.lookup_env_or_vault(vault, EnvVars::GOOGLE_CLOUD_PROJECT))
+                .or_else(|| self.lookup_env_or_vault(vault, EnvVars::GCLOUD_PROJECT))
+                .or_else(|| self.lookup_env_or_vault(vault, EnvVars::GCP_PROJECT))
+        } else {
+            None
+        };
+
+        Ok(ApiCredential {
+            provider: provider.id.clone(),
+            auth_header: None,
+            extra_headers: self.resolved_extra_headers_for_catalog(vault, &provider.id, catalog)?,
+            base_url: self.provider_base_url_for_catalog(vault, &provider.id, catalog),
+            codex_mode: false,
+            org_id: None,
+            project_id,
+        })
+    }
+
+    fn adapter_managed_auth_configured(&self, vault: &Vault, provider: &ProviderId) -> bool {
+        provider == &Provider::Vertex.id()
+            && self
+                .lookup_env_or_vault(vault, EnvVars::ANTHROPIC_VERTEX_PROJECT_ID)
+                .or_else(|| self.lookup_env_or_vault(vault, EnvVars::GOOGLE_CLOUD_PROJECT))
+                .or_else(|| self.lookup_env_or_vault(vault, EnvVars::GCLOUD_PROJECT))
+                .or_else(|| self.lookup_env_or_vault(vault, EnvVars::GCP_PROJECT))
+                .is_some()
     }
 
     pub async fn header_only_api_credential(
@@ -746,6 +814,37 @@ effort = false
         assert_eq!(
             api.base_url.as_deref(),
             Some("https://compat.example.com/v1")
+        );
+    }
+
+    #[tokio::test]
+    async fn vertex_resolves_as_adapter_managed_api_credential_without_secret_material() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        let resolver = test_resolver(
+            vault,
+            Arc::new(|name| match name {
+                "ANTHROPIC_VERTEX_PROJECT_ID" => Some("vertex-project".to_string()),
+                "ANTHROPIC_VERTEX_BASE_URL" => Some("https://vertex.example.test/v1".to_string()),
+                _ => None,
+            }),
+        );
+        let catalog = default_catalog();
+
+        let ResolvedCredential::Api(api) = resolver
+            .resolve(Provider::Vertex, CredentialUsage::ApiRequest, &catalog)
+            .await
+            .unwrap()
+        else {
+            panic!("expected api credential");
+        };
+
+        assert_eq!(api.provider, Provider::Vertex.id());
+        assert!(api.auth_header.is_none());
+        assert_eq!(api.project_id.as_deref(), Some("vertex-project"));
+        assert_eq!(
+            api.base_url.as_deref(),
+            Some("https://vertex.example.test/v1")
         );
     }
 

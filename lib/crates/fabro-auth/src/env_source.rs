@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter};
+use fabro_model::{
+    AdapterAuthStrategy, Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter,
+};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
@@ -43,22 +45,39 @@ impl EnvCredentialSource {
             self.lookup(name)
         });
 
-        if key.is_none() && provider.credentials.is_empty() && provider.extra_headers.is_empty() {
+        let adapter_auth_strategy =
+            adapter::get(&provider.adapter).map(|adapter| adapter.auth_strategy);
+        let adapter_managed_auth = matches!(
+            adapter_auth_strategy,
+            Some(AdapterAuthStrategy::GoogleApplicationDefault)
+        );
+
+        let adapter_managed_configured =
+            adapter_managed_auth && self.adapter_managed_configured(provider);
+
+        if key.is_none()
+            && provider.credentials.is_empty()
+            && provider.extra_headers.is_empty()
+            && !adapter_managed_configured
+        {
             return Ok(None);
         }
 
         let extra_headers = self.resolved_extra_headers(provider)?;
 
-        if key.is_none() && (!provider.credentials.is_empty() || extra_headers.is_empty()) {
+        if key.is_none()
+            && !adapter_managed_configured
+            && (!provider.credentials.is_empty() || extra_headers.is_empty())
+        {
             return Ok(None);
         }
 
-        let auth_header = key.map(|key| {
-            let policy = adapter::get(&provider.adapter)
-                .map_or(fabro_model::ApiKeyHeaderPolicy::Bearer, |adapter| {
-                    adapter.api_key_header
-                });
-            build_api_key_header(policy, key)
+        let auth_header = key.and_then(|key| {
+            let policy = adapter_auth_strategy.and_then(|strategy| match strategy {
+                AdapterAuthStrategy::ApiKey(policy) => Some(policy),
+                AdapterAuthStrategy::GoogleApplicationDefault => None,
+            });
+            policy.map(|policy| build_api_key_header(policy, key))
         });
 
         let mut cred = ApiCredential {
@@ -84,13 +103,27 @@ impl EnvCredentialSource {
                 cred.extra_headers
                     .insert("originator".to_string(), "fabro".to_string());
             }
+        } else if provider.id == Provider::Vertex.id() {
+            cred.project_id = self.vertex_project_id();
         }
         Ok(Some(cred))
+    }
+
+    fn adapter_managed_configured(&self, provider: &CatalogProvider) -> bool {
+        provider.id == Provider::Vertex.id() && self.vertex_project_id().is_some()
+    }
+
+    fn vertex_project_id(&self) -> Option<String> {
+        self.lookup(EnvVars::ANTHROPIC_VERTEX_PROJECT_ID)
+            .or_else(|| self.lookup(EnvVars::GOOGLE_CLOUD_PROJECT))
+            .or_else(|| self.lookup(EnvVars::GCLOUD_PROJECT))
+            .or_else(|| self.lookup(EnvVars::GCP_PROJECT))
     }
 
     fn env_base_url(&self, provider: &ProviderId) -> Option<String> {
         match Provider::from_id(provider) {
             Some(Provider::Anthropic) => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
+            Some(Provider::Vertex) => self.lookup(EnvVars::ANTHROPIC_VERTEX_BASE_URL),
             Some(Provider::OpenAi) => self.lookup(EnvVars::OPENAI_BASE_URL),
             Some(Provider::Gemini) => self.lookup(EnvVars::GEMINI_BASE_URL),
             Some(Provider::OpenAiCompatible) => self.lookup(EnvVars::OPENAI_COMPATIBLE_BASE_URL),
@@ -164,6 +197,10 @@ impl CredentialSource for EnvCredentialSource {
                     .any(|credential_ref| {
                         matches!(credential_ref, CredentialRef::Env(name) if self.lookup(name).is_some())
                     })
+                    || matches!(
+                        adapter::get(&provider.adapter).map(|adapter| adapter.auth_strategy),
+                        Some(AdapterAuthStrategy::GoogleApplicationDefault)
+                    ) && self.adapter_managed_configured(provider)
                     || (!provider.extra_headers.is_empty()
                         && provider.credentials.is_empty()
                         && self.resolved_extra_headers(provider).is_ok())
@@ -354,6 +391,32 @@ effort = true
             credential.extra_headers.get("x-portkey-provider"),
             Some(&"@bedrock-prod".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_registers_vertex_without_api_key_material() {
+        let source = test_source(&[
+            ("ANTHROPIC_VERTEX_PROJECT_ID", "vertex-project"),
+            (
+                "ANTHROPIC_VERTEX_BASE_URL",
+                "https://vertex.example.test/v1",
+            ),
+        ]);
+        let catalog = default_catalog();
+
+        let resolved = source.resolve(&catalog).await.unwrap();
+        let credential = resolved
+            .credentials
+            .iter()
+            .find(|credential| credential.provider == Provider::Vertex.id())
+            .expect("vertex should be adapter-managed");
+
+        assert!(credential.auth_header.is_none());
+        assert_eq!(
+            credential.base_url.as_deref(),
+            Some("https://vertex.example.test/v1")
+        );
+        assert_eq!(credential.project_id.as_deref(), Some("vertex-project"));
     }
 
     #[tokio::test]

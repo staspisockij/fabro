@@ -695,6 +695,7 @@ enum ContentBlockKind {
 
 /// Accumulated state across SSE events during streaming.
 struct StreamAccumulator {
+    provider_name:     String,
     id:                String,
     model:             String,
     content_parts:     Vec<ContentPart>,
@@ -713,8 +714,9 @@ struct StreamAccumulator {
 }
 
 impl StreamAccumulator {
-    fn new(rate_limit: Option<RateLimitInfo>) -> Self {
+    fn new(provider_name: impl Into<String>, rate_limit: Option<RateLimitInfo>) -> Self {
         Self {
+            provider_name: provider_name.into(),
             id: String::new(),
             model: String::new(),
             content_parts: Vec::new(),
@@ -735,7 +737,7 @@ impl StreamAccumulator {
         Response {
             id:            self.id.clone(),
             model:         self.model.clone(),
-            provider:      "anthropic".to_string(),
+            provider:      self.provider_name.clone(),
             message:       Message {
                 role:         Role::Assistant,
                 content:      content_parts,
@@ -1018,13 +1020,15 @@ struct SseReaderState {
 impl SseReaderState {
     fn new(
         http_resp: fabro_http::Response,
+        provider_name: impl Into<String>,
         rate_limit: Option<RateLimitInfo>,
         json_schema_mode: bool,
         stream_read_timeout: Option<std::time::Duration>,
     ) -> Self {
+        let provider_name = provider_name.into();
         Self {
             line_reader: super::common::LineReader::new(http_resp, stream_read_timeout),
-            accumulator: StreamAccumulator::new(rate_limit),
+            accumulator: StreamAccumulator::new(provider_name, rate_limit),
             pending_events: std::collections::VecDeque::new(),
             json_schema_mode,
         }
@@ -1104,11 +1108,16 @@ fn merge_provider_options(
 
 /// Build an Anthropic API request and HTTP request builder for the given
 /// unified request.
-async fn build_api_request(
-    adapter: &Adapter,
+struct ApiRequestParts {
+    api_request: ApiRequest,
+    beta_header: Option<String>,
+}
+
+async fn build_api_request_parts(
+    catalog: Option<&Catalog>,
     request: &Request,
     stream: bool,
-) -> (ApiRequest, fabro_http::RequestBuilder) {
+) -> ApiRequestParts {
     let (system, other_messages) = extract_system_prompt(&request.messages);
     let mut api_messages = translate_messages(&other_messages).await;
 
@@ -1128,7 +1137,7 @@ async fn build_api_request(
         request.tools.as_ref().map(|t| translate_tools(t))
     };
 
-    let model_info = common::catalog_model(adapter.catalog.as_deref(), &request.model);
+    let model_info = common::catalog_model(catalog, &request.model);
     let supports_prompt_cache = model_info.is_some_and(|m| m.features.prompt_cache);
     let auto_cache =
         supports_prompt_cache && is_auto_cache_enabled(request.provider_options.as_ref());
@@ -1216,7 +1225,7 @@ async fn build_api_request(
     let is_fast = request.speed == Some(Speed::Fast);
 
     let api_request = ApiRequest {
-        model: common::api_model_id(adapter.catalog.as_deref(), &request.model),
+        model: common::api_model_id(catalog, &request.model),
         messages: api_messages,
         max_tokens: resolved_max_tokens,
         system: system_value,
@@ -1236,6 +1245,26 @@ async fn build_api_request(
         stream,
     };
 
+    let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
+    let beta_header = build_beta_header(
+        request.provider_options.as_ref(),
+        auto_cache,
+        is_fast,
+        include_1m_context,
+    );
+
+    ApiRequestParts {
+        api_request,
+        beta_header,
+    }
+}
+
+async fn build_api_request(
+    adapter: &Adapter,
+    request: &Request,
+    stream: bool,
+) -> (ApiRequest, fabro_http::RequestBuilder) {
+    let parts = build_api_request_parts(adapter.catalog.as_deref(), request, stream).await;
     let url = adapter.messages_url();
     let mut req_builder = adapter.http.client.post(&url);
     // Apply default_headers first so adapter-specific headers can override
@@ -1249,13 +1278,7 @@ async fn build_api_request(
         }
         req_builder = req_builder.header("anthropic-version", "2023-06-01");
 
-        let include_1m_context = model_info.is_some_and(|m| m.context_window() >= 1_000_000);
-        if let Some(beta_str) = build_beta_header(
-            request.provider_options.as_ref(),
-            auto_cache,
-            is_fast,
-            include_1m_context,
-        ) {
+        if let Some(beta_str) = parts.beta_header.clone() {
             req_builder = req_builder.header("anthropic-beta", beta_str);
         }
     } else if let Some(api_key) = &adapter.http.api_key {
@@ -1263,10 +1286,129 @@ async fn build_api_request(
     }
 
     let req_builder = req_builder.json(&merge_provider_options(
-        &api_request,
+        &parts.api_request,
         request.provider_options.as_ref(),
     ));
-    (api_request, req_builder)
+    (parts.api_request, req_builder)
+}
+
+pub(crate) async fn build_vertex_request_body(
+    catalog: Option<&Catalog>,
+    request: &Request,
+    stream: bool,
+) -> (String, serde_json::Value) {
+    let parts = build_api_request_parts(catalog, request, stream).await;
+    let model = parts.api_request.model.clone();
+    let mut body = merge_provider_options(&parts.api_request, request.provider_options.as_ref());
+    if let Some(object) = body.as_object_mut() {
+        object.remove("model");
+        object.insert(
+            "anthropic_version".to_string(),
+            serde_json::Value::String("vertex-2023-10-16".to_string()),
+        );
+    }
+    (model, body)
+}
+
+pub(crate) fn parse_response_body(
+    body: &str,
+    headers: &fabro_http::HeaderMap,
+    request: &Request,
+    provider_name: &str,
+) -> Result<Response, Error> {
+    let api_resp: ApiResponse = serde_json::from_str(body)
+        .map_err(|e| Error::network(format!("failed to parse {provider_name} response: {e}"), e))?;
+
+    let content_parts: Vec<ContentPart> = api_resp
+        .content
+        .iter()
+        .filter_map(parse_content_block)
+        .collect();
+
+    let content_parts = if uses_json_schema_format(request) {
+        convert_synthetic_tool_to_text(content_parts)
+    } else {
+        content_parts
+    };
+
+    let finish_reason = if uses_json_schema_format(request) {
+        FinishReason::Stop
+    } else {
+        map_finish_reason(api_resp.stop_reason.as_deref())
+    };
+
+    Ok(Response {
+        id: api_resp.id,
+        model: api_resp.model,
+        provider: provider_name.to_string(),
+        message: Message {
+            role:         Role::Assistant,
+            content:      content_parts,
+            name:         None,
+            tool_call_id: None,
+        },
+        finish_reason,
+        usage: token_counts_from_api_usage(&api_resp.usage),
+        raw: serde_json::from_str(body).ok(),
+        warnings: vec![],
+        rate_limit: parse_rate_limit_headers(headers),
+    })
+}
+
+pub(crate) fn stream_events_from_response(
+    http_resp: fabro_http::Response,
+    request: &Request,
+    provider_name: impl Into<String>,
+    stream_read_timeout: Option<std::time::Duration>,
+) -> StreamEventStream {
+    let rate_limit = parse_rate_limit_headers(http_resp.headers());
+    let json_schema_mode = uses_json_schema_format(request);
+
+    let stream = stream::unfold(
+        SseReaderState::new(
+            http_resp,
+            provider_name,
+            rate_limit,
+            json_schema_mode,
+            stream_read_timeout,
+        ),
+        |mut state| async move {
+            loop {
+                if let Some(event) = state.pending_events.pop_front() {
+                    let event = if state.json_schema_mode {
+                        convert_stream_event_for_json_schema(event)
+                    } else {
+                        event
+                    };
+                    return Some((Ok(event), state));
+                }
+
+                match state.next_sse_event().await {
+                    SseResult::Event { event_type, data } => {
+                        let parsed: serde_json::Value = match serde_json::from_str(&data) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Some((
+                                    Err(Error::stream_error(
+                                        format!("failed to parse SSE data: {e}"),
+                                        e,
+                                    )),
+                                    state,
+                                ));
+                            }
+                        };
+                        let events =
+                            process_sse_event(&event_type, &parsed, &mut state.accumulator);
+                        state.pending_events.extend(events);
+                    }
+                    SseResult::Done => return None,
+                    SseResult::Error(err) => return Some((Err(err), state)),
+                }
+            }
+        },
+    );
+
+    Box::pin(stream)
 }
 
 #[async_trait::async_trait]
@@ -1293,50 +1435,7 @@ impl ProviderAdapter for Adapter {
             req = req.timeout(t);
         }
         let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
-
-        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| {
-            Error::network(
-                format!("failed to parse {} response: {e}", self.provider_name),
-                e,
-            )
-        })?;
-
-        let content_parts: Vec<ContentPart> = api_resp
-            .content
-            .iter()
-            .filter_map(parse_content_block)
-            .collect();
-
-        // If we used JsonSchema mode, convert the synthetic tool call back to text
-        let content_parts = if uses_json_schema_format(request) {
-            convert_synthetic_tool_to_text(content_parts)
-        } else {
-            content_parts
-        };
-
-        let finish_reason = if uses_json_schema_format(request) {
-            // The model was forced to call a tool, so stop_reason is "tool_use",
-            // but from the caller's perspective, the request completed normally.
-            FinishReason::Stop
-        } else {
-            map_finish_reason(api_resp.stop_reason.as_deref())
-        };
-        Ok(Response {
-            id: api_resp.id,
-            model: api_resp.model,
-            provider: self.provider_name.clone(),
-            message: Message {
-                role:         Role::Assistant,
-                content:      content_parts,
-                name:         None,
-                tool_call_id: None,
-            },
-            finish_reason,
-            usage: token_counts_from_api_usage(&api_resp.usage),
-            raw: serde_json::from_str(&body).ok(),
-            warnings: vec![],
-            rate_limit: parse_rate_limit_headers(&headers),
-        })
+        parse_response_body(&body, &headers, request, &self.provider_name)
     }
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
@@ -1368,52 +1467,12 @@ impl ProviderAdapter for Adapter {
             ));
         }
 
-        let rate_limit = parse_rate_limit_headers(http_resp.headers());
-        let json_schema_mode = uses_json_schema_format(request);
-        let stream_read_timeout = self.http.stream_read_timeout;
-
-        let stream = stream::unfold(
-            SseReaderState::new(http_resp, rate_limit, json_schema_mode, stream_read_timeout),
-            |mut state| async move {
-                loop {
-                    // Drain any buffered events first.
-                    if let Some(event) = state.pending_events.pop_front() {
-                        let event = if state.json_schema_mode {
-                            convert_stream_event_for_json_schema(event)
-                        } else {
-                            event
-                        };
-                        return Some((Ok(event), state));
-                    }
-
-                    // Read more SSE data from the byte stream.
-                    match state.next_sse_event().await {
-                        SseResult::Event { event_type, data } => {
-                            let parsed: serde_json::Value = match serde_json::from_str(&data) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    return Some((
-                                        Err(Error::stream_error(
-                                            format!("failed to parse SSE data: {e}"),
-                                            e,
-                                        )),
-                                        state,
-                                    ));
-                                }
-                            };
-                            let events =
-                                process_sse_event(&event_type, &parsed, &mut state.accumulator);
-                            state.pending_events.extend(events);
-                            // Loop to drain from pending_events.
-                        }
-                        SseResult::Done => return None,
-                        SseResult::Error(err) => return Some((Err(err), state)),
-                    }
-                }
-            },
-        );
-
-        Ok(Box::pin(stream))
+        Ok(stream_events_from_response(
+            http_resp,
+            request,
+            self.provider_name.clone(),
+            self.http.stream_read_timeout,
+        ))
     }
 
     fn supports_tool_choice(&self, mode: &str) -> bool {
@@ -1551,7 +1610,7 @@ mod tests {
 
     #[test]
     fn stream_token_counts_leaves_reasoning_zero_and_output_full() {
-        let mut acc = StreamAccumulator::new(None);
+        let mut acc = StreamAccumulator::new("anthropic", None);
         acc.content_parts.push(ContentPart::Thinking(ThinkingData {
             text:      "summary text".to_string(),
             signature: Some(String::new()),

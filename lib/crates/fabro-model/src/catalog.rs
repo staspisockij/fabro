@@ -835,6 +835,7 @@ impl Catalog {
     pub fn probe_for_provider(&self, p: Provider) -> Option<&Model> {
         let override_id: Option<&str> = match p {
             Provider::Anthropic => Some("claude-haiku-4-5"),
+            Provider::Vertex => Some("vertex-claude-haiku-4-5"),
             Provider::OpenAi => Some("gpt-5.4-mini"),
             _ => None,
         };
@@ -1843,6 +1844,38 @@ effort = false
                 .reasoning_effort,
             ReasoningEffort::VARIANTS
         );
+    }
+
+    #[test]
+    fn builtin_vertex_catalog_uses_vertex_adapter_and_api_ids() {
+        let catalog = Catalog::builtin();
+        let provider = catalog.provider(&ProviderId::vertex()).unwrap();
+
+        assert_eq!(provider.adapter, "vertex");
+        assert!(provider.credentials.is_empty());
+        assert_eq!(
+            catalog
+                .default_for_provider(&ProviderId::vertex())
+                .unwrap()
+                .id,
+            "vertex-claude-sonnet-4-6"
+        );
+
+        let expected_api_ids = [
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-5",
+            "claude-opus-4-5",
+            "claude-opus-4-1",
+            "claude-haiku-4-5",
+        ];
+        for api_id in expected_api_ids {
+            let model_id = format!("vertex-{api_id}");
+            let model = catalog.get(&model_id).unwrap();
+            assert_eq!(model.provider, ProviderId::vertex());
+            assert_eq!(catalog.model_settings(&model_id).unwrap().api_id, api_id);
+        }
     }
 
     #[test]

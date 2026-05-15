@@ -31,6 +31,7 @@ use crate::ids::ProviderId;
 #[strum(serialize_all = "snake_case")]
 pub enum Provider {
     Anthropic,
+    Vertex,
     #[serde(rename = "openai", alias = "open_ai")]
     #[strum(to_string = "openai", serialize = "open_ai")]
     OpenAi,
@@ -59,6 +60,7 @@ impl Provider {
     /// All known provider variants, for use in guardrail tests and iteration.
     pub const ALL: &[Self] = &[
         Self::Anthropic,
+        Self::Vertex,
         Self::OpenAi,
         Self::Gemini,
         Self::Kimi,
@@ -80,7 +82,7 @@ impl Provider {
             Self::Zai => &[EnvVars::ZAI_API_KEY],
             Self::Minimax => &[EnvVars::MINIMAX_API_KEY],
             Self::Inception => &[EnvVars::INCEPTION_API_KEY],
-            Self::OpenAiCompatible => &[],
+            Self::Vertex | Self::OpenAiCompatible => &[],
         }
     }
 
@@ -128,6 +130,7 @@ impl Provider {
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Anthropic => "Anthropic",
+            Self::Vertex => "Vertex AI",
             Self::OpenAi => "OpenAI",
             Self::Gemini => "Gemini",
             Self::Kimi => "Kimi",
@@ -165,6 +168,7 @@ mod tests {
     #[test]
     fn provider_id_preserves_canonical_builtin_strings() {
         assert_eq!(Provider::Anthropic.id().as_str(), ProviderId::ANTHROPIC);
+        assert_eq!(Provider::Vertex.id().as_str(), ProviderId::VERTEX);
         assert_eq!(Provider::OpenAi.id().as_str(), ProviderId::OPENAI);
         assert_eq!(Provider::Gemini.id().as_str(), ProviderId::GEMINI);
         assert_eq!(Provider::Kimi.id().as_str(), ProviderId::KIMI);
@@ -290,6 +294,11 @@ mod tests {
     }
 
     #[test]
+    fn api_key_env_vars_vertex_empty_because_adc_is_adapter_managed() {
+        assert!(Provider::Vertex.api_key_env_vars().is_empty());
+    }
+
+    #[test]
     fn api_key_env_vars_openai() {
         assert_eq!(Provider::OpenAi.api_key_env_vars(), &["OPENAI_API_KEY"]);
     }
@@ -324,11 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn every_provider_has_at_least_one_env_var() {
+    fn every_api_key_provider_has_at_least_one_env_var() {
         assert!(
             Provider::ALL
                 .iter()
-                .all(|p| !p.api_key_env_vars().is_empty())
+                .all(|p| { *p == Provider::Vertex || !p.api_key_env_vars().is_empty() })
         );
     }
 }

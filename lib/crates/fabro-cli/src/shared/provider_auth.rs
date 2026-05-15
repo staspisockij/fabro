@@ -34,6 +34,9 @@ use tokio::time::timeout;
 pub(crate) fn provider_key_url(provider: Provider) -> &'static str {
     match provider {
         Provider::Anthropic => "https://console.anthropic.com/settings/keys",
+        Provider::Vertex => {
+            "https://cloud.google.com/docs/authentication/application-default-credentials"
+        }
         Provider::OpenAi => "https://platform.openai.com/api-keys",
         Provider::Gemini => "https://aistudio.google.com/apikey",
         Provider::Kimi => "https://platform.moonshot.cn/console/api-keys",

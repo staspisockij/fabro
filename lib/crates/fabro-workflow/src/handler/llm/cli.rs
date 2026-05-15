@@ -60,7 +60,7 @@ pub enum AgentCli {
 impl AgentCli {
     pub fn for_provider(provider: Provider) -> Self {
         match provider {
-            Provider::Anthropic => Self::Claude,
+            Provider::Anthropic | Provider::Vertex => Self::Claude,
             Provider::Gemini => Self::Gemini,
             Provider::OpenAi
             | Provider::Kimi
@@ -142,7 +142,7 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
             | Provider::OpenAiCompatible => {
                 format!(" -m {model}")
             }
-            Provider::Anthropic => format!(" --model {model}"),
+            Provider::Anthropic | Provider::Vertex => format!(" --model {model}"),
         }
     };
     // Use `cat | command` instead of `command < file` because the background
@@ -163,7 +163,7 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
         // --dangerously-skip-permissions: bypass all permission checks (required for
         // non-interactive use). CLAUDECODE= unset to allow running inside a Claude Code
         // session.
-        Provider::Anthropic => format!(
+        Provider::Anthropic | Provider::Vertex => format!(
             "cat {prompt_file} | CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag}"
         ),
     }
@@ -326,7 +326,7 @@ pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliRespons
         | Provider::Inception
         | Provider::OpenAiCompatible => parse_codex_ndjson(output),
         Provider::Gemini => parse_gemini_json(output),
-        Provider::Anthropic => parse_claude_ndjson(output),
+        Provider::Anthropic | Provider::Vertex => parse_claude_ndjson(output),
     }
 }
 

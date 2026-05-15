@@ -38,6 +38,7 @@ fabro-model = { path = "../fabro-model" }
 fabro-redact.workspace = true
 fabro-static.workspace = true
 fabro-util = { path = "../fabro-util" }
+google-cloud-auth = "1.10.0"
 
 [dev-dependencies]
 http = "1"

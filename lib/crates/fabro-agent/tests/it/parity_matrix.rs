@@ -43,8 +43,8 @@ fn summarizer_model_id(provider: Provider) -> ModelHandle {
             provider: Provider::Gemini.id(),
             model:    "gemini-3-flash-preview".to_string(),
         },
-        Provider::Anthropic => ModelHandle::ByName {
-            provider: Provider::Anthropic.id(),
+        Provider::Anthropic | Provider::Vertex => ModelHandle::ByName {
+            provider: provider.id(),
             model:    "claude-haiku-4-5".to_string(),
         },
     }
@@ -60,7 +60,9 @@ fn build_summarizer(provider: Provider, client: &Client) -> WebFetchSummarizer {
 fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn AgentProfile> {
     let summarizer = Some(build_summarizer(provider, client));
     match provider {
-        Provider::Anthropic => Box::new(AnthropicProfile::with_summarizer(model, summarizer)),
+        Provider::Anthropic | Provider::Vertex => {
+            Box::new(AnthropicProfile::with_summarizer(model, summarizer).with_provider(provider))
+        }
         Provider::OpenAi => Box::new(OpenAiProfile::with_summarizer(model, summarizer)),
         Provider::Kimi
         | Provider::Zai
@@ -93,10 +95,10 @@ async fn make_session(
         let sub_profile: Arc<dyn AgentProfile> = {
             let summarizer = Some(build_summarizer(provider, &factory_client));
             match provider {
-                Provider::Anthropic => Arc::new(AnthropicProfile::with_summarizer(
-                    &factory_model,
-                    summarizer,
-                )),
+                Provider::Anthropic | Provider::Vertex => Arc::new(
+                    AnthropicProfile::with_summarizer(&factory_model, summarizer)
+                        .with_provider(provider),
+                ),
                 Provider::OpenAi => {
                     Arc::new(OpenAiProfile::with_summarizer(&factory_model, summarizer))
                 }

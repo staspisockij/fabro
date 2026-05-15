@@ -41,11 +41,18 @@ impl EnvVars {
     // LLM providers and tool integrations
     pub const ANTHROPIC_API_KEY: &'static str = "ANTHROPIC_API_KEY";
     pub const ANTHROPIC_BASE_URL: &'static str = "ANTHROPIC_BASE_URL";
+    pub const ANTHROPIC_VERTEX_BASE_URL: &'static str = "ANTHROPIC_VERTEX_BASE_URL";
+    pub const ANTHROPIC_VERTEX_PROJECT_ID: &'static str = "ANTHROPIC_VERTEX_PROJECT_ID";
     pub const BRAVE_SEARCH_API_KEY: &'static str = "BRAVE_SEARCH_API_KEY";
     pub const CHATGPT_ACCOUNT_ID: &'static str = "CHATGPT_ACCOUNT_ID";
     pub const GEMINI_API_KEY: &'static str = "GEMINI_API_KEY";
     pub const GEMINI_BASE_URL: &'static str = "GEMINI_BASE_URL";
     pub const GOOGLE_API_KEY: &'static str = "GOOGLE_API_KEY";
+    pub const GOOGLE_CLOUD_PROJECT: &'static str = "GOOGLE_CLOUD_PROJECT";
+    pub const GOOGLE_APPLICATION_CREDENTIALS: &'static str = "GOOGLE_APPLICATION_CREDENTIALS";
+    pub const CLOUD_ML_REGION: &'static str = "CLOUD_ML_REGION";
+    pub const GCLOUD_PROJECT: &'static str = "GCLOUD_PROJECT";
+    pub const GCP_PROJECT: &'static str = "GCP_PROJECT";
     pub const GOPATH: &'static str = "GOPATH";
     pub const INCEPTION_API_KEY: &'static str = "INCEPTION_API_KEY";
     pub const KIMI_API_KEY: &'static str = "KIMI_API_KEY";
@@ -179,11 +186,18 @@ mod tests {
             EnvVars::FABRO_WORKER_TOKEN,
             EnvVars::ANTHROPIC_API_KEY,
             EnvVars::ANTHROPIC_BASE_URL,
+            EnvVars::ANTHROPIC_VERTEX_BASE_URL,
+            EnvVars::ANTHROPIC_VERTEX_PROJECT_ID,
             EnvVars::BRAVE_SEARCH_API_KEY,
             EnvVars::CHATGPT_ACCOUNT_ID,
             EnvVars::GEMINI_API_KEY,
             EnvVars::GEMINI_BASE_URL,
             EnvVars::GOOGLE_API_KEY,
+            EnvVars::GOOGLE_CLOUD_PROJECT,
+            EnvVars::GOOGLE_APPLICATION_CREDENTIALS,
+            EnvVars::CLOUD_ML_REGION,
+            EnvVars::GCLOUD_PROJECT,
+            EnvVars::GCP_PROJECT,
             EnvVars::GOPATH,
             EnvVars::INCEPTION_API_KEY,
             EnvVars::KIMI_API_KEY,

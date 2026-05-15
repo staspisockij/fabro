@@ -33,9 +33,11 @@ fn profile_context_window_matches_catalog_for_default_models() {
             Provider::Gemini => {
                 Box::new(GeminiProfile::new(model).with_catalog(Arc::clone(&catalog)))
             }
-            Provider::Anthropic => {
-                Box::new(AnthropicProfile::new(model).with_catalog(Arc::clone(&catalog)))
-            }
+            Provider::Anthropic | Provider::Vertex => Box::new(
+                AnthropicProfile::new(model)
+                    .with_provider(provider)
+                    .with_catalog(Arc::clone(&catalog)),
+            ),
         };
 
         assert_eq!(

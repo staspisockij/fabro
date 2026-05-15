@@ -324,7 +324,9 @@ impl ModelBillingFacts {
         match provider {
             Provider::OpenAi => Self::OpenAi(OpenAiBillingFacts::default()),
             Provider::OpenAiCompatible => Self::OpenAiCompatible(OpenAiBillingFacts::default()),
-            Provider::Anthropic => Self::Anthropic(anthropic_billing_facts(tokens)),
+            Provider::Anthropic | Provider::Vertex => {
+                Self::Anthropic(anthropic_billing_facts(tokens))
+            }
             Provider::Gemini => Self::Gemini(GeminiBillingFacts::default()),
             Provider::Kimi => Self::Kimi(OpenAiBillingFacts::default()),
             Provider::Zai => Self::Zai(OpenAiBillingFacts::default()),
@@ -629,7 +631,9 @@ fn pricing_policy_for_builtin_provider(
             cached_input,
             output,
         }),
-        Provider::Anthropic => anthropic_pricing_policy(input, output, cached_input),
+        Provider::Anthropic | Provider::Vertex => {
+            anthropic_pricing_policy(input, output, cached_input)
+        }
         Provider::Gemini => ModelPricingPolicy::Gemini(GeminiModelPricing {
             input,
             output,

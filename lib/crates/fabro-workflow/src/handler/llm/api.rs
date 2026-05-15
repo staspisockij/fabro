@@ -198,7 +198,7 @@ fn build_profile(
 
 fn default_profile_kind(provider: Provider) -> AgentProfileKind {
     match provider {
-        Provider::Anthropic => AgentProfileKind::Anthropic,
+        Provider::Anthropic | Provider::Vertex => AgentProfileKind::Anthropic,
         Provider::Gemini => AgentProfileKind::Gemini,
         Provider::OpenAi
         | Provider::Kimi

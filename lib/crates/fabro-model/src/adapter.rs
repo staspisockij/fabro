@@ -40,6 +40,17 @@ pub enum ApiKeyHeaderPolicy {
     Custom { name: &'static str },
 }
 
+/// How a provider adapter authenticates outbound API requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdapterAuthStrategy {
+    /// Fabro resolves an API key and converts it into the adapter's HTTP
+    /// authentication header.
+    ApiKey(ApiKeyHeaderPolicy),
+    /// The adapter owns token acquisition through Google Application Default
+    /// Credentials. No API key material is stored in Fabro.
+    GoogleApplicationDefault,
+}
+
 /// Native control values an adapter knows how to send through its provider
 /// API.
 #[derive(Debug, Clone, Copy)]
@@ -62,8 +73,8 @@ pub struct AdapterMetadata {
     pub key:             &'static str,
     /// Default agent profile dispatched for providers that use this adapter.
     pub default_profile: AgentProfileKind,
-    /// How API keys for this adapter are converted into auth headers.
-    pub api_key_header:  ApiKeyHeaderPolicy,
+    /// How this adapter authenticates API requests.
+    pub auth_strategy:   AdapterAuthStrategy,
     /// Native control values the adapter can transmit.
     pub controls:        AdapterControlCapabilities,
 }
@@ -78,7 +89,18 @@ const FAST_SPEEDS: &[Speed] = &[Speed::Fast];
 pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
     key:             "anthropic",
     default_profile: AgentProfileKind::Anthropic,
-    api_key_header:  ApiKeyHeaderPolicy::Custom { name: "x-api-key" },
+    auth_strategy:   AdapterAuthStrategy::ApiKey(ApiKeyHeaderPolicy::Custom { name: "x-api-key" }),
+    controls:        AdapterControlCapabilities {
+        native_reasoning_effort: FULL_REASONING_EFFORTS,
+        additional_speeds:       FAST_SPEEDS,
+    },
+};
+
+/// Anthropic Claude through Vertex AI publisher endpoints — `vertex` adapter.
+pub const VERTEX: AdapterMetadata = AdapterMetadata {
+    key:             "vertex",
+    default_profile: AgentProfileKind::Anthropic,
+    auth_strategy:   AdapterAuthStrategy::GoogleApplicationDefault,
     controls:        AdapterControlCapabilities {
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       FAST_SPEEDS,
@@ -89,7 +111,7 @@ pub const ANTHROPIC: AdapterMetadata = AdapterMetadata {
 pub const OPENAI: AdapterMetadata = AdapterMetadata {
     key:             "openai",
     default_profile: AgentProfileKind::OpenAi,
-    api_key_header:  ApiKeyHeaderPolicy::Bearer,
+    auth_strategy:   AdapterAuthStrategy::ApiKey(ApiKeyHeaderPolicy::Bearer),
     controls:        AdapterControlCapabilities {
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       &[],
@@ -100,9 +122,9 @@ pub const OPENAI: AdapterMetadata = AdapterMetadata {
 pub const GEMINI: AdapterMetadata = AdapterMetadata {
     key:             "gemini",
     default_profile: AgentProfileKind::Gemini,
-    api_key_header:  ApiKeyHeaderPolicy::Custom {
+    auth_strategy:   AdapterAuthStrategy::ApiKey(ApiKeyHeaderPolicy::Custom {
         name: "x-goog-api-key",
-    },
+    }),
     controls:        AdapterControlCapabilities {
         native_reasoning_effort: FULL_REASONING_EFFORTS,
         additional_speeds:       &[],
@@ -115,7 +137,7 @@ pub const GEMINI: AdapterMetadata = AdapterMetadata {
 pub const OPENAI_COMPATIBLE: AdapterMetadata = AdapterMetadata {
     key:             "openai_compatible",
     default_profile: AgentProfileKind::OpenAi,
-    api_key_header:  ApiKeyHeaderPolicy::Bearer,
+    auth_strategy:   AdapterAuthStrategy::ApiKey(ApiKeyHeaderPolicy::Bearer),
     controls:        AdapterControlCapabilities {
         // `openai_compatible` providers vary widely; the catalog requires
         // models declaring `features.reasoning_effort = "levels"` to
@@ -126,7 +148,8 @@ pub const OPENAI_COMPATIBLE: AdapterMetadata = AdapterMetadata {
 };
 
 /// All built-in adapter metadata, in stable iteration order.
-pub const ALL_ADAPTERS: &[AdapterMetadata] = &[ANTHROPIC, OPENAI, GEMINI, OPENAI_COMPATIBLE];
+pub const ALL_ADAPTERS: &[AdapterMetadata] =
+    &[ANTHROPIC, VERTEX, OPENAI, GEMINI, OPENAI_COMPATIBLE];
 
 /// Look up adapter metadata by stable key.
 #[must_use]
@@ -145,6 +168,7 @@ pub fn keys() -> impl Iterator<Item = &'static str> {
 pub fn default_for_provider_id(provider: &ProviderId) -> &'static str {
     match Provider::from_id(provider) {
         Some(Provider::Anthropic) => ANTHROPIC.key,
+        Some(Provider::Vertex) => VERTEX.key,
         Some(Provider::OpenAi) => OPENAI.key,
         Some(Provider::Gemini) => GEMINI.key,
         Some(
@@ -165,6 +189,7 @@ mod tests {
     #[test]
     fn lookup_by_known_key() {
         assert_eq!(get("anthropic").unwrap().key, "anthropic");
+        assert_eq!(get("vertex").unwrap().key, "vertex");
         assert_eq!(get("openai").unwrap().key, "openai");
         assert_eq!(get("gemini").unwrap().key, "gemini");
         assert_eq!(get("openai_compatible").unwrap().key, "openai_compatible");
@@ -187,15 +212,29 @@ mod tests {
 
     #[test]
     fn anthropic_uses_custom_x_api_key_header() {
-        match ANTHROPIC.api_key_header {
-            ApiKeyHeaderPolicy::Custom { name } => assert_eq!(name, "x-api-key"),
-            ApiKeyHeaderPolicy::Bearer => panic!("expected custom header for anthropic"),
+        match ANTHROPIC.auth_strategy {
+            AdapterAuthStrategy::ApiKey(ApiKeyHeaderPolicy::Custom { name }) => {
+                assert_eq!(name, "x-api-key");
+            }
+            other => panic!("expected custom API-key header for anthropic, got {other:?}"),
         }
     }
 
     #[test]
     fn openai_uses_bearer_header() {
-        assert!(matches!(OPENAI.api_key_header, ApiKeyHeaderPolicy::Bearer));
+        assert!(matches!(
+            OPENAI.auth_strategy,
+            AdapterAuthStrategy::ApiKey(ApiKeyHeaderPolicy::Bearer)
+        ));
+    }
+
+    #[test]
+    fn vertex_uses_google_application_default_credentials() {
+        assert!(matches!(
+            VERTEX.auth_strategy,
+            AdapterAuthStrategy::GoogleApplicationDefault
+        ));
+        assert_eq!(VERTEX.default_profile, AgentProfileKind::Anthropic);
     }
 
     #[test]

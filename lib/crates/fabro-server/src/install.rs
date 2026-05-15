@@ -822,6 +822,7 @@ async fn put_install_llm(
 
 fn unsupported_install_provider_error(provider: Provider) -> Option<&'static str> {
     match provider {
+        Provider::Vertex => Some("vertex is not supported by install in v1; configure Google ADC"),
         Provider::OpenAiCompatible => Some("openai_compatible is not supported by install in v1"),
         _ => None,
     }
@@ -2045,7 +2046,8 @@ async fn validate_llm_provider(
         Provider::Anthropic => ("x-api-key", input.api_key.clone()),
         Provider::OpenAi => ("Authorization", format!("Bearer {}", input.api_key)),
         Provider::Gemini => ("x-goog-api-key", input.api_key.clone()),
-        Provider::Kimi
+        Provider::Vertex
+        | Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
         | Provider::Inception
@@ -2093,6 +2095,7 @@ fn provider_base_url(state: &InstallAppState, provider: Provider) -> String {
         .cloned()
         .or_else(|| match provider {
             Provider::Anthropic => std::env::var(EnvVars::ANTHROPIC_BASE_URL).ok(),
+            Provider::Vertex => std::env::var(EnvVars::ANTHROPIC_VERTEX_BASE_URL).ok(),
             Provider::OpenAi => std::env::var(EnvVars::OPENAI_BASE_URL).ok(),
             Provider::Gemini => std::env::var(EnvVars::GEMINI_BASE_URL).ok(),
             Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception => None,
@@ -2102,7 +2105,8 @@ fn provider_base_url(state: &InstallAppState, provider: Provider) -> String {
             Provider::Anthropic => DEFAULT_ANTHROPIC_BASE_URL.to_string(),
             Provider::OpenAi => DEFAULT_OPENAI_BASE_URL.to_string(),
             Provider::Gemini => DEFAULT_GEMINI_BASE_URL.to_string(),
-            Provider::Kimi
+            Provider::Vertex
+            | Provider::Kimi
             | Provider::Zai
             | Provider::Minimax
             | Provider::Inception

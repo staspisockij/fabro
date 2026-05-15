@@ -1,0 +1,147 @@
+[providers.vertex]
+display_name = "Vertex AI"
+adapter = "vertex"
+priority = 90
+
+[models."vertex-claude-opus-4-7"]
+provider = "vertex"
+api_id = "claude-opus-4-7"
+display_name = "Claude Opus 4.7 on Vertex AI"
+family = "claude-4"
+training = "2025-08-01"
+knowledge_cutoff = "May 2025"
+estimated_output_tps = 25
+
+[models."vertex-claude-opus-4-7".limits]
+context_window = 1000000
+max_output = 128000
+
+[models."vertex-claude-opus-4-7".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models."vertex-claude-opus-4-7".controls]
+speed = ["fast"]
+
+[models."vertex-claude-opus-4-6"]
+provider = "vertex"
+api_id = "claude-opus-4-6"
+display_name = "Claude Opus 4.6 on Vertex AI"
+family = "claude-4"
+training = "2025-08-01"
+knowledge_cutoff = "May 2025"
+estimated_output_tps = 25
+
+[models."vertex-claude-opus-4-6".limits]
+context_window = 1000000
+max_output = 128000
+
+[models."vertex-claude-opus-4-6".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models."vertex-claude-opus-4-6".controls]
+speed = ["fast"]
+
+[models."vertex-claude-sonnet-4-6"]
+provider = "vertex"
+api_id = "claude-sonnet-4-6"
+display_name = "Claude Sonnet 4.6 on Vertex AI"
+family = "claude-4"
+training = "2025-08-01"
+knowledge_cutoff = "May 2025"
+default = true
+estimated_output_tps = 50
+
+[models."vertex-claude-sonnet-4-6".limits]
+context_window = 200000
+max_output = 64000
+
+[models."vertex-claude-sonnet-4-6".features]
+tools = true
+vision = true
+reasoning = true
+reasoning_effort = "levels"
+prompt_cache = true
+
+[models."vertex-claude-sonnet-4-5"]
+provider = "vertex"
+api_id = "claude-sonnet-4-5"
+display_name = "Claude Sonnet 4.5 on Vertex AI"
+family = "claude-4"
+training = "2025-08-01"
+knowledge_cutoff = "May 2025"
+estimated_output_tps = 50
+
+[models."vertex-claude-sonnet-4-5".limits]
+context_window = 200000
+max_output = 64000
+
+[models."vertex-claude-sonnet-4-5".features]
+tools = true
+vision = true
+reasoning = true
+prompt_cache = true
+
+[models."vertex-claude-opus-4-5"]
+provider = "vertex"
+api_id = "claude-opus-4-5"
+display_name = "Claude Opus 4.5 on Vertex AI"
+family = "claude-4"
+training = "2025-08-01"
+knowledge_cutoff = "May 2025"
+estimated_output_tps = 25
+
+[models."vertex-claude-opus-4-5".limits]
+context_window = 200000
+max_output = 64000
+
+[models."vertex-claude-opus-4-5".features]
+tools = true
+vision = true
+reasoning = true
+prompt_cache = true
+
+[models."vertex-claude-opus-4-1"]
+provider = "vertex"
+api_id = "claude-opus-4-1"
+display_name = "Claude Opus 4.1 on Vertex AI"
+family = "claude-4"
+training = "2025-03-01"
+knowledge_cutoff = "March 2025"
+estimated_output_tps = 25
+
+[models."vertex-claude-opus-4-1".limits]
+context_window = 200000
+max_output = 32000
+
+[models."vertex-claude-opus-4-1".features]
+tools = true
+vision = true
+reasoning = true
+prompt_cache = true
+
+[models."vertex-claude-haiku-4-5"]
+provider = "vertex"
+api_id = "claude-haiku-4-5"
+display_name = "Claude Haiku 4.5 on Vertex AI"
+family = "claude-4"
+training = "2025-08-01"
+knowledge_cutoff = "May 2025"
+estimated_output_tps = 100
+
+[models."vertex-claude-haiku-4-5".limits]
+context_window = 200000
+max_output = 8192
+
+[models."vertex-claude-haiku-4-5".features]
+tools = true
+vision = true
+reasoning = false
+prompt_cache = true

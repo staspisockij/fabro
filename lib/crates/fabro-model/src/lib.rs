@@ -10,7 +10,8 @@ pub mod reasoning;
 pub mod types;
 
 pub use adapter::{
-    AdapterControlCapabilities, AdapterMetadata, AgentProfileKind, ApiKeyHeaderPolicy,
+    AdapterAuthStrategy, AdapterControlCapabilities, AdapterMetadata, AgentProfileKind,
+    ApiKeyHeaderPolicy,
 };
 pub use billing::{
     AnthropicBillingFacts, AnthropicModelPricing, BilledModelUsage, BilledTokenCounts,

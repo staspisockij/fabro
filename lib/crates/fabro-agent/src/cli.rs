@@ -211,7 +211,7 @@ fn summarizer_model_id(provider: Provider) -> ModelHandle {
         model:    match provider {
             Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
             Provider::Gemini => "gemini-2.0-flash",
-            Provider::Anthropic => "claude-haiku-4-5",
+            Provider::Anthropic | Provider::Vertex => "claude-haiku-4-5",
             Provider::Kimi => "kimi-k2.5",
             Provider::Zai => "glm-4.7",
             Provider::Minimax => "minimax-m2.5",
@@ -250,9 +250,11 @@ fn build_profile(
         Provider::Gemini => {
             Box::new(GeminiProfile::with_summarizer(model, summarizer).with_catalog(catalog))
         }
-        Provider::Anthropic => {
-            Box::new(AnthropicProfile::with_summarizer(model, summarizer).with_catalog(catalog))
-        }
+        Provider::Anthropic | Provider::Vertex => Box::new(
+            AnthropicProfile::with_summarizer(model, summarizer)
+                .with_provider(provider)
+                .with_catalog(catalog),
+        ),
     }
 }
 

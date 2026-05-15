@@ -19,6 +19,7 @@ pub struct ProviderId(String);
 
 impl ProviderId {
     pub const ANTHROPIC: &'static str = "anthropic";
+    pub const VERTEX: &'static str = "vertex";
     pub const OPENAI: &'static str = "openai";
     pub const GEMINI: &'static str = "gemini";
     pub const KIMI: &'static str = "kimi";
@@ -49,6 +50,11 @@ impl ProviderId {
     #[must_use]
     pub fn anthropic() -> Self {
         Self::new(Self::ANTHROPIC)
+    }
+
+    #[must_use]
+    pub fn vertex() -> Self {
+        Self::new(Self::VERTEX)
     }
 
     #[must_use]

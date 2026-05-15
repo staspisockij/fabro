@@ -97,6 +97,27 @@ fn build_anthropic(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
     Arc::new(build_anthropic_adapter(config))
 }
 
+fn build_vertex_adapter(config: AdapterConfig) -> providers::VertexAdapter {
+    let mut adapter = providers::VertexAdapter::new().with_name(config.provider_id.clone());
+    if let Some(base_url) = config.base_url {
+        adapter = adapter.with_base_url(base_url);
+    }
+    if let Some(project_id) = config.project_id {
+        adapter = adapter.with_project_id(project_id);
+    }
+    if !config.extra_headers.is_empty() {
+        adapter = adapter.with_default_headers(config.extra_headers);
+    }
+    if let Some(catalog) = config.catalog {
+        adapter = adapter.with_catalog(catalog);
+    }
+    adapter
+}
+
+fn build_vertex(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
+    Arc::new(build_vertex_adapter(config))
+}
+
 fn build_openai_adapter(config: AdapterConfig) -> providers::OpenAiAdapter {
     let mut adapter = providers::OpenAiAdapter::new_optional_auth(auth_value_optional(
         config.auth_header.as_ref(),
@@ -179,6 +200,7 @@ fn build_openai_compatible(config: AdapterConfig) -> Arc<dyn ProviderAdapter> {
 /// `factory_for` and `registered_keys` derive from this table.
 const FACTORIES: &[(&str, AdapterFactory)] = &[
     (model_adapter::ANTHROPIC.key, build_anthropic),
+    (model_adapter::VERTEX.key, build_vertex),
     (model_adapter::OPENAI.key, build_openai),
     (model_adapter::GEMINI.key, build_gemini),
     (
