@@ -47,6 +47,7 @@ pub struct CreateRunInput {
     pub title: Option<String>,
     pub git: Option<GitContext>,
     pub fork_source_ref: Option<ForkSourceRef>,
+    pub parent_id: Option<RunId>,
     pub provenance: Option<RunProvenance>,
     pub configured_providers: Vec<ProviderId>,
     /// Public URL where this run can be viewed in the web UI, when the server
@@ -109,6 +110,7 @@ pub async fn create(
         title,
         git,
         fork_source_ref,
+        parent_id,
         provenance,
         configured_providers,
         web_url,
@@ -169,6 +171,7 @@ pub async fn create(
         submitted_manifest_bytes.as_deref(),
         accepted_definition.as_ref(),
         title,
+        parent_id,
         web_url,
     )
     .await?;
@@ -189,6 +192,7 @@ async fn persist_created_run(
     submitted_manifest_bytes: Option<&[u8]>,
     accepted_definition: Option<&RunDefinition>,
     explicit_title: Option<String>,
+    parent_id: Option<RunId>,
     web_url: Option<String>,
 ) -> Result<(), Error> {
     let record = persisted.run_spec();
@@ -242,6 +246,7 @@ async fn persist_created_run(
             manifest_blob,
             git: record.git.clone(),
             fork_source_ref: record.fork_source_ref.clone(),
+            parent_id,
             web_url,
         },
         record.run_id.created_at(),
@@ -871,6 +876,7 @@ mod tests {
                 title: None,
                 git: None,
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,
@@ -916,6 +922,7 @@ mod tests {
                 title: None,
                 git: None,
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,
@@ -983,6 +990,7 @@ mod tests {
                     push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
                 }),
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,
@@ -1093,6 +1101,7 @@ mod tests {
                 title: None,
                 git: None,
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,
@@ -1137,6 +1146,7 @@ mod tests {
                     push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
                 }),
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,
@@ -1203,6 +1213,7 @@ mod tests {
                 title: None,
                 git: None,
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: None,
                 configured_providers: Vec::new(),
                 web_url: None,
@@ -1248,6 +1259,7 @@ mod tests {
                 title: None,
                 git: None,
                 fork_source_ref: None,
+                parent_id: None,
                 provenance: Some(fabro_types::RunProvenance {
                     server:  Some(fabro_types::RunServerProvenance {
                         version: "0.9.0".to_string(),

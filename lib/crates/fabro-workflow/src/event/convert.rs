@@ -39,6 +39,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             manifest_blob,
             git,
             fork_source_ref,
+            parent_id,
             web_url,
             ..
         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
@@ -57,6 +58,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             manifest_blob:    *manifest_blob,
             git:              git.clone(),
             fork_source_ref:  fork_source_ref.clone(),
+            parent_id:        *parent_id,
             web_url:          web_url.clone(),
         }),
         Event::WorkflowRunStarted {
@@ -143,6 +145,19 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 title: title.clone(),
             })
         }
+        Event::RunParentLinked {
+            previous_parent_id,
+            parent_id,
+            ..
+        } => EventBody::RunParentLinked(fabro_types::RunParentLinkedProps {
+            previous_parent_id: *previous_parent_id,
+            parent_id:          *parent_id,
+        }),
+        Event::RunParentUnlinked {
+            previous_parent_id, ..
+        } => EventBody::RunParentUnlinked(fabro_types::RunParentUnlinkedProps {
+            previous_parent_id: *previous_parent_id,
+        }),
         Event::WorkflowRunCompleted {
             duration_ms,
             artifact_count,
@@ -2251,6 +2266,7 @@ mod tests {
             manifest_blob:    None,
             git:              None,
             fork_source_ref:  None,
+            parent_id:        None,
             web_url:          None,
         });
         let actor = stored.actor.as_ref().expect("actor set");
