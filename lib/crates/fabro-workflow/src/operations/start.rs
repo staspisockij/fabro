@@ -37,6 +37,7 @@ use crate::event::{
     Emitter, Event, EventBody, RunEventLogger, RunEventSink, RunNoticeLevel, append_event_to_sink,
 };
 use crate::handler::HandlerRegistry;
+use crate::handler::llm::routing;
 use crate::outcome::Outcome;
 use crate::pipeline::{
     self, DevcontainerSpec, FinalizeOptions, Finalized, InitOptions, LlmSpec, Persisted,
@@ -81,6 +82,12 @@ struct RunSession {
     run_control:       Option<Arc<RunControlState>>,
     vault:             Option<Arc<AsyncRwLock<Vault>>>,
     catalog:           Arc<Catalog>,
+}
+
+struct ResolvedStartLlm {
+    model:          String,
+    provider_id:    ProviderId,
+    fallback_chain: Vec<FallbackTarget>,
 }
 
 pub struct StartServices {
@@ -316,41 +323,7 @@ impl RunSession {
         let catalog = Arc::clone(&services.catalog);
         let configured =
             configured_providers_for_start(services.vault.as_ref(), catalog.as_ref()).await;
-        let model = resolved.model.name.as_ref().map_or_else(
-            || catalog.default_for_configured_ids(&configured).id.clone(),
-            InterpString::as_source,
-        );
-        let provider = resolved
-            .model
-            .provider
-            .as_ref()
-            .map(InterpString::as_source)
-            .filter(|value| !value.is_empty());
-
-        let provider_id = if let Some(value) = provider.as_deref() {
-            let provider_id = ProviderId::from(value);
-            catalog
-                .provider(&provider_id)
-                .ok_or_else(|| {
-                    Error::Precondition(format!("Provider \"{value}\" is not configured"))
-                })?
-                .id
-                .clone()
-        } else if let Some(model) = catalog.get(&model) {
-            model.provider.clone()
-        } else {
-            catalog
-                .default_for_configured_ids(&configured)
-                .provider
-                .clone()
-        };
-
-        let catalog_provider = catalog.provider(&provider_id).ok_or_else(|| {
-            Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
-        })?;
-        let profile_kind = catalog_provider.adapter.metadata().default_profile;
-        let fallback_chain =
-            resolve_fallback_chain(catalog.as_ref(), &provider_id, &model, &resolved.model);
+        let llm = resolve_start_llm(catalog.as_ref(), &configured, resolved)?;
         let mcp_servers = resolved
             .agent
             .mcps
@@ -425,10 +398,9 @@ impl RunSession {
             run_control: services.run_control,
             sandbox,
             llm: LlmSpec {
-                model: model.clone(),
-                provider_id: provider_id.clone(),
-                profile_kind,
-                fallback_chain,
+                model: llm.model.clone(),
+                provider_id: llm.provider_id.clone(),
+                fallback_chain: llm.fallback_chain,
                 mcp_servers,
                 model_controls: resolved.model.controls.clone(),
                 dry_run: resolved.execution.mode == RunMode::DryRun,
@@ -457,7 +429,7 @@ impl RunSession {
             pr_config,
             pr_github_app: services.github_app,
             pr_origin_url: record.repo_origin_url().map(str::to_string),
-            pr_model: model,
+            pr_model: llm.model,
             workflow_path,
             workflow_bundle,
             vault: services.vault,
@@ -560,6 +532,42 @@ fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions
         .unwrap_or_default();
     config.skip_clone = !settings.clone.enabled;
     config
+}
+
+fn resolve_start_llm(
+    catalog: &Catalog,
+    configured: &[ProviderId],
+    settings: &ResolvedRunSettings,
+) -> Result<ResolvedStartLlm, Error> {
+    let model = settings.model.name.as_ref().map_or_else(
+        || catalog.default_for_configured_ids(configured).id.clone(),
+        InterpString::as_source,
+    );
+    let provider = settings
+        .model
+        .provider
+        .as_ref()
+        .map(InterpString::as_source)
+        .filter(|value| !value.is_empty());
+
+    let default_provider_id = catalog
+        .default_for_configured_ids(configured)
+        .provider
+        .clone();
+    let provider_context = routing::resolve_provider_context(
+        catalog,
+        &default_provider_id,
+        &model,
+        provider.as_deref(),
+    )?;
+    let provider_id = provider_context.provider_id;
+    let fallback_chain = resolve_fallback_chain(catalog, &provider_id, &model, &settings.model);
+
+    Ok(ResolvedStartLlm {
+        model,
+        provider_id,
+        fallback_chain,
+    })
 }
 
 fn resolve_fallback_chain(
@@ -1205,6 +1213,43 @@ mod tests {
             provider: "openai".to_string(),
             model:    "gpt-5.4-mini".to_string(),
         }]);
+    }
+
+    #[test]
+    fn resolve_start_llm_infers_provider_from_model_alias() {
+        let overrides: fabro_model::catalog::LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.acme]
+adapter = "openai_compatible"
+base_url = "https://api.acme.test/v1"
+agent_profile = "openai"
+
+[models.acme-claude]
+provider = "acme"
+display_name = "Acme Claude"
+family = "claude"
+default = true
+agent_profile = "anthropic"
+aliases = ["ac"]
+
+[models.acme-claude.limits]
+context_window = 1000
+
+[models.acme-claude.features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        )
+        .unwrap();
+        let catalog = Catalog::from_builtin_with_overrides(&overrides).unwrap();
+        let mut settings = ResolvedRunSettings::default();
+        settings.model.name = Some(InterpString::parse("ac"));
+
+        let resolved = resolve_start_llm(&catalog, &[], &settings).unwrap();
+
+        assert_eq!(resolved.model, "ac");
+        assert_eq!(resolved.provider_id, ProviderId::new("acme"));
     }
 
     #[test]

@@ -334,7 +334,6 @@ fn spawn_event_forwarder(
 pub struct AgentApiBackend {
     model:              String,
     provider_id:        ProviderId,
-    profile_kind:       AgentProfileKind,
     fallback_chain:     Vec<FallbackTarget>,
     sessions:           Mutex<HashMap<String, Session>>,
     tool_env:           Option<Arc<dyn ToolEnvProvider>>,
@@ -355,12 +354,9 @@ impl AgentApiBackend {
         steering_hub: Arc<SteeringHub>,
     ) -> Self {
         let catalog = Arc::new(Catalog::from_builtin().expect("default catalog should build"));
-        let provider_id = provider_id.into();
-        let profile_kind = routing::default_profile_kind(catalog.as_ref(), &provider_id);
         Self::new_with_catalog(
             model,
-            provider_id,
-            profile_kind,
+            provider_id.into(),
             fallback_chain,
             source,
             steering_hub,
@@ -372,7 +368,6 @@ impl AgentApiBackend {
     pub fn new_with_catalog(
         model: String,
         provider_id: ProviderId,
-        profile_kind: AgentProfileKind,
         fallback_chain: Vec<FallbackTarget>,
         source: Arc<dyn CredentialSource>,
         steering_hub: Arc<SteeringHub>,
@@ -381,7 +376,6 @@ impl AgentApiBackend {
         Self {
             model,
             provider_id,
-            profile_kind,
             fallback_chain,
             sessions: Mutex::new(HashMap::new()),
             tool_env: None,
@@ -407,12 +401,6 @@ impl AgentApiBackend {
             Arc::new(EnvCredentialSource::new()),
             steering_hub,
         )
-    }
-
-    #[must_use]
-    pub fn with_profile_kind(mut self, profile_kind: AgentProfileKind) -> Self {
-        self.profile_kind = profile_kind;
-        self
     }
 
     #[must_use]
@@ -463,7 +451,12 @@ impl AgentApiBackend {
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<Session, Error> {
         let model = node.model().unwrap_or(&self.model);
-        let provider = self.resolve_provider_context(model, node.provider())?;
+        let provider = routing::resolve_node_provider_context(
+            self.catalog.as_ref(),
+            &self.provider_id,
+            &self.model,
+            node,
+        )?;
         Self::create_session_for(
             model,
             provider,
@@ -1239,7 +1232,6 @@ mod tests {
         );
         assert_eq!(backend.model, "claude-opus-4-6");
         assert_eq!(backend.provider_id, ProviderId::openai());
-        assert_eq!(backend.profile_kind, AgentProfileKind::OpenAi);
     }
 
     #[test]
@@ -1411,7 +1403,6 @@ reasoning = false
         let backend = AgentApiBackend::new_with_catalog(
             "acme-llama".to_string(),
             ProviderId::from("acme"),
-            AgentProfileKind::OpenAi,
             Vec::new(),
             Arc::new(EnvCredentialSource::new()),
             SteeringHub::for_tests(),
@@ -1424,6 +1415,51 @@ reasoning = false
 
         assert_eq!(provider.provider_id, ProviderId::from("acme"));
         assert_eq!(provider.profile_kind, AgentProfileKind::OpenAi);
+    }
+
+    #[test]
+    fn api_backend_resolves_model_agent_profile_override() {
+        let settings: LlmCatalogSettings = toml::from_str(
+            r#"
+[providers.acme]
+adapter = "openai_compatible"
+base_url = "https://api.acme.test/v1"
+agent_profile = "openai"
+
+[models.acme-claude]
+provider = "acme"
+display_name = "Acme Claude"
+family = "claude"
+training = "2026-01"
+default = true
+agent_profile = "anthropic"
+aliases = ["ac"]
+
+[models.acme-claude.limits]
+context_window = 131072
+max_output = 8192
+
+[models.acme-claude.features]
+tools = true
+vision = false
+reasoning = false
+"#,
+        )
+        .unwrap();
+        let catalog = Arc::new(Catalog::from_builtin_with_overrides(&settings).unwrap());
+        let backend = AgentApiBackend::new_with_catalog(
+            "acme-claude".to_string(),
+            ProviderId::from("acme"),
+            Vec::new(),
+            Arc::new(EnvCredentialSource::new()),
+            SteeringHub::for_tests(),
+            catalog,
+        );
+
+        let provider = backend.resolve_provider_context("ac", None).unwrap();
+
+        assert_eq!(provider.provider_id, ProviderId::from("acme"));
+        assert_eq!(provider.profile_kind, AgentProfileKind::Anthropic);
     }
 
     #[test]

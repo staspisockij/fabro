@@ -43,24 +43,12 @@ pub(crate) fn node_needs_api_backend(node: &Node) -> bool {
 }
 
 #[derive(Clone)]
-pub(super) struct ProviderContext {
-    pub(super) provider_id:  ProviderId,
-    pub(super) profile_kind: AgentProfileKind,
+pub(crate) struct ProviderContext {
+    pub(crate) provider_id:  ProviderId,
+    pub(crate) profile_kind: AgentProfileKind,
 }
 
-pub(super) fn default_profile_kind(
-    catalog: &Catalog,
-    provider_id: &ProviderId,
-) -> AgentProfileKind {
-    catalog
-        .provider(provider_id)
-        .unwrap_or_else(|| panic!("Provider \"{provider_id}\" is not configured"))
-        .adapter
-        .metadata()
-        .default_profile
-}
-
-pub(super) fn resolve_provider_context(
+pub(crate) fn resolve_provider_context(
     catalog: &Catalog,
     default_provider_id: &ProviderId,
     model: &str,
@@ -84,10 +72,23 @@ pub(super) fn resolve_provider_context(
     let provider = catalog.provider(&provider_id).ok_or_else(|| {
         Error::Precondition(format!("Provider \"{provider_id}\" is not configured"))
     })?;
+    let profile_kind = catalog
+        .effective_agent_profile(&provider.id, Some(model))
+        .expect("validated provider should resolve an agent profile");
     Ok(ProviderContext {
-        provider_id:  provider.id.clone(),
-        profile_kind: provider.adapter.metadata().default_profile,
+        provider_id: provider.id.clone(),
+        profile_kind,
     })
+}
+
+pub(crate) fn resolve_node_provider_context(
+    catalog: &Catalog,
+    default_provider_id: &ProviderId,
+    default_model: &str,
+    node: &Node,
+) -> Result<ProviderContext, Error> {
+    let model = node.model().unwrap_or(default_model);
+    resolve_provider_context(catalog, default_provider_id, model, node.provider())
 }
 
 fn unsupported_backend_error(raw: &str) -> Error {

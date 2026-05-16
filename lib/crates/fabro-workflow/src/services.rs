@@ -10,7 +10,7 @@ use fabro_auth::CredentialSource;
 #[cfg(test)]
 use fabro_auth::ResolvedCredentials;
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
-use fabro_model::{AgentProfileKind, Catalog, ProviderId};
+use fabro_model::{Catalog, ProviderId};
 use tokio_util::sync::CancellationToken;
 
 use crate::ManifestPath;
@@ -39,7 +39,7 @@ pub struct RunServices {
     pub hook_runner:             Option<Arc<HookRunner>>,
     pub(crate) cancel_token:     CancellationToken,
     pub provider_id:             ProviderId,
-    pub profile_kind:            AgentProfileKind,
+    pub model:                   String,
     pub llm_source:              Arc<dyn CredentialSource>,
     pub catalog:                 Arc<Catalog>,
     pub(crate) sandbox_git:      Arc<SandboxGitRuntime>,
@@ -56,7 +56,7 @@ impl RunServices {
         hook_runner: Option<Arc<HookRunner>>,
         cancel_token: CancellationToken,
         provider_id: ProviderId,
-        profile_kind: AgentProfileKind,
+        model: String,
         llm_source: Arc<dyn CredentialSource>,
         catalog: Arc<Catalog>,
         sandbox_git: Arc<SandboxGitRuntime>,
@@ -70,7 +70,7 @@ impl RunServices {
             hook_runner,
             cancel_token,
             provider_id,
-            profile_kind,
+            model,
             llm_source,
             catalog,
             sandbox_git,
@@ -130,6 +130,22 @@ impl RunServices {
     ) -> Arc<Self> {
         Arc::new(Self {
             cancel_token,
+            ..self.as_ref().clone()
+        })
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_catalog_context(
+        self: &Arc<Self>,
+        catalog: Arc<Catalog>,
+        provider_id: ProviderId,
+        model: String,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            provider_id,
+            model,
+            catalog,
             ..self.as_ref().clone()
         })
     }
@@ -234,7 +250,7 @@ impl EngineServices {
                 None,
                 CancellationToken::new(),
                 ProviderId::anthropic(),
-                AgentProfileKind::Anthropic,
+                "claude-sonnet-4-6".to_string(),
                 Arc::new(StubCredentialSource),
                 Arc::new(Catalog::from_builtin().expect("default catalog should build")),
                 Arc::new(SandboxGitRuntime::new()),
