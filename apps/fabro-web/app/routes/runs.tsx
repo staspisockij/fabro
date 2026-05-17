@@ -22,7 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ciConfig, columnForRun, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
-import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
+import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus } from "../data/runs";
 import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
 import { InlineMarkdown } from "../components/inline-markdown";
@@ -32,7 +32,7 @@ import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events"
 import { useAuthConfig, useBoardsRuns, useSystemInfo } from "../lib/queries";
 import { queryKeys } from "../lib/query-keys";
 import { archiveRun, canArchive } from "../lib/run-actions";
-import type { PaginatedBoardRunList } from "@qltysh/fabro-api-client";
+import type { BoardColumn, PaginatedBoardRunList } from "@qltysh/fabro-api-client";
 
 export { shouldRefreshBoardForEvent };
 
@@ -44,7 +44,7 @@ interface ColumnStyle {
   actions: string[];
 }
 
-const columnStyles: Record<ColumnStatus, ColumnStyle> = {
+const columnStyles: Record<BoardColumn, ColumnStyle> = {
   queued:       { actions: [] },
   initializing: { actions: [] },
   running:      { actions: [] },
@@ -64,7 +64,7 @@ interface BoardRunsResponse {
 }
 
 type Column = {
-  id: ColumnStatus;
+  id: BoardColumn;
   name: string;
   dot: string;
   text: string;
@@ -287,7 +287,7 @@ function PrCard({
             {lifecycleLabel}
           </span>
         )}
-        {pr.number != null && (
+        {pr.pullRequestUrl && pr.number != null && (
           <PullRequestChip
             number={pr.number}
             url={pr.pullRequestUrl}
@@ -499,7 +499,7 @@ function ColumnActionsMenu({ column }: { column: Column }) {
   );
 }
 
-function BoardColumn({ column }: { column: Column }) {
+function BoardColumnView({ column }: { column: Column }) {
   const actions = column.actions;
   return (
     <div className="flex min-w-0 flex-col">
@@ -632,7 +632,7 @@ function RunRow({ run }: { run: RunWithStatus }) {
       </Link>
 
       <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs text-fg-muted">
-        {run.number != null && (
+        {run.pullRequestUrl && run.number != null && (
           <PullRequestChip number={run.number} url={run.pullRequestUrl}>
             {run.checks != null && <span className={`size-1.5 rounded-full ${ciConfig[deriveCiStatus(run.checks)].dot}`} />}
           </PullRequestChip>
@@ -974,7 +974,7 @@ export default function Runs() {
             <div className="flex gap-5 overflow-x-auto pb-4">
               {visibleColumns.map((col) => (
                 <div key={col.id} className="w-72 shrink-0">
-                  <BoardColumn column={col} />
+                  <BoardColumnView column={col} />
                 </div>
               ))}
             </div>

@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_model::catalog::CatalogProvider;
-use fabro_model::{
-    AdapterAuthStrategy, Catalog, CredentialRef, HeaderValueRef, Provider, ProviderId, adapter,
-};
+use fabro_model::{AdapterAuthStrategy, Catalog, CredentialRef, HeaderValueRef, ProviderId};
 use fabro_static::EnvVars;
 
 use crate::credential_source::{CredentialSource, ResolvedCredentials};
 use crate::{ApiCredential, EnvLookup, ResolveError, build_api_key_header};
+
+/// Catalog provider ID for Claude served through Vertex AI publisher endpoints.
+const VERTEX_PROVIDER_ID: &str = "vertex";
 
 #[derive(Clone)]
 pub struct EnvCredentialSource {
@@ -45,11 +46,10 @@ impl EnvCredentialSource {
             self.lookup(name)
         });
 
-        let adapter_auth_strategy =
-            adapter::get(&provider.adapter).map(|adapter| adapter.auth_strategy);
+        let adapter_auth_strategy = provider.adapter.metadata().auth_strategy;
         let adapter_managed_auth = matches!(
             adapter_auth_strategy,
-            Some(AdapterAuthStrategy::GoogleApplicationDefault)
+            AdapterAuthStrategy::GoogleApplicationDefault
         );
 
         let adapter_managed_configured =
@@ -72,12 +72,9 @@ impl EnvCredentialSource {
             return Ok(None);
         }
 
-        let auth_header = key.and_then(|key| {
-            let policy = adapter_auth_strategy.and_then(|strategy| match strategy {
-                AdapterAuthStrategy::ApiKey(policy) => Some(policy),
-                AdapterAuthStrategy::GoogleApplicationDefault => None,
-            });
-            policy.map(|policy| build_api_key_header(policy, key))
+        let auth_header = key.and_then(|key| match adapter_auth_strategy {
+            AdapterAuthStrategy::ApiKey(policy) => Some(build_api_key_header(policy, key)),
+            AdapterAuthStrategy::GoogleApplicationDefault => None,
         });
 
         let mut cred = ApiCredential {
@@ -92,7 +89,7 @@ impl EnvCredentialSource {
         cred.base_url = self
             .env_base_url(&provider.id)
             .or_else(|| provider.base_url.clone());
-        if provider.id == Provider::OpenAi.id() && cred.auth_header.is_some() {
+        if provider.id == ProviderId::openai() && cred.auth_header.is_some() {
             cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
             cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
             if let Some(account_id) = self.lookup(EnvVars::CHATGPT_ACCOUNT_ID) {
@@ -103,14 +100,14 @@ impl EnvCredentialSource {
                 cred.extra_headers
                     .insert("originator".to_string(), "fabro".to_string());
             }
-        } else if provider.id == Provider::Vertex.id() {
+        } else if provider.id == ProviderId::new(VERTEX_PROVIDER_ID) {
             cred.project_id = self.vertex_project_id();
         }
         Ok(Some(cred))
     }
 
     fn adapter_managed_configured(&self, provider: &CatalogProvider) -> bool {
-        provider.id == Provider::Vertex.id() && self.vertex_project_id().is_some()
+        provider.id == ProviderId::new(VERTEX_PROVIDER_ID) && self.vertex_project_id().is_some()
     }
 
     fn vertex_project_id(&self) -> Option<String> {
@@ -121,14 +118,12 @@ impl EnvCredentialSource {
     }
 
     fn env_base_url(&self, provider: &ProviderId) -> Option<String> {
-        match Provider::from_id(provider) {
-            Some(Provider::Anthropic) => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
-            Some(Provider::Vertex) => self.lookup(EnvVars::ANTHROPIC_VERTEX_BASE_URL),
-            Some(Provider::OpenAi) => self.lookup(EnvVars::OPENAI_BASE_URL),
-            Some(Provider::Gemini) => self.lookup(EnvVars::GEMINI_BASE_URL),
-            Some(Provider::OpenAiCompatible) => self.lookup(EnvVars::OPENAI_COMPATIBLE_BASE_URL),
-            Some(Provider::Kimi | Provider::Zai | Provider::Minimax | Provider::Inception)
-            | None => None,
+        match provider.as_str() {
+            ProviderId::ANTHROPIC => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
+            VERTEX_PROVIDER_ID => self.lookup(EnvVars::ANTHROPIC_VERTEX_BASE_URL),
+            ProviderId::OPENAI => self.lookup(EnvVars::OPENAI_BASE_URL),
+            ProviderId::GEMINI => self.lookup(EnvVars::GEMINI_BASE_URL),
+            _ => None,
         }
     }
 
@@ -198,8 +193,8 @@ impl CredentialSource for EnvCredentialSource {
                         matches!(credential_ref, CredentialRef::Env(name) if self.lookup(name).is_some())
                     })
                     || matches!(
-                        adapter::get(&provider.adapter).map(|adapter| adapter.auth_strategy),
-                        Some(AdapterAuthStrategy::GoogleApplicationDefault)
+                        provider.adapter.metadata().auth_strategy,
+                        AdapterAuthStrategy::GoogleApplicationDefault
                     ) && self.adapter_managed_configured(provider)
                     || (!provider.extra_headers.is_empty()
                         && provider.credentials.is_empty()
@@ -216,9 +211,9 @@ mod tests {
     use std::sync::Arc;
 
     use fabro_model::catalog::LlmCatalogSettings;
-    use fabro_model::{Catalog, Provider, ProviderId};
+    use fabro_model::{Catalog, ProviderId};
 
-    use super::EnvCredentialSource;
+    use super::{EnvCredentialSource, VERTEX_PROVIDER_ID};
     use crate::CredentialSource;
 
     fn test_source(entries: &[(&str, &str)]) -> EnvCredentialSource {
@@ -244,7 +239,7 @@ mod tests {
         let catalog = default_catalog();
 
         assert_eq!(source.configured_providers(&catalog).await, vec![
-            Provider::Anthropic.id()
+            ProviderId::anthropic()
         ]);
     }
 
@@ -271,7 +266,7 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, Provider::OpenAi.id());
+        assert_eq!(credential.provider, ProviderId::openai());
         assert!(credential.codex_mode);
         assert_eq!(
             credential.base_url.as_deref(),
@@ -292,7 +287,7 @@ mod tests {
         let resolved = source.resolve(&catalog).await.unwrap();
         let credential = resolved.credentials.first().unwrap();
 
-        assert_eq!(credential.provider, Provider::Kimi.id());
+        assert_eq!(credential.provider, ProviderId::new("kimi"));
         assert_eq!(
             credential.base_url.as_deref(),
             Some("https://api.moonshot.ai/v1")
@@ -322,7 +317,6 @@ context_window = 128000
 tools = true
 vision = false
 reasoning = false
-effort = false
 "#,
         );
         let source = test_source(&[("ACME_API_KEY", "acme-key")]);
@@ -370,7 +364,7 @@ context_window = 200000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 "#,
         );
         let source = test_source(&[("PORTKEY_API_KEY", "pk-live")]);
@@ -408,7 +402,7 @@ effort = true
         let credential = resolved
             .credentials
             .iter()
-            .find(|credential| credential.provider == Provider::Vertex.id())
+            .find(|credential| credential.provider == ProviderId::new(VERTEX_PROVIDER_ID))
             .expect("vertex should be adapter-managed");
 
         assert!(credential.auth_header.is_none());
@@ -444,7 +438,7 @@ context_window = 200000
 tools = true
 vision = true
 reasoning = true
-effort = true
+reasoning_effort = "levels"
 "#,
         );
         let source = test_source(&[]);
