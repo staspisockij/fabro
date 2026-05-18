@@ -117,7 +117,6 @@ export function useUpdateRunTitle(id: string | undefined) {
         if (!id) return;
         void mutate(queryKeys.runs.detail(id), run, { revalidate: false });
         void mutate(queryKeys.boards.runs());
-        void mutate(queryKeys.boards.runs(true));
       },
     },
   );

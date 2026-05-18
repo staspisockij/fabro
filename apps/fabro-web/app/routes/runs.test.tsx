@@ -10,16 +10,14 @@ import {
 function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
   const status =
     column === "blocked"
-      ? { kind: "blocked" as const, reason: "interview", pending_question_id: null }
+      ? { kind: "blocked" as const, blocked_reason: "human_input_required" }
       : column === "succeeded"
         ? { kind: "succeeded" as const, reason: "completed" }
         : column === "failed"
-          ? { kind: "failed" as const, reason: "error" }
-          : column === "queued"
-            ? { kind: "queued" as const }
-            : column === "initializing"
-              ? { kind: "starting" as const }
-              : { kind: "running" as const };
+          ? { kind: "failed" as const, reason: "workflow_error" }
+          : column === "initializing"
+            ? { kind: "starting" as const }
+            : { kind: "running" as const };
   return {
     id,
     goal:             `Run ${id}`,
@@ -35,8 +33,8 @@ function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
       pending_control: null,
       queue_position:  null,
       error:           null,
-      archived:        column === "archived",
-      archived_at:     column === "archived" ? "2026-04-19T12:05:00Z" : null,
+      archived:        false,
+      archived_at:     null,
     },
     sandbox:          null,
     models:           [],
@@ -60,7 +58,6 @@ describe("runs route board mapping", () => {
   test("keeps blocked runs in the blocked lane and preserves question text", () => {
     const columns = buildBoardColumns({
       columns: [
-        { id: "queued", name: "Queued" },
         { id: "initializing", name: "Initializing" },
         { id: "running", name: "Running" },
         { id: "blocked", name: "Blocked" },
@@ -79,45 +76,9 @@ describe("runs route board mapping", () => {
     expect(columns.find((column) => column.id === "blocked")?.items[0]?.question).toBe("Older unresolved question?");
   });
 
-  test("renders an archived column when the response includes one", () => {
+  test("renders the five board columns returned by the API", () => {
     const columns = buildBoardColumns({
       columns: [
-        { id: "queued", name: "Queued" },
-        { id: "initializing", name: "Initializing" },
-        { id: "running", name: "Running" },
-        { id: "blocked", name: "Blocked" },
-        { id: "succeeded", name: "Succeeded" },
-        { id: "failed", name: "Failed" },
-        { id: "archived", name: "Archived" },
-      ],
-      data: [
-        boardRun("succeeded-run", "succeeded"),
-        boardRun("archived-run", "archived"),
-      ],
-      meta: { has_more: false },
-    });
-
-    expect(columns.map((column) => column.id)).toEqual([
-      "queued",
-      "initializing",
-      "running",
-      "blocked",
-      "succeeded",
-      "failed",
-      "archived",
-    ]);
-    expect(
-      columns.find((column) => column.id === "archived")?.items.map((item) => item.id),
-    ).toEqual(["archived-run"]);
-    expect(
-      columns.find((column) => column.id === "succeeded")?.items.map((item) => item.id),
-    ).toEqual(["succeeded-run"]);
-  });
-
-  test("omits the archived column when the response does not include it", () => {
-    const columns = buildBoardColumns({
-      columns: [
-        { id: "queued", name: "Queued" },
         { id: "initializing", name: "Initializing" },
         { id: "running", name: "Running" },
         { id: "blocked", name: "Blocked" },
@@ -128,7 +89,43 @@ describe("runs route board mapping", () => {
       meta: { has_more: false },
     });
 
-    expect(columns.some((column) => column.id === "archived")).toBe(false);
+    expect(columns.map((column) => column.id)).toEqual([
+      "initializing",
+      "running",
+      "blocked",
+      "succeeded",
+      "failed",
+    ]);
+    expect(
+      columns.find((column) => column.id === "succeeded")?.items.map((item) => item.id),
+    ).toEqual(["succeeded-run"]);
+  });
+
+  test("omits archived runs because archived is not a board column", () => {
+    const archivedRun = boardRun("archived-run", "succeeded");
+    archivedRun.lifecycle.archived = true;
+    archivedRun.lifecycle.archived_at = "2026-04-19T12:05:00Z";
+
+    const columns = buildBoardColumns({
+      columns: [
+        { id: "initializing", name: "Initializing" },
+        { id: "running", name: "Running" },
+        { id: "blocked", name: "Blocked" },
+        { id: "succeeded", name: "Succeeded" },
+        { id: "failed", name: "Failed" },
+      ],
+      data: [boardRun("succeeded-run", "succeeded"), archivedRun],
+      meta: { has_more: false },
+    });
+
+    expect(columns.map((column) => column.id)).toEqual([
+      "initializing",
+      "running",
+      "blocked",
+      "succeeded",
+      "failed",
+    ]);
+    expect(columns.flatMap((column) => column.items).map((item) => item.id)).toEqual(["succeeded-run"]);
   });
 
   test("refreshes for blocked status and interview events", () => {

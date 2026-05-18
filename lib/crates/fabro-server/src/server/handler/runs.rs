@@ -98,11 +98,12 @@ impl ListRunsParams {
 
 fn board_column(status: RunStatus, archived: bool) -> Option<BoardColumn> {
     if archived {
-        return Some(BoardColumn::Archived);
+        return None;
     }
     match status {
-        RunStatus::Submitted | RunStatus::Queued => Some(BoardColumn::Queued),
-        RunStatus::Starting => Some(BoardColumn::Initializing),
+        RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting => {
+            Some(BoardColumn::Initializing)
+        }
         RunStatus::Running | RunStatus::Paused { .. } => Some(BoardColumn::Running),
         RunStatus::Blocked { .. } => Some(BoardColumn::Blocked),
         RunStatus::Succeeded { .. } => Some(BoardColumn::Succeeded),
@@ -111,12 +112,8 @@ fn board_column(status: RunStatus, archived: bool) -> Option<BoardColumn> {
     }
 }
 
-pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition> {
-    let mut columns = vec![
-        BoardColumnDefinition {
-            id:   BoardColumn::Queued,
-            name: "Queued".into(),
-        },
+pub(crate) fn board_columns() -> Vec<BoardColumnDefinition> {
+    vec![
         BoardColumnDefinition {
             id:   BoardColumn::Initializing,
             name: "Initializing".into(),
@@ -137,14 +134,7 @@ pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition
             id:   BoardColumn::Failed,
             name: "Failed".into(),
         },
-    ];
-    if include_archived {
-        columns.push(BoardColumnDefinition {
-            id:   BoardColumn::Archived,
-            name: "Archived".into(),
-        });
-    }
-    columns
+    ]
 }
 
 fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
@@ -175,18 +165,14 @@ async fn list_board_runs(
                 .into_response();
         }
     };
-    let include_archived = params.include_archived;
     let board_summaries: Vec<_> = entries
         .into_iter()
-        .filter_map(|entry| {
-            let column = board_column(
+        .filter(|entry| {
+            board_column(
                 entry.summary.lifecycle.status,
                 entry.summary.lifecycle.archived,
-            )?;
-            if column == BoardColumn::Archived && !include_archived {
-                return None;
-            }
-            Some(entry)
+            )
+            .is_some()
         })
         .collect();
     let (page_summaries, has_more) = paginate_items(board_summaries, &params.pagination());
@@ -194,7 +180,7 @@ async fn list_board_runs(
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "columns": board_columns(include_archived),
+            "columns": board_columns(),
             "data": page_summaries
                 .into_iter()
                 .map(|entry| entry.summary)

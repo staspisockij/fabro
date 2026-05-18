@@ -10039,7 +10039,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
     assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
     // Verify the run appears on the board (store has Submitted status →
-    // "queued" column)
+    // "initializing" column)
     let req = Request::builder()
         .method("GET")
         .uri(api("/boards/runs"))
@@ -10963,7 +10963,7 @@ async fn boards_runs_excludes_archived_by_default() {
 }
 
 #[tokio::test]
-async fn boards_runs_includes_archived_when_flag_set() {
+async fn boards_runs_keeps_archived_runs_off_board_even_when_flag_set() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let archived_id = fixtures::RUN_1;
@@ -11018,14 +11018,11 @@ async fn boards_runs_includes_archived_when_flag_set() {
     let body = response_json!(response, StatusCode::OK).await;
     let data = body["data"].as_array().expect("data should be array");
 
-    let archived_item = data
-        .iter()
-        .find(|i| run_json_id(i) == Some(&archived_id.to_string()))
-        .expect("archived run should appear when include_archived=true");
-    assert!(run_json_archived(archived_item));
-    assert_eq!(
-        run_json_status(archived_item)["kind"].as_str().unwrap(),
-        "succeeded"
+    assert!(
+        !data
+            .iter()
+            .any(|i| run_json_id(i) == Some(&archived_id.to_string())),
+        "archived run should remain off-board",
     );
 
     let succeeded_item = data
@@ -11043,13 +11040,11 @@ async fn boards_runs_includes_archived_when_flag_set() {
         .map(|c| c["id"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(column_ids, vec![
-        "queued",
         "initializing",
         "running",
         "blocked",
         "succeeded",
         "failed",
-        "archived",
     ],);
 }
 

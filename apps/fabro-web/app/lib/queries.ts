@@ -91,12 +91,12 @@ export function useSystemInfo() {
   );
 }
 
-export function useBoardsRuns(includeArchived: boolean = false) {
+export function useBoardsRuns() {
   return useSWR<BoardRunsEnvelope>(
-    queryKeys.boards.runs(includeArchived),
+    queryKeys.boards.runs(),
     () =>
       fetchAllPages("board runs", (limit, offset) =>
-        apiData(() => runsApi.listBoardRuns(limit, offset, includeArchived)),
+        apiData(() => runsApi.listBoardRuns(limit, offset)),
       ),
   );
 }

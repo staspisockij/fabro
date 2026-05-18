@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ArchiveBoxIcon, ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
@@ -45,13 +45,11 @@ interface ColumnStyle {
 }
 
 const columnStyles: Record<BoardColumn, ColumnStyle> = {
-  queued:       { actions: [] },
   initializing: { actions: [] },
   running:      { actions: [] },
   blocked:      { actions: ["Answer Question"] },
   succeeded:    { actions: [] },
   failed:       { actions: [] },
-  archived:     { actions: [] },
 };
 
 const defaultColumnStyle: ColumnStyle = { actions: [] };
@@ -72,9 +70,8 @@ type Column = {
   items: RunItem[];
 };
 
-function buildSkeletonColumns(includeArchived: boolean): Column[] {
+function buildSkeletonColumns(): Column[] {
   return columnStatuses
-    .filter((id) => includeArchived || id !== "archived")
     .map((id) => {
       const colors = columnStatusDisplay[id];
       return {
@@ -768,7 +765,6 @@ export default function Runs() {
   const repoFilter = searchParams.get("repo") ?? "all";
   const workflowFilter = searchParams.get("workflow") ?? "all";
   const createdFilter = parseCreatedFilter(searchParams.get("created"));
-  const includeArchived = searchParams.get("archived") === "1";
   const view = parseView(searchParams.get("view"));
 
   const updateParam = useCallback(
@@ -793,10 +789,9 @@ export default function Runs() {
   const setRepoFilter = (value: string) => updateParam("repo", value === "all" ? null : value);
   const setWorkflowFilter = (value: string) => updateParam("workflow", value === "all" ? null : value);
   const setCreatedFilter = (value: CreatedFilter) => updateParam("created", value === "all" ? null : value);
-  const setIncludeArchived = (value: boolean) => updateParam("archived", value ? "1" : null);
   const setView = (value: ViewMode) => updateParam("view", value === "columns" ? null : value);
 
-  const boardRuns = useBoardsRuns(includeArchived);
+  const boardRuns = useBoardsRuns();
   const authConfig = useAuthConfig();
   const systemInfo = useSystemInfo();
   const isLandingReady =
@@ -807,8 +802,8 @@ export default function Runs() {
     () =>
       boardRuns.data
         ? buildBoardColumns(boardRuns.data)
-        : buildSkeletonColumns(includeArchived),
-    [boardRuns.data, includeArchived],
+        : buildSkeletonColumns(),
+    [boardRuns.data],
   );
   const hasGitHubAuth = authConfig.data?.methods.includes("github") === true;
   const serverUrl = systemInfo.data?.server_url;
@@ -871,9 +866,7 @@ export default function Runs() {
     (sum, col) => sum + col.items.length,
     0,
   );
-  const visibleColumns = filteredColumns.filter(
-    (col) => col.id !== "queued" || col.items.length > 0,
-  );
+  const visibleColumns = filteredColumns;
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -935,16 +928,6 @@ export default function Runs() {
             </select>
             <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
           </div>
-          <button
-            type="button"
-            onClick={() => setIncludeArchived(!includeArchived)}
-            aria-pressed={includeArchived}
-            title={includeArchived ? "Hide archived runs" : "Show archived runs"}
-            className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium transition-colors ${includeArchived ? "text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
-          >
-            <ArchiveBoxIcon className="size-4" aria-hidden="true" />
-            <span>Show archived</span>
-          </button>
           <div role="group" aria-label="Run list view" className="flex rounded-md border border-line bg-panel/80 p-0.5">
             <button
               type="button"

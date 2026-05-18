@@ -1160,10 +1160,6 @@ mod runs {
     pub(super) fn columns() -> Vec<BoardColumnDefinition> {
         vec![
             BoardColumnDefinition {
-                id:   BoardColumn::Queued,
-                name: "Queued".into(),
-            },
-            BoardColumnDefinition {
                 id:   BoardColumn::Initializing,
                 name: "Initializing".into(),
             },

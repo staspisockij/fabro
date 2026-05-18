@@ -85,7 +85,7 @@ function boardInvalidation(payload: EventPayload) {
 }
 
 function boardRunKeys() {
-  return [queryKeys.boards.runs(false), queryKeys.boards.runs(true)];
+  return [queryKeys.boards.runs()];
 }
 
 export function useBoardEvents() {

@@ -267,7 +267,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     try {
       await deleteRun(params.id);
       void mutate(queryKeys.boards.runs());
-      void mutate(queryKeys.boards.runs(true));
       push({ message: "Run deleted." });
       navigate("/runs");
     } catch (error) {

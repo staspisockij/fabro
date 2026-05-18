@@ -38,7 +38,7 @@ export const queryKeys = {
     attachUrl: () => "/api/v1/attach",
   },
   boards: {
-    runs: (includeArchived = false) => ["boards", "runs", includeArchived] as const,
+    runs: () => ["boards", "runs"] as const,
   },
   runs: {
     detail: (id: string) => ["runs", "detail", id] as const,
