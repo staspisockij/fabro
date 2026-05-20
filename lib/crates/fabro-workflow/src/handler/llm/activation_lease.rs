@@ -31,10 +31,16 @@ impl ActivationLease {
         options: ActivationLeaseOptions,
         handle: &Arc<dyn ActiveControlHandle>,
     ) -> Result<Arc<Self>, Error> {
-        if !options
-            .hub
-            .attach_handle(&options.stage_id, &options.session_id, Arc::clone(handle))
-        {
+        let attached = if let Some(pair_handle) = handle.pair_handle() {
+            options
+                .hub
+                .attach_pairable_handle(&options.stage_id, &options.session_id, pair_handle)
+        } else {
+            options
+                .hub
+                .attach_handle(&options.stage_id, &options.session_id, Arc::clone(handle))
+        };
+        if !attached {
             return Err(Error::Precondition(format!(
                 "stage {} already has a different active agent session",
                 options.stage_id
@@ -82,6 +88,13 @@ impl ActivationLease {
         }
         self.mark_released();
         true
+    }
+
+    pub fn is_pair_active(&self) -> bool {
+        !self.released.load(Ordering::Acquire)
+            && self
+                .hub
+                .pair_is_active_for(&self.stage_id, &self.session_id)
     }
 
     fn mark_released(&self) -> bool {

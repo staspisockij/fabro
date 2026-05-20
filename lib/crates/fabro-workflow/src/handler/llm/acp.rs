@@ -8,7 +8,7 @@ use fabro_acp::{
     AcpCommandError, AcpControlHandle, AcpError, AcpLiveControl, AcpProcessSpec, AcpRunRequest,
     render_stop_reason,
 };
-use fabro_agent::{AgentEvent, Sandbox, StaticEnvProvider, ToolEnvProvider};
+use fabro_agent::{AgentEvent, Sandbox, StaticEnvProvider, SteeringItem, ToolEnvProvider};
 use fabro_graphviz::graph::Node;
 use fabro_types::{AgentBackend, Principal, SessionCapability, StageId, SteeringMessage};
 use fabro_util::time::elapsed_ms;
@@ -284,8 +284,12 @@ impl AgentAcpBackend {
 }
 
 impl ActiveControlHandle for AcpControlHandle {
-    fn enqueue_bounded(&self, item: SteeringMessage, cap: usize) -> Option<SteeringMessage> {
-        Self::enqueue_bounded(self, item, cap)
+    fn enqueue_bounded(&self, item: SteeringItem, cap: usize) -> Option<SteeringItem> {
+        let item = match item {
+            SteeringItem::Steering { text, actor } => SteeringMessage::new(text, actor),
+            item => return Some(item),
+        };
+        Self::enqueue_bounded(self, item, cap).map(SteeringItem::from)
     }
 
     fn interrupt(&self, actor: Option<Principal>) {
@@ -294,10 +298,14 @@ impl ActiveControlHandle for AcpControlHandle {
 
     fn interrupt_then_enqueue_bounded(
         &self,
-        item: SteeringMessage,
+        item: SteeringItem,
         cap: usize,
-    ) -> Option<SteeringMessage> {
-        Self::interrupt_then_enqueue_bounded(self, item, cap)
+    ) -> Option<SteeringItem> {
+        let item = match item {
+            SteeringItem::Steering { text, actor } => SteeringMessage::new(text, actor),
+            item => return Some(item),
+        };
+        Self::interrupt_then_enqueue_bounded(self, item, cap).map(SteeringItem::from)
     }
 
     fn has_pending_control_work(&self) -> bool {

@@ -82,8 +82,9 @@ use fabro_types::settings::server::{
 };
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
-    EventBody, InterviewQuestionRecord, Principal, PullRequestLink, QuestionType, RunBlobId,
-    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
+    AgentBackend, EventBody, InterviewQuestionRecord, PairId, PairMessageId, PairTarget, Principal,
+    PullRequestLink, QuestionType, RunBlobId, RunControlAction, RunEvent, RunId, ServerSettings,
+    SessionCapability,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -205,10 +206,13 @@ struct ManagedRun {
     // Populated when running:
     answer_transport: Option<RunAnswerTransport>,
     accepted_questions: HashSet<String>,
-    /// Stage IDs of currently steerable live agent sessions,
-    /// keyed to the session id that owns the active lease. Used by the
-    /// steerability predicate.
+    /// Stage IDs of currently steerable live agent sessions, keyed to the
+    /// session id that owns the active lease. Used by the steerability
+    /// predicate for steer/interrupt controls.
     active_steerable_stages: HashMap<StageId, String>,
+    /// API-mode session targets eligible for live pair control. ACP sessions
+    /// can be steerable but are intentionally excluded from pairing.
+    active_api_targets: HashMap<StageId, PairTarget>,
     /// Stage IDs of currently running agent sessions that have no live
     /// steering capability, keyed to the session id that owns the marker.
     active_non_steerable_stages: HashMap<StageId, String>,
@@ -270,6 +274,13 @@ enum RunAnswerTransport {
 enum AnswerTransportError {
     Closed,
     Timeout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PairTransportError {
+    Closed,
+    Timeout,
+    Control(fabro_workflow::PairControlError),
 }
 
 impl RunAnswerTransport {
@@ -360,6 +371,73 @@ impl RunAnswerTransport {
                 steering_hub.interrupt_then_steer(&text, Some(&actor));
                 Ok(())
             }
+        }
+    }
+
+    async fn start_pair(
+        &self,
+        run_id: RunId,
+        pair_id: PairId,
+        target: PairTarget,
+        actor: Principal,
+    ) -> Result<(), PairTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::start_pair(run_id, pair_id, target, actor);
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| PairTransportError::Timeout)?
+                    .map_err(|_| PairTransportError::Closed)
+            }
+            Self::InProcess { steering_hub, .. } => steering_hub
+                .start_pair(run_id, pair_id, target, Some(actor))
+                .map(|_| ())
+                .map_err(PairTransportError::Control),
+        }
+    }
+
+    async fn send_pair_message(
+        &self,
+        pair_id: PairId,
+        message_id: PairMessageId,
+        text: String,
+        client_message_id: Option<String>,
+        actor: Principal,
+    ) -> Result<(), PairTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::pair_message(
+                    pair_id,
+                    message_id,
+                    text.clone(),
+                    client_message_id.clone(),
+                    actor,
+                );
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| PairTransportError::Timeout)?
+                    .map_err(|_| PairTransportError::Closed)
+            }
+            Self::InProcess { steering_hub, .. } => steering_hub
+                .send_pair_message(pair_id, message_id, text, client_message_id, Some(actor))
+                .map(|_| ())
+                .map_err(PairTransportError::Control),
+        }
+    }
+
+    async fn end_pair(&self, pair_id: PairId, actor: Principal) -> Result<(), PairTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::end_pair(pair_id, actor);
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| PairTransportError::Timeout)?
+                    .map_err(|_| PairTransportError::Closed)
+            }
+            Self::InProcess { steering_hub, .. } => steering_hub
+                .end_pair(pair_id, Some(actor))
+                .map(|_| ())
+                .map_err(PairTransportError::Control),
         }
     }
 }
@@ -2054,6 +2132,7 @@ fn octet_stream_response(bytes: Bytes) -> Response {
 fn clear_live_run_state(run: &mut ManagedRun) {
     run.answer_transport = None;
     run.accepted_questions.clear();
+    run.active_api_targets.clear();
     run.active_steerable_stages.clear();
     run.active_non_steerable_stages.clear();
     run.event_tx = None;
@@ -2369,6 +2448,7 @@ fn managed_run(
         enqueued_at: Instant::now(),
         answer_transport: None,
         accepted_questions: HashSet::new(),
+        active_api_targets: HashMap::new(),
         active_steerable_stages: HashMap::new(),
         active_non_steerable_stages: HashMap::new(),
         event_tx: None,
@@ -2475,6 +2555,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 reason: props.reason,
             };
             managed_run.error = None;
+            managed_run.active_api_targets.clear();
             managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_stages.clear();
         }
@@ -2486,6 +2567,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                 &props.failure.detail.message,
                 &props.failure.detail.causes,
             ));
+            managed_run.active_api_targets.clear();
             managed_run.active_steerable_stages.clear();
             managed_run.active_non_steerable_stages.clear();
         }
@@ -2501,11 +2583,34 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                         .active_steerable_stages
                         .insert(stage_id.clone(), session_id.clone());
                     managed_run.active_non_steerable_stages.remove(stage_id);
+                    let acp_provider: &'static str = AgentBackend::Acp.into();
+                    if props.provider.as_deref() == Some(acp_provider) {
+                        managed_run.active_api_targets.remove(stage_id);
+                    } else {
+                        managed_run
+                            .active_api_targets
+                            .insert(stage_id.clone(), PairTarget {
+                                stage_id:         stage_id.clone(),
+                                node_id:          event
+                                    .node_id
+                                    .clone()
+                                    .unwrap_or_else(|| stage_id.node_id().to_string()),
+                                node_label:       event
+                                    .node_label
+                                    .clone()
+                                    .unwrap_or_else(|| stage_id.node_id().to_string()),
+                                visit:            stage_id.visit(),
+                                agent_session_id: session_id.clone(),
+                                provider:         props.provider.clone(),
+                                model:            props.model.clone(),
+                            });
+                    }
                 } else {
                     managed_run
                         .active_non_steerable_stages
                         .insert(stage_id.clone(), session_id.clone());
                     managed_run.active_steerable_stages.remove(stage_id);
+                    managed_run.active_api_targets.remove(stage_id);
                 }
             }
         }
@@ -2519,6 +2624,13 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
                     .is_some_and(|current| current == session_id)
                 {
                     managed_run.active_steerable_stages.remove(stage_id);
+                    if managed_run
+                        .active_api_targets
+                        .get(stage_id)
+                        .is_some_and(|target| target.agent_session_id == *session_id)
+                    {
+                        managed_run.active_api_targets.remove(stage_id);
+                    }
                 }
                 if managed_run
                     .active_non_steerable_stages
@@ -2537,6 +2649,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
         | EventBody::StageCompleted(_)
         | EventBody::StageFailed(_) => {
             if let Some(stage_id) = &event.stage_id {
+                managed_run.active_api_targets.remove(stage_id);
                 managed_run.active_steerable_stages.remove(stage_id);
                 managed_run.active_non_steerable_stages.remove(stage_id);
             }

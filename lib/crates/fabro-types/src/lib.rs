@@ -12,10 +12,12 @@ pub mod diff;
 pub mod event_envelope;
 pub mod failure_signature;
 pub mod graph;
+mod id;
 pub mod interview;
 pub mod llm_backend;
 pub mod manifest_path;
 pub mod outcome;
+pub mod pair;
 pub mod principal;
 pub mod pull_request;
 pub mod repository;
@@ -67,6 +69,16 @@ pub use manifest_path::{ManifestPath, ManifestPathParseError};
 pub use outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageOutcome, StageState,
 };
+pub use pair::{
+    PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord, PairStartRequest,
+    PairStatus, PairSystemMessageKind, PairTarget, PairTargetSelector,
+    PairTranscriptAssistantMessage, PairTranscriptDetailRef, PairTranscriptEntry,
+    PairTranscriptError, PairTranscriptMeta, PairTranscriptModel, PairTranscriptResponse,
+    PairTranscriptSystemMessage, PairTranscriptToolCall, PairTranscriptToolStatus,
+    PairTranscriptUserMessage, PairTranscriptWarning, RunEventDetailContent,
+    RunEventDetailContentKind, RunEventDetailEnvelope, RunEventDetailResponse,
+    RunPairStatusResponse,
+};
 pub use principal::{AuthMethod, Principal, SystemActorKind, UserPrincipal};
 pub use pull_request::{
     CheckRun, CheckRunStatus, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
@@ -81,7 +93,8 @@ pub use run::{
 pub use run_blob_id::RunBlobId;
 pub use run_event::{
     EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
-    RunEvent, RunNoticeCode, RunNoticeLevel, SessionCapability,
+    RunEvent, RunNoticeCode, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason,
+    SessionCapability,
 };
 pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};

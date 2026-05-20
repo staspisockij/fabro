@@ -47,7 +47,8 @@ pub use sandbox::{
     shell_quote,
 };
 pub use session::{
-    CompletionCoordinator, Session, SessionControlHandle, StaticEnvProvider, ToolEnvProvider,
+    CompletionCoordinator, Session, SessionControlHandle, StaticEnvProvider, SteeringItem,
+    ToolEnvProvider,
 };
 pub use skills::Skill;
 pub use subagent::{

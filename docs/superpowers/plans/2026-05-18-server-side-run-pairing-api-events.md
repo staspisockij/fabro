@@ -805,12 +805,12 @@ Files:
 
 Steps:
 
-- [ ] Add shared pair schemas and endpoints to OpenAPI with the exact request/response shapes above.
-- [ ] Add `PairId`, `PairMessageId`, `PairStatus`, `PairTargetSelector`, `PairTarget`, `PairRecord`, `RunPairStatusResponse`, `PairStartRequest`, `PairMessageRequest`, `PairMessageRecord`, transcript entry types, and `RunEventDetailResponse` to `fabro-types`.
-- [ ] Leave `SessionCapability` unchanged. Existing `steer` capability remains the active API-mode control signal that pair target discovery uses.
-- [ ] Add `with_replacement(...)` mappings in `fabro-api/build.rs` for shared pair types and the generic event detail response.
-- [ ] Run `cargo build -p fabro-api` to regenerate API code.
-- [ ] Add type identity and JSON parity tests for pair ids, status enums, selectors, pair records, message records, transcript responses, and event detail responses.
+- [x] Add shared pair schemas and endpoints to OpenAPI with the exact request/response shapes above.
+- [x] Add `PairId`, `PairMessageId`, `PairStatus`, `PairTargetSelector`, `PairTarget`, `PairRecord`, `RunPairStatusResponse`, `PairStartRequest`, `PairMessageRequest`, `PairMessageRecord`, transcript entry types, and `RunEventDetailResponse` to `fabro-types`.
+- [x] Leave `SessionCapability` unchanged. Existing `steer` capability remains the active API-mode control signal that pair target discovery uses.
+- [x] Add `with_replacement(...)` mappings in `fabro-api/build.rs` for shared pair types and the generic event detail response.
+- [x] Run `cargo build -p fabro-api` to regenerate API code.
+- [x] Add type identity and JSON parity tests for pair ids, status enums, selectors, pair records, message records, transcript responses, and event detail responses.
 
 ### Unit 2: Typed Pair Events
 
@@ -826,12 +826,12 @@ Files:
 
 Steps:
 
-- [ ] Add props structs and `EventBody` variants for `run.pair.started`, `run.pair.ended`, `run.pair.failed`, `agent.pair.user_message`, and `agent.pair.system_message`.
-- [ ] Add matching internal `Event` variants.
-- [ ] Update `event_name()` with exact dot-notation names.
-- [ ] Update `event_body_from_event()` with JSON properties matching the event contract.
-- [ ] Update `stored_event_fields()` so actor, session, node, stage, and tool identity live in the envelope, not duplicated in properties.
-- [ ] Add tests for event names, serialized wire shape, actor lifting, session/stage envelope mapping, and `visit` preservation.
+- [x] Add props structs and `EventBody` variants for `run.pair.started`, `run.pair.ended`, `run.pair.failed`, `agent.pair.user_message`, and `agent.pair.system_message`.
+- [x] Add matching internal `Event` variants.
+- [x] Update `event_name()` with exact dot-notation names.
+- [x] Update `event_body_from_event()` with JSON properties matching the event contract.
+- [x] Update `stored_event_fields()` so actor, session, node, stage, and tool identity live in the envelope, not duplicated in properties.
+- [x] Add tests for event names, serialized wire shape, actor lifting, session/stage envelope mapping, and `visit` preservation.
 
 ### Unit 3: Runtime Pair Control
 
@@ -845,16 +845,16 @@ Files:
 
 Steps:
 
-- [ ] Replace the text-only steering queue internals with typed control items while preserving existing steering public helpers.
-- [ ] Track one active pair per run and one selected target per pair.
-- [ ] Pair user messages must append `Message::User` and emit `agent.pair.user_message`.
-- [ ] Pair system messages must append `Message::System` and emit `agent.pair.system_message`.
-- [ ] Pair start must validate the exact selected target, enable pair mode, record `run.pair.started`, queue `human_joined`, request interruption/parking, and return runtime confirmation.
-- [ ] Pair message must record `agent.pair.user_message` once for the selected target after queue acceptance.
-- [ ] Pair end must queue `human_left`, disable pair mode, record `run.pair.ended`, and return runtime confirmation.
-- [ ] While pair is active, no-tool natural completion must stay parked instead of releasing the stage.
-- [ ] After pair end, normal autonomous completion/release behavior must resume.
-- [ ] Pair start requires an active API-mode steering-capable target; ACP/CLI-only agents are not pairable.
+- [x] Replace the text-only steering queue internals with typed control items while preserving existing steering public helpers.
+- [x] Track one active pair per run and one selected target per pair.
+- [x] Pair user messages must append `Message::User` and emit `agent.pair.user_message`.
+- [x] Pair system messages must append `Message::System` and emit `agent.pair.system_message`.
+- [x] Pair start must validate the exact selected target, enable pair mode, record `run.pair.started`, queue `human_joined`, request interruption/parking, and return runtime confirmation.
+- [x] Pair message must record `agent.pair.user_message` once for the selected target after queue acceptance.
+- [x] Pair end must queue `human_left`, disable pair mode, record `run.pair.ended`, and return runtime confirmation.
+- [x] While pair is active, no-tool natural completion must stay parked instead of releasing the stage.
+- [x] After pair end, normal autonomous completion/release behavior must resume.
+- [x] Pair start requires an active API-mode steering-capable target; ACP/CLI-only agents are not pairable.
 
 ### Unit 4: Worker Control Transport
 
@@ -866,12 +866,12 @@ Files:
 
 Steps:
 
-- [ ] Add `WorkerControlMessage` variants for `pair.start`, `pair.message`, and `pair.end`.
-- [ ] Add constructors on `WorkerControlEnvelope`.
-- [ ] Extend worker control so pair start and end return runtime-level confirmed success or typed rejection; mpsc enqueue success alone must not satisfy pair lifecycle API success.
+- [x] Add `WorkerControlMessage` variants for `pair.start`, `pair.message`, and `pair.end`.
+- [x] Add constructors on `WorkerControlEnvelope`.
+- [x] Extend worker control so pair start and end return runtime-level confirmed success or typed rejection; mpsc enqueue success alone must not satisfy pair lifecycle API success.
 - [ ] Update worker control-line handling to call the workflow pair control methods and send back typed accept/reject results.
-- [ ] Extend `RunAnswerTransport` with `start_pair`, `send_pair_message`, and `end_pair`.
-- [ ] Preserve existing `steer`, `interrupt`, `interrupt_then_steer`, `answer`, and `cancel` behavior.
+- [x] Extend `RunAnswerTransport` with `start_pair`, `send_pair_message`, and `end_pair`.
+- [x] Preserve existing `steer`, `interrupt`, `interrupt_then_steer`, `answer`, and `cancel` behavior.
 - [ ] Add tests proving subprocess transport returns confirmed results for start/end, accepted results for message enqueue, and maps runtime rejections to documented API errors.
 
 ### Unit 5: Server API Handlers
@@ -886,15 +886,15 @@ Files:
 
 Steps:
 
-- [ ] Implement pair routes and merge them into the existing server router.
-- [ ] Implement `GET /api/v1/runs/{id}/events/{seq}` under the existing run internals/event handler surface.
-- [ ] Add live `ManagedRun` state for richer active API target metadata.
-- [ ] Implement active pair-eligible target enumeration from live `ManagedRun` state.
-- [ ] Implement exact target selection; do not default to all active targets when multiple targets exist.
-- [ ] Implement pair lifecycle reconstruction from durable events without read-time timeout reconciliation.
-- [ ] Reuse existing run gates: archived rejection, blocked rejection, terminal rejection, and worker-control unavailable handling.
-- [ ] Return the documented `ErrorResponse.code` values for all pair conflicts.
-- [ ] Add `fabro-client` methods for get pair status, start pair, get pair by id, end pair, send pair message, get transcript, and get run event detail.
+- [x] Implement pair routes and merge them into the existing server router.
+- [x] Implement `GET /api/v1/runs/{id}/events/{seq}` under the existing run internals/event handler surface.
+- [x] Add live `ManagedRun` state for richer active API target metadata.
+- [x] Implement active pair-eligible target enumeration from live `ManagedRun` state.
+- [x] Implement exact target selection; do not default to all active targets when multiple targets exist.
+- [x] Implement pair lifecycle reconstruction from durable events without read-time timeout reconciliation.
+- [x] Reuse existing run gates: archived rejection, blocked rejection, terminal rejection, and worker-control unavailable handling.
+- [x] Return the documented `ErrorResponse.code` values for all pair conflicts.
+- [x] Add `fabro-client` methods for get pair status, start pair, get pair by id, end pair, send pair message, get transcript, and get run event detail.
 
 ### Unit 6: Transcript Projection And Event Detail
 
@@ -906,14 +906,14 @@ Files:
 
 Steps:
 
-- [ ] Reconstruct pair windows from `run.pair.started`, `run.pair.ended`, and `run.pair.failed`.
-- [ ] Build compact transcript entries from pair events and matching agent events inside the pair window.
-- [ ] Exclude delta events and full tool output.
-- [ ] Build deterministic compact tool summaries with `detail_ref.seq`.
-- [ ] Compute `next_since_seq` as highest scanned source event sequence plus `1`.
-- [ ] Implement run event detail lookup by sequence only.
-- [ ] Split run event detail responses into metadata, non-content properties, and truncated/redacted content.
-- [ ] Apply `max_content_length` truncation consistently and report `truncated` and `redacted`.
+- [x] Reconstruct pair windows from `run.pair.started`, `run.pair.ended`, and `run.pair.failed`.
+- [x] Build compact transcript entries from pair events and matching agent events inside the pair window.
+- [x] Exclude delta events and full tool output.
+- [x] Build deterministic compact tool summaries with `detail_ref.seq`.
+- [x] Compute `next_since_seq` as highest scanned source event sequence plus `1`.
+- [x] Implement run event detail lookup by sequence only.
+- [x] Split run event detail responses into metadata, non-content properties, and truncated/redacted content.
+- [x] Apply `max_content_length` truncation consistently and report `truncated` and `redacted`.
 
 ## Test Plan
 
