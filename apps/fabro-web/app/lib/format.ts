@@ -106,9 +106,10 @@ export function formatTokenCount(
 
 const BYTES_PER_GIB = 1024 * 1024 * 1024;
 const BYTES_PER_MIB = 1024 * 1024;
+const BYTES_PER_KIB = 1024;
 
 /**
- * Format a byte count as a memory/disk size (e.g. "8 GiB", "512 MiB", "1024 B").
+ * Format a byte count as a memory/disk size (e.g. "8 GiB", "512 MiB", "4 KiB", "742 B").
  */
 export function formatBytesAsMemory(bytes: number): string {
   if (bytes >= BYTES_PER_GIB) {
@@ -118,6 +119,10 @@ export function formatBytesAsMemory(bytes: number): string {
   if (bytes >= BYTES_PER_MIB) {
     const mib = bytes / BYTES_PER_MIB;
     return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
+  }
+  if (bytes >= BYTES_PER_KIB) {
+    const kib = bytes / BYTES_PER_KIB;
+    return `${Number.isInteger(kib) ? kib : kib.toFixed(1)} KiB`;
   }
   return `${bytes} B`;
 }

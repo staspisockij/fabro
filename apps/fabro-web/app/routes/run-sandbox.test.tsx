@@ -182,6 +182,15 @@ describe("formatBytesAsMemory", () => {
   test("falls back to mebibytes when below a gibibyte", () => {
     expect(formatBytesAsMemory(512 * 1024 * 1024)).toBe("512 MiB");
   });
+
+  test("falls back to kibibytes when below a mebibyte", () => {
+    expect(formatBytesAsMemory(4 * 1024)).toBe("4 KiB");
+    expect(formatBytesAsMemory(1536)).toBe("1.5 KiB");
+  });
+
+  test("renders raw bytes when below a kibibyte", () => {
+    expect(formatBytesAsMemory(742)).toBe("742 B");
+  });
 });
 
 describe("RunSandbox route", () => {

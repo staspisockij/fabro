@@ -1468,6 +1468,12 @@ fn build_disk_usage_response(
         }
     }
 
+    // Measure the whole storage tree so the managed total can't drift as new
+    // subdirectories are added. "other" is the residual (database, artifacts,
+    // sessions, vaults) — everything that isn't an enumerated run or log file.
+    let managed_size = dir_size(storage_dir);
+    let other_size = managed_size.saturating_sub(total_run_size + total_log_size);
+
     Ok(DiskUsageResponse {
         summary:                 vec![
             DiskUsageSummaryRow {
@@ -1484,8 +1490,15 @@ fn build_disk_usage_response(
                 size_bytes:        Some(to_i64(total_log_size)),
                 reclaimable_bytes: Some(to_i64(total_log_size)),
             },
+            DiskUsageSummaryRow {
+                type_:             Some("other".to_string()),
+                count:             None,
+                active:            None,
+                size_bytes:        Some(to_i64(other_size)),
+                reclaimable_bytes: Some(0),
+            },
         ],
-        total_size_bytes:        Some(to_i64(total_run_size + total_log_size)),
+        total_size_bytes:        Some(to_i64(managed_size)),
         total_reclaimable_bytes: Some(to_i64(reclaimable_run_size + total_log_size)),
         runs:                    verbose.then_some(run_rows),
     })

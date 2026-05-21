@@ -962,9 +962,16 @@ pub(crate) async fn get_system_disk_usage(
                     "active": null,
                     "size_bytes": 256,
                     "reclaimable_bytes": 256
+                },
+                {
+                    "type": "other",
+                    "count": null,
+                    "active": null,
+                    "size_bytes": 16_777_216,
+                    "reclaimable_bytes": 0
                 }
             ],
-            "total_size_bytes": 1280,
+            "total_size_bytes": 16_778_496,
             "total_reclaimable_bytes": 1280,
             "runs": runs
         })),
