@@ -1,0 +1,76 @@
+diff --git a/lib/crates/fabro-model/src/billing.rs b/lib/crates/fabro-model/src/billing.rs
+index f06cad06a..a3be9f470 100644
+--- a/lib/crates/fabro-model/src/billing.rs
++++ b/lib/crates/fabro-model/src/billing.rs
+@@ -361,7 +361,7 @@ impl BilledTokenCounts {
+     /// Returns the five disjoint per-call token buckets, dropping the derived
+     /// `total_tokens` sum and the optional `total_usd_micros` cost.
+     #[must_use]
+-    pub fn token_counts(&self) -> TokenCounts {
++    pub fn to_token_counts(&self) -> TokenCounts {
+         TokenCounts {
+             input_tokens:       self.input_tokens,
+             output_tokens:      self.output_tokens,
+@@ -371,6 +371,17 @@ impl BilledTokenCounts {
+         }
+     }
+ 
++    /// Fills in `total_usd_micros` from catalog pricing when it is missing.
++    ///
++    /// No-op when the cost is already known. Used by read-side rollups so
++    /// in-flight stages can show an exact cost for the tokens consumed so far
++    /// without mutating the underlying projection.
++    pub fn ensure_priced(&mut self, catalog: &Catalog, model: &ModelRef) {
++        if self.total_usd_micros.is_none() {
++            self.total_usd_micros = catalog.price_tokens(model, &self.to_token_counts());
++        }
++    }
++
+     pub fn add_counts(&mut self, source: &Self) {
+         self.input_tokens += source.input_tokens;
+         self.output_tokens += source.output_tokens;
+diff --git a/lib/crates/fabro-workflow/src/billing_rollup.rs b/lib/crates/fabro-workflow/src/billing_rollup.rs
+index 89791caa7..a0dac337c 100644
+--- a/lib/crates/fabro-workflow/src/billing_rollup.rs
++++ b/lib/crates/fabro-workflow/src/billing_rollup.rs
+@@ -3,6 +3,14 @@ use std::collections::HashMap;
+ use fabro_model::Catalog;
+ use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, StageProjection};
+ 
++fn stage_priced_usage(catalog: Option<&Catalog>, stage: &StageProjection) -> BilledTokenCounts {
++    let mut usage = stage.usage.clone();
++    if let (Some(catalog), Some(model)) = (catalog, stage.model.as_ref()) {
++        usage.ensure_priced(catalog, model);
++    }
++    usage
++}
++
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct ProjectionBillingStage {
+     pub node_id:     String,
+@@ -50,7 +58,7 @@ pub fn billing_rollup_from_projection(
+         if is_boundary_stage(projection, stage_id.node_id()) {
+             continue;
+         }
+-        let priced = stage_usage_with_cost(catalog, stage);
++        let priced = stage_priced_usage(catalog, stage);
+         if stage.completion.is_none() && stage.duration_ms.is_none() && priced.is_zero() {
+             continue;
+         }
+@@ -118,16 +126,6 @@ pub fn billing_rollup_from_projection(
+     }
+ }
+ 
+-fn stage_usage_with_cost(catalog: Option<&Catalog>, stage: &StageProjection) -> BilledTokenCounts {
+-    let mut usage = stage.usage.clone();
+-    if usage.total_usd_micros.is_none() {
+-        if let (Some(catalog), Some(model)) = (catalog, stage.model.as_ref()) {
+-            usage.total_usd_micros = catalog.price_tokens(model, &usage.token_counts());
+-        }
+-    }
+-    usage
+-}
+-
+ fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
+     projection
+         .spec()
