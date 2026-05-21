@@ -1,0 +1,989 @@
+diff --git a/apps/fabro-web/app/routes/run-billing.test.tsx b/apps/fabro-web/app/routes/run-billing.test.tsx
+index 7afe469c6..99f6ece5d 100644
+--- a/apps/fabro-web/app/routes/run-billing.test.tsx
++++ b/apps/fabro-web/app/routes/run-billing.test.tsx
+@@ -1,7 +1,20 @@
+ import { afterEach, describe, expect, mock, test } from "bun:test";
+ import TestRenderer from "react-test-renderer";
+ 
+-import type { BilledTokenCounts, RunBilling } from "@qltysh/fabro-api-client";
++import type {
++  BilledTokenCounts,
++  RunBilling,
++  StageTiming,
++} from "@qltysh/fabro-api-client";
++
++function stageTiming(wall_time_ms = 0, inference_time_ms = 0, tool_time_ms = 0): StageTiming {
++  return {
++    wall_time_ms,
++    inference_time_ms,
++    tool_time_ms,
++    active_time_ms: inference_time_ms + tool_time_ms,
++  };
++}
+ 
+ let currentBilling: RunBilling | undefined;
+ 
+@@ -28,7 +41,7 @@ function billing(overrides: Partial<RunBilling> = {}): RunBilling {
+   return {
+     stages: [],
+     totals: {
+-      timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++      timing: stageTiming(),
+       ...zeroBilling(),
+     },
+     by_model: [],
+@@ -74,19 +87,19 @@ describe("RunBilling", () => {
+             stage: { id: "start", name: "start" },
+             model: null,
+             billing: zeroBilling(),
+-            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++            timing: stageTiming(),
+             state: "succeeded",
+           },
+           {
+             stage: { id: "command", name: "command" },
+             model: null,
+             billing: zeroBilling(),
+-            timing: { wall_time_ms: 61000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++            timing: stageTiming(61000),
+             state: "succeeded",
+           },
+         ],
+         totals: {
+-          timing: { wall_time_ms: 61000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++          timing: stageTiming(61000),
+           ...zeroBilling(),
+         },
+       }),
+@@ -109,7 +122,7 @@ describe("RunBilling", () => {
+             stage: { id: "start", name: "start" },
+             model: null,
+             billing: zeroBilling(),
+-            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++            timing: stageTiming(),
+             state: "succeeded",
+           },
+           {
+@@ -124,12 +137,12 @@ describe("RunBilling", () => {
+               total_tokens: 1500,
+               total_usd_micros: 240000,
+             }),
+-            timing: { wall_time_ms: 42000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++            timing: stageTiming(42000),
+             state: "succeeded",
+           },
+         ],
+         totals: {
+-          timing: { wall_time_ms: 42000, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++          timing: stageTiming(42000),
+           ...zeroBilling({
+             input_tokens: 1200,
+             output_tokens: 300,
+@@ -197,13 +210,13 @@ describe("RunBilling", () => {
+                 total_tokens: 1500,
+                 total_usd_micros: 240000,
+               }),
+-              timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++              timing: stageTiming(),
+               started_at: startedAt,
+               state: "running",
+             },
+           ],
+           totals: {
+-            timing: { wall_time_ms: 0, inference_time_ms: 0, tool_time_ms: 0, active_time_ms: 0 },
++            timing: stageTiming(),
+             ...zeroBilling({
+               input_tokens: 1200,
+               output_tokens: 300,
+@@ -255,4 +268,4 @@ describe("RunBilling", () => {
+       Date.now = originalNow;
+     }
+   });
+-});
++});
+\ No newline at end of file
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index ed189db84..417acf422 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -8684,23 +8684,6 @@ components:
+           description: Equals `inference_time_ms + tool_time_ms`.
+           example: 180000
+ 
+-    RunTimings:
+-      description: Timing information for a run.
+-      type: object
+-      required:
+-        - wall_time_ms
+-      properties:
+-        wall_time_ms:
+-          type: integer
+-          format: uint64
+-          minimum: 0
+-          description: Wall-clock time elapsed in milliseconds.
+-          example: 420000
+-        elapsed_warning:
+-          type: boolean
+-          description: Whether the elapsed time exceeds the expected threshold.
+-          example: false
+-
+     SandboxProvider:
+       description: Sandbox execution provider.
+       type: string
+diff --git a/lib/crates/fabro-api/tests/run_failure_round_trip.rs b/lib/crates/fabro-api/tests/run_failure_round_trip.rs
+index 7c07bb96d..b3bd27baa 100644
+--- a/lib/crates/fabro-api/tests/run_failure_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_failure_round_trip.rs
+@@ -70,7 +70,7 @@ fn conclusion_json_uses_failure_object() {
+             status:               StageOutcome::Failed {
+                 retry_requested: false,
+             },
+-            timing:               fabro_types::RunTiming::new(42, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(42),
+             failure:              Some(RunFailure {
+                 reason: FailureReason::WorkflowError,
+                 detail: FailureDetail::new("boom", FailureCategory::Deterministic),
+diff --git a/lib/crates/fabro-cli/src/commands/run/runner.rs b/lib/crates/fabro-cli/src/commands/run/runner.rs
+index 7b89e06bd..440beb8be 100644
+--- a/lib/crates/fabro-cli/src/commands/run/runner.rs
++++ b/lib/crates/fabro-cli/src/commands/run/runner.rs
+@@ -795,7 +795,7 @@ mod tests {
+         );
+         assert_eq!(
+             worker_title_phase_for_event(&EventBody::RunCompleted(RunCompletedProps {
+-                timing:               fabro_types::RunTiming::new(10, 0, 0),
++                timing:               fabro_types::RunTiming::wall_only(10),
+                 artifact_count:       0,
+                 status:               "succeeded".to_string(),
+                 reason:               SuccessReason::Completed,
+@@ -813,7 +813,7 @@ mod tests {
+                     reason: FailureReason::Cancelled,
+                     detail: FailureDetail::new("cancelled", FailureCategory::Canceled),
+                 },
+-                timing:               fabro_types::RunTiming::new(10, 0, 0),
++                timing:               fabro_types::RunTiming::wall_only(10),
+                 final_git_commit_sha: None,
+                 final_patch:          None,
+                 diff_summary:         None,
+@@ -827,7 +827,7 @@ mod tests {
+                     reason: FailureReason::Terminated,
+                     detail: FailureDetail::new("boom", FailureCategory::Deterministic),
+                 },
+-                timing:               fabro_types::RunTiming::new(10, 0, 0),
++                timing:               fabro_types::RunTiming::wall_only(10),
+                 final_git_commit_sha: None,
+                 final_patch:          None,
+                 diff_summary:         None,
+diff --git a/lib/crates/fabro-cli/src/commands/run/wait.rs b/lib/crates/fabro-cli/src/commands/run/wait.rs
+index 090054ca5..6ef61c4ee 100644
+--- a/lib/crates/fabro-cli/src/commands/run/wait.rs
++++ b/lib/crates/fabro-cli/src/commands/run/wait.rs
+@@ -153,7 +153,7 @@ mod tests {
+         let conclusion = Conclusion {
+             timestamp:            chrono::Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(12345, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(12345),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               vec![],
+@@ -212,7 +212,7 @@ mod tests {
+             status:               StageOutcome::Failed {
+                 retry_requested: false,
+             },
+-            timing:               fabro_types::RunTiming::new(500, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(500),
+             failure:              Some(RunFailure {
+                 reason: FailureReason::WorkflowError,
+                 detail: FailureDetail::new("error", FailureCategory::Deterministic),
+@@ -241,7 +241,7 @@ mod tests {
+         let conclusion = Conclusion {
+             timestamp:            chrono::Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(8000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(8000),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               vec![],
+diff --git a/lib/crates/fabro-dump/src/lib.rs b/lib/crates/fabro-dump/src/lib.rs
+index fe5d683c3..8345b84a4 100644
+--- a/lib/crates/fabro-dump/src/lib.rs
++++ b/lib/crates/fabro-dump/src/lib.rs
+@@ -548,7 +548,7 @@ mod tests {
+                 .single()
+                 .unwrap(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(5, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(5),
+             failure:              None,
+             final_git_commit_sha: Some("abc123".to_string()),
+             stages:               Vec::new(),
+diff --git a/lib/crates/fabro-server/src/demo/mod.rs b/lib/crates/fabro-server/src/demo/mod.rs
+index 12a1f453e..d3f2463db 100644
+--- a/lib/crates/fabro-server/src/demo/mod.rs
++++ b/lib/crates/fabro-server/src/demo/mod.rs
+@@ -1107,7 +1107,7 @@ mod runs {
+         let source_directory = Some(format!("/demo/{repo_name}"));
+         let repo_origin_url = Some(format!("https://github.com/demo/{repo_name}.git"));
+         let wall_time_ms = elapsed_secs.and_then(duration_ms_from_secs);
+-        let timing = wall_time_ms.map(|ms| fabro_types::RunTiming::new(ms, 0, 0));
++        let timing = wall_time_ms.map(fabro_types::RunTiming::wall_only);
+         Run {
+             id: run_id,
+             parent_id: None,
+@@ -1603,7 +1603,7 @@ mod runs {
+             totals:   RunBillingTotals {
+                 cache_read_tokens:  0,
+                 cache_write_tokens: 0,
+-                timing:             fabro_types::RunTiming::new(389_000, 0, 0),
++                timing:             fabro_types::RunTiming::wall_only(389_000),
+                 input_tokens:       71540,
+                 output_tokens:      21080,
+                 reasoning_tokens:   0,
+@@ -1987,7 +1987,7 @@ mod billing {
+                 input_tokens:       643_860,
+                 output_tokens:      189_720,
+                 reasoning_tokens:   0,
+-                timing:             fabro_types::RunTiming::new(3_501_000, 0, 0),
++                timing:             fabro_types::RunTiming::wall_only(3_501_000),
+                 total_tokens:       833_580,
+                 total_usd_micros:   Some(20_340_000),
+             },
+diff --git a/lib/crates/fabro-server/src/run_files.rs b/lib/crates/fabro-server/src/run_files.rs
+index a820464b1..835b386c4 100644
+--- a/lib/crates/fabro-server/src/run_files.rs
++++ b/lib/crates/fabro-server/src/run_files.rs
+@@ -2390,7 +2390,7 @@ index 1111111..2222222 160000
+         projection.conclusion = Some(fabro_types::Conclusion {
+             timestamp:            chrono::Utc::now(),
+             status:               fabro_types::StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               Vec::new(),
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index 0e3804aba..7ec32dfb1 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -252,7 +252,7 @@ struct ModelBillingTotals {
+ #[derive(Default)]
+ struct BillingAccumulator {
+     total_runs:   i64,
+-    total_timing: fabro_types::StageTiming,
++    total_timing: fabro_types::RunTiming,
+     by_model:     HashMap<ModelRef, ModelBillingTotals>,
+ }
+ 
+diff --git a/lib/crates/fabro-server/src/server/handler/billing.rs b/lib/crates/fabro-server/src/server/handler/billing.rs
+index d423b4e79..fc2b7ae0e 100644
+--- a/lib/crates/fabro-server/src/server/handler/billing.rs
++++ b/lib/crates/fabro-server/src/server/handler/billing.rs
+@@ -2,9 +2,7 @@ use std::collections::HashMap;
+ use std::sync::Arc;
+ 
+ use chrono::{DateTime, Utc};
+-use fabro_types::{
+-    RunProjection, RunTiming, StageHandler, StageProjection, StageState, StageTiming,
+-};
++use fabro_types::{RunProjection, StageHandler, StageProjection, StageState, StageTiming};
+ 
+ use super::super::{
+     ApiError, AppState, BillingByModel, BillingStageRef, IntoResponse, Json, ListResponse,
+@@ -130,11 +128,7 @@ async fn get_run_billing(
+             input_tokens:       rollup.totals.input_tokens,
+             output_tokens:      rollup.totals.output_tokens,
+             reasoning_tokens:   rollup.totals.reasoning_tokens,
+-            timing:             RunTiming::new(
+-                totals_timing.wall_time_ms,
+-                totals_timing.inference_time_ms,
+-                totals_timing.tool_time_ms,
+-            ),
++            timing:             totals_timing.into(),
+             total_tokens:       rollup.totals.total_tokens,
+             total_usd_micros:   rollup.totals.total_usd_micros,
+         },
+diff --git a/lib/crates/fabro-server/src/server/handler/system.rs b/lib/crates/fabro-server/src/server/handler/system.rs
+index 4c2b7e551..adb25634c 100644
+--- a/lib/crates/fabro-server/src/server/handler/system.rs
++++ b/lib/crates/fabro-server/src/server/handler/system.rs
+@@ -541,11 +541,7 @@ async fn get_aggregate_billing(
+             output_tokens:      total_billing.output_tokens,
+             reasoning_tokens:   total_billing.reasoning_tokens,
+             runs:               agg.total_runs,
+-            timing:             fabro_types::RunTiming::new(
+-                agg.total_timing.wall_time_ms,
+-                agg.total_timing.inference_time_ms,
+-                agg.total_timing.tool_time_ms,
+-            ),
++            timing:             agg.total_timing,
+             total_tokens:       total_billing.total_tokens,
+             total_usd_micros:   total_billing.total_usd_micros,
+         },
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index b2629563b..20908c3e4 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -2709,7 +2709,7 @@ async fn persist_cancelled_run_status_ignores_already_terminal_runs() {
+     let run_id = fixtures::RUN_1;
+     create_durable_run_with_events(&state, run_id, &[
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -2745,7 +2745,7 @@ async fn delete_terminal_managed_run_does_not_send_cancel_signal() {
+     let run_id = fixtures::RUN_1;
+     create_durable_run_with_events(&state, run_id, &[
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -4057,7 +4057,7 @@ async fn create_completed_run_ready_for_pull_request(
+             goal: Some("Ship the server-side PR".to_string()),
+         },
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -7549,7 +7549,7 @@ async fn patch_run_title_updates_active_and_archived_runs() {
+         &run_store,
+         &run_id,
+         &workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -7697,7 +7697,7 @@ async fn cancel_terminal_durable_run_returns_conflict() {
+     let run_id = fixtures::RUN_1;
+     create_durable_run_with_events(&state, run_id, &[
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -7747,7 +7747,7 @@ async fn steer_terminal_durable_run_returns_run_not_steerable() {
+     let run_id = fixtures::RUN_1;
+     create_durable_run_with_events(&state, run_id, &[
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -8601,7 +8601,7 @@ async fn archive_and_unarchive_updates_listing_visibility() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -8935,7 +8935,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
+             primary_repo_link: None,
+         },
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -9201,7 +9201,7 @@ fn aggregate_billing_counts_projection_rollup_usage_visits() {
+                 },
+             },
+         ],
+-        timing:             fabro_types::StageTiming::wall_only(2000),
++        timing:             fabro_types::RunTiming::wall_only(2000),
+         billed_visit_count: 2,
+     };
+ 
+@@ -10438,7 +10438,7 @@ async fn boards_runs_excludes_archived_by_default() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -10487,7 +10487,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -10507,7 +10507,7 @@ async fn boards_runs_includes_archived_when_flag_set() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -10580,7 +10580,7 @@ async fn get_run_exposes_canonical_operator_statuses() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -10665,7 +10665,7 @@ async fn boards_runs_maps_statuses_to_columns() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1000),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+diff --git a/lib/crates/fabro-server/tests/it/api/run_files.rs b/lib/crates/fabro-server/tests/it/api/run_files.rs
+index bb35f8356..88df727c8 100644
+--- a/lib/crates/fabro-server/tests/it/api/run_files.rs
++++ b/lib/crates/fabro-server/tests/it/api/run_files.rs
+@@ -102,7 +102,7 @@ async fn append_completed_run_with_final_patch(
+         &run_store,
+         run_id,
+         &workflow_event::Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+diff --git a/lib/crates/fabro-store/src/run_state.rs b/lib/crates/fabro-store/src/run_state.rs
+index 5925bb5d2..c9916f64b 100644
+--- a/lib/crates/fabro-store/src/run_state.rs
++++ b/lib/crates/fabro-store/src/run_state.rs
+@@ -2140,7 +2140,7 @@ mod tests {
+                         reason: FailureReason::WorkflowError,
+                         detail: FailureDetail::new("boom", FailureCategory::Deterministic),
+                     },
+-                    timing:               fabro_types::RunTiming::new(42, 0, 0),
++                    timing:               fabro_types::RunTiming::wall_only(42),
+                     final_git_commit_sha: Some("abc123".to_string()),
+                     final_patch:          Some(patch.to_string()),
+                     diff_summary:         None,
+@@ -2299,7 +2299,7 @@ mod tests {
+                             detail
+                         },
+                     },
+-                    timing:               fabro_types::RunTiming::new(42, 0, 0),
++                    timing:               fabro_types::RunTiming::wall_only(42),
+                     final_git_commit_sha: None,
+                     final_patch:          None,
+                     diff_summary:         None,
+@@ -2340,7 +2340,7 @@ mod tests {
+                 1,
+                 EventBody::RunFailed(RunFailedProps {
+                     failure:              failure.clone(),
+-                    timing:               fabro_types::RunTiming::new(42, 0, 0),
++                    timing:               fabro_types::RunTiming::wall_only(42),
+                     final_git_commit_sha: Some("abc123".to_string()),
+                     final_patch:          None,
+                     diff_summary:         None,
+@@ -2367,7 +2367,7 @@ mod tests {
+             .apply_event(&test_event(
+                 1,
+                 EventBody::RunCompleted(RunCompletedProps {
+-                    timing:               fabro_types::RunTiming::new(10, 0, 0),
++                    timing:               fabro_types::RunTiming::wall_only(10),
+                     artifact_count:       0,
+                     status:               "succeeded".to_string(),
+                     reason:               SuccessReason::Completed,
+@@ -2533,7 +2533,7 @@ mod tests {
+             .apply_event(&test_event(
+                 1,
+                 EventBody::RunCompleted(RunCompletedProps {
+-                    timing:               fabro_types::RunTiming::new(10, 0, 0),
++                    timing:               fabro_types::RunTiming::wall_only(10),
+                     artifact_count:       0,
+                     status:               "succeeded".to_string(),
+                     reason:               SuccessReason::PartialSuccess,
+@@ -2673,7 +2673,7 @@ mod tests {
+             .apply_event(&test_event(
+                 1,
+                 EventBody::RunCompleted(RunCompletedProps {
+-                    timing:               fabro_types::RunTiming::new(10, 0, 0),
++                    timing:               fabro_types::RunTiming::wall_only(10),
+                     artifact_count:       0,
+                     status:               "succeeded".to_string(),
+                     reason:               SuccessReason::Completed,
+diff --git a/lib/crates/fabro-types/src/event_envelope.rs b/lib/crates/fabro-types/src/event_envelope.rs
+index e1c6f2364..59f1ba21a 100644
+--- a/lib/crates/fabro-types/src/event_envelope.rs
++++ b/lib/crates/fabro-types/src/event_envelope.rs
+@@ -36,7 +36,7 @@ mod tests {
+             tool_call_id:       None,
+             actor:              None,
+             body:               EventBody::RunCompleted(RunCompletedProps {
+-                timing:               RunTiming::new(42, 0, 0),
++                timing:               RunTiming::wall_only(42),
+                 artifact_count:       0,
+                 status:               "success".to_string(),
+                 reason:               SuccessReason::Completed,
+@@ -80,7 +80,7 @@ mod tests {
+                 model:             Some("claude-sonnet".to_string()),
+             }),
+             body:               EventBody::RunCompleted(RunCompletedProps {
+-                timing:               RunTiming::new(100, 0, 0),
++                timing:               RunTiming::wall_only(100),
+                 artifact_count:       1,
+                 status:               "success".to_string(),
+                 reason:               SuccessReason::Completed,
+diff --git a/lib/crates/fabro-types/src/timing.rs b/lib/crates/fabro-types/src/timing.rs
+index 35cea1f4b..993511c6a 100644
+--- a/lib/crates/fabro-types/src/timing.rs
++++ b/lib/crates/fabro-types/src/timing.rs
+@@ -99,15 +99,44 @@ impl RunTiming {
+         }
+     }
+ 
+-    /// Add one stage visit's active timing into this run rollup. The stage's
+-    /// wall time does not feed into the run wall time (which is the clock
+-    /// duration of the run itself, not the sum of stage wall times).
+-    pub fn add_stage_active(&mut self, stage: &StageTiming) {
+-        self.inference_time_ms = self
+-            .inference_time_ms
+-            .saturating_add(stage.inference_time_ms);
+-        self.tool_time_ms = self.tool_time_ms.saturating_add(stage.tool_time_ms);
+-        self.active_time_ms = self.inference_time_ms.saturating_add(self.tool_time_ms);
++    /// Run-level rollups for runs with no inference/tool work yet recorded.
++    #[must_use]
++    pub fn wall_only(wall_time_ms: u64) -> Self {
++        Self::new(wall_time_ms, 0, 0)
++    }
++
++    /// Sum two run timings field-by-field. Used to accumulate aggregate
++    /// billing totals across completed runs.
++    #[must_use]
++    pub fn saturating_add(&self, other: &Self) -> Self {
++        Self::new(
++            self.wall_time_ms.saturating_add(other.wall_time_ms),
++            self.inference_time_ms
++                .saturating_add(other.inference_time_ms),
++            self.tool_time_ms.saturating_add(other.tool_time_ms),
++        )
++    }
++
++    /// Return a copy with `wall_time_ms` replaced. Useful at finalize time
++    /// when the active breakdown is summed across stage visits but the run
++    /// wall time is the executor's clock duration.
++    #[must_use]
++    pub fn with_wall_time(self, wall_time_ms: u64) -> Self {
++        Self {
++            wall_time_ms,
++            ..self
++        }
++    }
++}
++
++impl From<StageTiming> for RunTiming {
++    fn from(stage: StageTiming) -> Self {
++        Self {
++            wall_time_ms:      stage.wall_time_ms,
++            inference_time_ms: stage.inference_time_ms,
++            tool_time_ms:      stage.tool_time_ms,
++            active_time_ms:    stage.active_time_ms,
++        }
+     }
+ }
+ 
+@@ -145,16 +174,45 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn run_timing_add_stage_accumulates_active_breakdown_only() {
+-        let mut run = RunTiming::new(1500, 0, 0);
+-        run.add_stage_active(&StageTiming::new(400, 100, 50));
+-        run.add_stage_active(&StageTiming::new(800, 200, 150));
+-        assert_eq!(run.wall_time_ms, 1500);
+-        assert_eq!(run.inference_time_ms, 300);
+-        assert_eq!(run.tool_time_ms, 200);
++    fn run_timing_wall_only_zeroes_breakdown_and_active() {
++        let timing = RunTiming::wall_only(1500);
++        assert_eq!(timing.wall_time_ms, 1500);
++        assert_eq!(timing.inference_time_ms, 0);
++        assert_eq!(timing.tool_time_ms, 0);
++        assert_eq!(timing.active_time_ms, 0);
++    }
++
++    #[test]
++    fn run_timing_saturating_add_sums_all_breakdown_fields() {
++        let a = RunTiming::new(1000, 100, 50);
++        let b = RunTiming::new(500, 200, 150);
++        let sum = a.saturating_add(&b);
++        assert_eq!(sum.wall_time_ms, 1500);
++        assert_eq!(sum.inference_time_ms, 300);
++        assert_eq!(sum.tool_time_ms, 200);
++        assert_eq!(sum.active_time_ms, 500);
++    }
++
++    #[test]
++    fn run_timing_from_stage_timing_copies_all_fields() {
++        let stage = StageTiming::new(900, 200, 300);
++        let run: RunTiming = stage.into();
++        assert_eq!(run.wall_time_ms, 900);
++        assert_eq!(run.inference_time_ms, 200);
++        assert_eq!(run.tool_time_ms, 300);
+         assert_eq!(run.active_time_ms, 500);
+     }
+ 
++    #[test]
++    fn run_timing_with_wall_time_replaces_wall_and_preserves_breakdown() {
++        let original = RunTiming::new(1000, 200, 300);
++        let updated = original.with_wall_time(5000);
++        assert_eq!(updated.wall_time_ms, 5000);
++        assert_eq!(updated.inference_time_ms, 200);
++        assert_eq!(updated.tool_time_ms, 300);
++        assert_eq!(updated.active_time_ms, 500);
++    }
++
+     #[test]
+     fn stage_timing_round_trips_json_with_serialized_active_time() {
+         let original = StageTiming::new(900, 250, 350);
+diff --git a/lib/crates/fabro-types/tests/run_failure_serde.rs b/lib/crates/fabro-types/tests/run_failure_serde.rs
+index 72aa3c348..ca96879af 100644
+--- a/lib/crates/fabro-types/tests/run_failure_serde.rs
++++ b/lib/crates/fabro-types/tests/run_failure_serde.rs
+@@ -32,7 +32,7 @@ fn run_failed_serializes_nested_failure_contract() {
+                 detail
+             },
+         },
+-        timing:               RunTiming::new(42, 0, 0),
++        timing:               RunTiming::wall_only(42),
+         final_git_commit_sha: Some("abc123".to_string()),
+         final_patch:          Some("diff --git a/file b/file".to_string()),
+         diff_summary:         None,
+@@ -86,7 +86,7 @@ fn run_failed_omits_empty_failure_optional_fields() {
+             reason: FailureReason::WorkflowError,
+             detail: FailureDetail::new("boom", FailureCategory::Deterministic),
+         },
+-        timing:               RunTiming::new(1, 0, 0),
++        timing:               RunTiming::wall_only(1),
+         final_git_commit_sha: None,
+         final_patch:          None,
+         diff_summary:         None,
+@@ -124,7 +124,7 @@ fn conclusion_serializes_rich_failure() {
+         status:               StageOutcome::Failed {
+             retry_requested: false,
+         },
+-        timing:               RunTiming::new(42, 0, 0),
++        timing:               RunTiming::wall_only(42),
+         failure:              Some(RunFailure {
+             reason: FailureReason::WorkflowError,
+             detail: {
+diff --git a/lib/crates/fabro-workflow/src/billing_rollup.rs b/lib/crates/fabro-workflow/src/billing_rollup.rs
+index da92152b5..bf3f0ac6d 100644
+--- a/lib/crates/fabro-workflow/src/billing_rollup.rs
++++ b/lib/crates/fabro-workflow/src/billing_rollup.rs
+@@ -1,6 +1,6 @@
+ use std::collections::HashMap;
+ 
+-use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, StageTiming};
++use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, RunTiming, StageTiming};
+ 
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct ProjectionBillingStage {
+@@ -27,7 +27,7 @@ pub struct ProjectionBillingRollup {
+     pub by_model:           Vec<ProjectionBillingByModel>,
+     /// Run-level timing summed across every stage visit. `wall_time_ms` is
+     /// the sum of stage visit wall times (not the run clock duration).
+-    pub timing:             StageTiming,
++    pub timing:             RunTiming,
+     pub billed_visit_count: usize,
+ }
+ 
+@@ -44,7 +44,7 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
+     let mut stages = Vec::<ProjectionBillingStage>::new();
+     let mut by_model = HashMap::<ModelRef, ProjectionBillingByModel>::new();
+     let mut totals = BilledTokenCounts::default();
+-    let mut run_timing = StageTiming::default();
++    let mut run_timing = RunTiming::default();
+     let mut billed_visit_count = 0_usize;
+ 
+     for (stage_id, stage) in projection.iter_stages() {
+@@ -70,7 +70,7 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
+ 
+         if let Some(timing) = stage.timing {
+             row.timing = row.timing.saturating_add(&timing);
+-            run_timing = run_timing.saturating_add(&timing);
++            run_timing = run_timing.saturating_add(&RunTiming::from(timing));
+         }
+ 
+         if !stage.usage.is_zero() {
+diff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs
+index d64d8173c..4e823e4b8 100644
+--- a/lib/crates/fabro-workflow/src/event/convert.rs
++++ b/lib/crates/fabro-workflow/src/event/convert.rs
+@@ -1553,7 +1553,7 @@ mod tests {
+     fn run_event_workflow_failure_uses_display_error() {
+         let event = Event::workflow_run_failed_from_error(
+             &Error::handler("boom"),
+-            ::fabro_types::RunTiming::new(900, 0, 0),
++            ::fabro_types::RunTiming::wall_only(900),
+             FailureReason::WorkflowError,
+             Some("abc123".to_string()),
+             None,
+@@ -1573,7 +1573,7 @@ mod tests {
+         let source = EventTestCause;
+         let event = Event::workflow_run_failed_from_error(
+             &Error::engine_with_source("Failed to initialize sandbox", source),
+-            ::fabro_types::RunTiming::new(900, 0, 0),
++            ::fabro_types::RunTiming::wall_only(900),
+             FailureReason::WorkflowError,
+             None,
+             None,
+@@ -1598,7 +1598,7 @@ mod tests {
+         let source = EventTestCause;
+         let event = Event::workflow_run_failed_from_error(
+             &Error::engine_with_source("Failed to initialize sandbox", source),
+-            ::fabro_types::RunTiming::new(900, 0, 0),
++            ::fabro_types::RunTiming::wall_only(900),
+             FailureReason::SandboxInitFailed,
+             Some("abc123".to_string()),
+             None,
+diff --git a/lib/crates/fabro-workflow/src/lifecycle/git.rs b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+index 27873db8e..4e8fef87f 100644
+--- a/lib/crates/fabro-workflow/src/lifecycle/git.rs
++++ b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+@@ -1255,7 +1255,7 @@ mod tests {
+         let conclusion = Conclusion {
+             timestamp:            chrono::Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(10, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(10),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               Vec::new(),
+diff --git a/lib/crates/fabro-workflow/src/operations/archive.rs b/lib/crates/fabro-workflow/src/operations/archive.rs
+index 4d7572876..34ca62650 100644
+--- a/lib/crates/fabro-workflow/src/operations/archive.rs
++++ b/lib/crates/fabro-workflow/src/operations/archive.rs
+@@ -160,7 +160,7 @@ mod tests {
+             .await
+             .unwrap();
+         event::append_event(&run_store, run_id, &Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(10, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(10),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -185,7 +185,7 @@ mod tests {
+             .unwrap();
+         let failure_event = Event::workflow_run_failed_from_error(
+             &crate::error::Error::engine("boom"),
+-            fabro_types::RunTiming::new(10, 0, 0),
++            fabro_types::RunTiming::wall_only(10),
+             FailureReason::WorkflowError,
+             None,
+             None,
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index 8b989d2d4..b86e4e46c 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -272,7 +272,7 @@ async fn persist_terminal_engine_failure(
+     };
+     let failure_event = Event::workflow_run_failed_from_error(
+         error,
+-        fabro_types::RunTiming::new(crate::millis_u64(duration), 0, 0),
++        fabro_types::RunTiming::wall_only(crate::millis_u64(duration)),
+         reason,
+         None,
+         None,
+@@ -1720,7 +1720,7 @@ reasoning = false
+         let conclusion = crate::records::Conclusion {
+             timestamp:            Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               vec![],
+diff --git a/lib/crates/fabro-workflow/src/pipeline/finalize.rs b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+index 90025bc55..ddefe988c 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/finalize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+@@ -183,11 +183,7 @@ fn build_conclusion_from_parts(
+     Conclusion {
+         timestamp: chrono::Utc::now(),
+         status,
+-        timing: fabro_types::RunTiming::new(
+-            run_wall_time_ms,
+-            projection_billing.timing.inference_time_ms,
+-            projection_billing.timing.tool_time_ms,
+-        ),
++        timing: projection_billing.timing.with_wall_time(run_wall_time_ms),
+         failure,
+         final_git_commit_sha,
+         stages,
+@@ -1109,7 +1105,7 @@ mod tests {
+         let conclusion = Conclusion {
+             timestamp:            chrono::Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(10, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(10),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               Vec::new(),
+@@ -1172,7 +1168,7 @@ mod tests {
+         let conclusion = Conclusion {
+             timestamp:            chrono::Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(10, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(10),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               Vec::new(),
+@@ -1224,7 +1220,7 @@ mod tests {
+         let conclusion = Conclusion {
+             timestamp:            chrono::Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(10, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(10),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               Vec::new(),
+diff --git a/lib/crates/fabro-workflow/src/pipeline/pull_request.rs b/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
+index e50f95860..a04f6ab8c 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
+@@ -870,7 +870,7 @@ mod tests {
+         Conclusion {
+             timestamp:            Utc::now(),
+             status:               crate::outcome::StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(150_000, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(150_000),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               vec![
+@@ -1600,7 +1600,7 @@ mod tests {
+             .await
+             .unwrap();
+         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+@@ -1888,7 +1888,7 @@ mod tests {
+             .await
+             .unwrap();
+         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             artifact_count:       0,
+             status:               "succeeded".to_string(),
+             reason:               SuccessReason::Completed,
+diff --git a/lib/crates/fabro-workflow/src/test_support.rs b/lib/crates/fabro-workflow/src/test_support.rs
+index bb254cfd5..aa9c8117a 100644
+--- a/lib/crates/fabro-workflow/src/test_support.rs
++++ b/lib/crates/fabro-workflow/src/test_support.rs
+@@ -40,7 +40,7 @@ async fn execute_and_emit_terminal(initialized: InitializedState) -> Executed {
+     let billing = state.as_ref().and_then(billing_from_projection);
+     let event = build_terminal_event(
+         &executed.outcome,
+-        fabro_types::RunTiming::new(executed.wall_time_ms, 0, 0),
++        fabro_types::RunTiming::wall_only(executed.wall_time_ms),
+         0,
+         None,
+         None,
+diff --git a/lib/crates/fabro-workflow/tests/it/integration.rs b/lib/crates/fabro-workflow/tests/it/integration.rs
+index 4ec0d28ed..13c3c1900 100644
+--- a/lib/crates/fabro-workflow/tests/it/integration.rs
++++ b/lib/crates/fabro-workflow/tests/it/integration.rs
+@@ -7130,7 +7130,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
+         Some(&Conclusion {
+             timestamp:            Utc::now(),
+             status:               StageOutcome::Succeeded,
+-            timing:               fabro_types::RunTiming::new(1, 0, 0),
++            timing:               fabro_types::RunTiming::wall_only(1),
+             failure:              None,
+             final_git_commit_sha: None,
+             stages:               Vec::new(),
+diff --git a/lib/packages/fabro-api-client/src/.openapi-generator/FILES b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+index 625c2b73a..378a74e29 100644
+--- a/lib/packages/fabro-api-client/src/.openapi-generator/FILES
++++ b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+@@ -333,7 +333,6 @@ models/run-status.ts
+ models/run-superseded-by-props.ts
+ models/run-timestamps.ts
+ models/run-timing.ts
+-models/run-timings.ts
+ models/run.ts
+ models/sandbox-details.ts
+ models/sandbox-file-entry.ts
+@@ -427,4 +426,4 @@ models/workflow-ref.ts
+ models/workflow-reference.ts
+ models/workflow-schedule-summary.ts
+ models/workflow-settings.ts
+-models/write-blob-response.ts
++models/write-blob-response.ts
+\ No newline at end of file
+diff --git a/lib/packages/fabro-api-client/src/models/index.ts b/lib/packages/fabro-api-client/src/models/index.ts
+index fca2edf63..9c5cd2123 100644
+--- a/lib/packages/fabro-api-client/src/models/index.ts
++++ b/lib/packages/fabro-api-client/src/models/index.ts
+@@ -310,7 +310,6 @@ export * from './run-status-succeeded';
+ export * from './run-superseded-by-props';
+ export * from './run-timestamps';
+ export * from './run-timing';
+-export * from './run-timings';
+ export * from './sandbox-details';
+ export * from './sandbox-file-entry';
+ export * from './sandbox-file-list-response';
+@@ -403,4 +402,4 @@ export * from './workflow-ref';
+ export * from './workflow-reference';
+ export * from './workflow-schedule-summary';
+ export * from './workflow-settings';
+-export * from './write-blob-response';
++export * from './write-blob-response';
+\ No newline at end of file
+diff --git a/lib/packages/fabro-api-client/src/models/run-timings.ts b/lib/packages/fabro-api-client/src/models/run-timings.ts
+deleted file mode 100644
+index 00c3ce238..000000000
+--- a/lib/packages/fabro-api-client/src/models/run-timings.ts
++++ /dev/null
+@@ -1,29 +0,0 @@
+-/* tslint:disable */
+-/* eslint-disable */
+-/**
+- * Fabro Run API
+- * HTTP API for managing Fabro workflow run executions.
+- *
+- * The version of the OpenAPI document: 0.1.0
+- *
+- *
+- * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
+- * https://openapi-generator.tech
+- * Do not edit the class manually.
+- */
+-
+-
+-
+-/**
+- * Timing information for a run.
+- */
+-export interface RunTimings {
+-    /**
+-     * Wall-clock time elapsed in milliseconds.
+-     */
+-    'wall_time_ms': number;
+-    /**
+-     * Whether the elapsed time exceeds the expected threshold.
+-     */
+-    'elapsed_warning'?: boolean;
+-}
