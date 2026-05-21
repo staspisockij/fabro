@@ -516,7 +516,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-21T18:43:56.979834Z",
-  "last_event_at": "2026-05-21T18:44:05.405378Z",
+  "last_event_at": "2026-05-21T18:46:16.842322Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -614,9 +614,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 38,
       "checkpoint": {
-        "timestamp": "2026-05-21T18:46:12.198367Z",
+        "timestamp": "2026-05-21T18:46:16.840899Z",
         "current_node": "preflight_compile",
         "completed_nodes": [
           "start",
@@ -625,11 +625,82 @@
         ],
         "node_retries": {},
         "context_values": {
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "current_node": "preflight_compile",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.thread_id": "toolchain",
+          "outcome": "succeeded",
+          "graph.goal": "---\ntitle: \"feat: Wall and active time metrics\"\ntype: feature\nstatus: active\ndate: 2026-05-21\n---\n\n# feat: Wall and active time metrics\n\n## Summary\n\nRename runtime duration concepts from ambiguous duration/runtime/elapsed fields\nto explicit wall-time fields, then add first-class active timing.\n\nDefinitions:\n\n- `wall_time_ms`: elapsed clock time from start to finish.\n- `inference_time_ms`: Fabro-observed LLM request/stream elapsed time.\n- `tool_time_ms`: tool or command execution elapsed time.\n- `active_time_ms`: `inference_time_ms + tool_time_ms`.\n\nThis is greenfield API churn. Do not preserve old public run/stage timing\nfields, aliases, or compatibility shims for `duration_ms`, `runtime_secs`, or\n`elapsed_secs` on run/stage runtime surfaces.\n\nRun-level active time is total work performed: sum active timing across stage\nvisits. Parallel work is summed, so run active time can exceed run wall time.\n\n## Key Changes\n\n- Add a shared timing value object in `fabro-types` for stage/run active timing:\n  - `wall_time_ms`\n  - `inference_time_ms`\n  - `tool_time_ms`\n  - derived or stored `active_time_ms`\n- Replace run/stage public timing fields:\n  - stage/run terminal event props use `wall_time_ms` plus the active timing\n    breakdown.\n  - `StageProjection` stores the timing breakdown instead of stage\n    `duration_ms`.\n  - `RunTimestamps` keeps timestamps only; move elapsed values into a separate\n    run timing object.\n  - `/runs/{id}/stages` and `/runs/{id}/billing` expose timing in milliseconds,\n    not `runtime_secs`.\n- Keep `duration_ms` only for unrelated subsystem-specific operational events\n  where the name is still local and unambiguous, such as sandbox setup,\n  metadata snapshot, devcontainer lifecycle, and hook execution. The cleanup\n  target is public run/stage runtime semantics.\n- Update OpenAPI and regenerate the Rust and TypeScript API clients after\n  schema edits.\n\n## Timing Behavior\n\n- `prompt` nodes:\n  - inference = elapsed time spent in the one-shot LLM backend call.\n  - tool = 0.\n- native `agent` nodes:\n  - inference = sum of elapsed time spent opening/consuming LLM streams for new\n    turns in the stage.\n  - tool = sum of elapsed time spent executing agent tool calls.\n  - retry backoff and waiting for steering are wall time, not active time.\n- opaque external/ACP agent nodes:\n  - inference = 0 for v1 because Fabro cannot reliably separate model time from\n    process runtime.\n  - tool = external agent process wall time.\n- `command` nodes:\n  - inference = 0.\n  - tool = command wall time from the sandbox command result.\n- `human`, `wait`, `conditional`, `fan-in`, `start`, and `exit`:\n  - inference = 0.\n  - tool = 0.\n- `parallel` container nodes:\n  - active = 0 on the container stage.\n  - child/branch stages carry work timing so rollups do not double count.\n\n## Implementation\n\n- In `fabro-types`, introduce the timing structs and replace the relevant fields\n  in `Outcome`, `NodeResult` consumers, `StageProjection`, `Conclusion`,\n  `RunTimestamps`, `RunCompletedProps`, `RunFailedProps`,\n  `StageCompletedProps`, `StageFailedProps`, `RunBillingStage`, and\n  `RunBillingTotals`.\n- In `fabro-workflow`, rename run/stage execution fields from `duration_ms` to\n  `wall_time_ms` and thread timing through lifecycle events, terminal events,\n  conclusion building, pull request summaries, timeline/billing rollups, and\n  test support fixtures.\n- In `fabro-agent`, add timing data to agent events or session results so\n  `fabro-workflow` can aggregate:\n  - LLM stream/request elapsed time per assistant response.\n  - tool call elapsed time per tool completion.\n  - preserve token billing behavior separately from timing.\n- In `fabro-store`, update event projection to write stage `started_at`, timing\n  breakdowns, and run summary timing from the new event props.\n- In `fabro-server`, replace runtime billing aggregation with a timing rollup\n  owned by workflow/projection code. Billing endpoints may include timing, but\n  billing logic should not define timing semantics.\n- In `apps/fabro-web`, update run list/detail/stages/billing views and tests to\n  render wall time and active time from the new fields.\n- Remove all run/stage public API references to old timing names from\n  `docs/public/api-reference/fabro-api.yaml` and regenerated clients.\n\n## Test Plan\n\n- `fabro-types`:\n  - run and stage event round trips serialize the new timing payloads.\n  - old public run/stage timing properties are absent from serialized fixtures.\n  - API-facing timing structs round trip through generated schemas.\n- `fabro-store`:\n  - `stage.started` records `started_at`.\n  - stage terminal events store `wall_time_ms` and active breakdowns.\n  - run summaries expose timestamp fields and run timing without\n    `elapsed_secs`.\n  - retried stages reset per-attempt live wall-time state correctly.\n- `fabro-workflow`:\n  - prompt stages report inference-only active timing.\n  - command stages report tool-only active timing.\n  - native agent stages sum LLM turn timing and tool timing.\n  - human/wait/conditional/fan-in/start/exit stages report zero active timing.\n  - parallel stage rollups sum child active work and avoid container double\n    counting.\n  - repeated node visits sum timing by node in rollups.\n- `fabro-server`:\n  - `/runs/{id}/stages`, `/runs/{id}/billing`, run detail, and run list return\n    new timing fields only.\n  - aggregate billing/timing totals sum active work across completed runs.\n  - OpenAPI conformance passes after regeneration.\n- `apps/fabro-web`:\n  - run list/detail/billing/stages render wall time and active time.\n  - in-flight wall-time ticking still uses `started_at`.\n  - no UI code reads `runtime_secs`, `elapsed_secs`, or run/stage\n    `duration_ms`.\n\n## Validation\n\nRun focused checks first:\n\n```bash\ncargo nextest run -p fabro-types -p fabro-store -p fabro-workflow -p fabro-server\ncd apps/fabro-web && bun test && bun run typecheck\n```\n\nThen run full workspace checks before merging:\n\n```bash\ncargo build --workspace\ncargo nextest run --workspace\ncargo +nightly-2026-04-14 fmt --check --all\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\ngit diff --check\n```\n\n## Assumptions\n\n- Inference time is Fabro-observed LLM request/stream elapsed time, not\n  provider-reported model-only compute time.\n- LLM retry backoff, queueing outside a request/stream, human waits, steering\n  waits, and scheduler gaps are wall time but not active time.\n- Active timing is finalized-event based in v1; live active-time ticking can be\n  added later if it becomes necessary.\n- No compatibility layer is required for existing API clients or stored run\n  event data.\n",
+          "internal.retry_count.preflight_compile": 0,
+          "thread.start.current_node": "toolchain",
+          "failure_signature": "",
+          "thread.toolchain.current_node": "preflight_compile",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.fidelity": "compact",
+          "internal.retry_count.start": 0,
+          "internal.node_visit_count": 1,
+          "internal.run_id": "01KS5XKDG7DN8SH2QYFH2VME0S",
+          "failure_class": "",
+          "internal.retry_count.toolchain": 0,
+          "graph.rankdir": "LR"
+        },
+        "node_outcomes": {
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_lint",
+        "git_commit_sha": "f462708c573c790081e012f26f56fb2da53538bf",
+        "node_visits": {
+          "preflight_compile": 1,
+          "start": 1,
+          "toolchain": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-21T18:48:35.792647Z",
+        "current_node": "preflight_lint",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint"
+        ],
+        "node_retries": {},
+        "context_values": {
           "internal.fidelity": "compact",
           "thread.toolchain.current_node": "preflight_compile",
           "outcome": "succeeded",
           "internal.work_dir": "/home/daytona/workspace/fabro",
-          "internal.thread_id": "toolchain",
+          "internal.thread_id": "preflight_compile",
+          "thread.preflight_compile.current_node": "preflight_lint",
           "graph.goal": "---\ntitle: \"feat: Wall and active time metrics\"\ntype: feature\nstatus: active\ndate: 2026-05-21\n---\n\n# feat: Wall and active time metrics\n\n## Summary\n\nRename runtime duration concepts from ambiguous duration/runtime/elapsed fields\nto explicit wall-time fields, then add first-class active timing.\n\nDefinitions:\n\n- `wall_time_ms`: elapsed clock time from start to finish.\n- `inference_time_ms`: Fabro-observed LLM request/stream elapsed time.\n- `tool_time_ms`: tool or command execution elapsed time.\n- `active_time_ms`: `inference_time_ms + tool_time_ms`.\n\nThis is greenfield API churn. Do not preserve old public run/stage timing\nfields, aliases, or compatibility shims for `duration_ms`, `runtime_secs`, or\n`elapsed_secs` on run/stage runtime surfaces.\n\nRun-level active time is total work performed: sum active timing across stage\nvisits. Parallel work is summed, so run active time can exceed run wall time.\n\n## Key Changes\n\n- Add a shared timing value object in `fabro-types` for stage/run active timing:\n  - `wall_time_ms`\n  - `inference_time_ms`\n  - `tool_time_ms`\n  - derived or stored `active_time_ms`\n- Replace run/stage public timing fields:\n  - stage/run terminal event props use `wall_time_ms` plus the active timing\n    breakdown.\n  - `StageProjection` stores the timing breakdown instead of stage\n    `duration_ms`.\n  - `RunTimestamps` keeps timestamps only; move elapsed values into a separate\n    run timing object.\n  - `/runs/{id}/stages` and `/runs/{id}/billing` expose timing in milliseconds,\n    not `runtime_secs`.\n- Keep `duration_ms` only for unrelated subsystem-specific operational events\n  where the name is still local and unambiguous, such as sandbox setup,\n  metadata snapshot, devcontainer lifecycle, and hook execution. The cleanup\n  target is public run/stage runtime semantics.\n- Update OpenAPI and regenerate the Rust and TypeScript API clients after\n  schema edits.\n\n## Timing Behavior\n\n- `prompt` nodes:\n  - inference = elapsed time spent in the one-shot LLM backend call.\n  - tool = 0.\n- native `agent` nodes:\n  - inference = sum of elapsed time spent opening/consuming LLM streams for new\n    turns in the stage.\n  - tool = sum of elapsed time spent executing agent tool calls.\n  - retry backoff and waiting for steering are wall time, not active time.\n- opaque external/ACP agent nodes:\n  - inference = 0 for v1 because Fabro cannot reliably separate model time from\n    process runtime.\n  - tool = external agent process wall time.\n- `command` nodes:\n  - inference = 0.\n  - tool = command wall time from the sandbox command result.\n- `human`, `wait`, `conditional`, `fan-in`, `start`, and `exit`:\n  - inference = 0.\n  - tool = 0.\n- `parallel` container nodes:\n  - active = 0 on the container stage.\n  - child/branch stages carry work timing so rollups do not double count.\n\n## Implementation\n\n- In `fabro-types`, introduce the timing structs and replace the relevant fields\n  in `Outcome`, `NodeResult` consumers, `StageProjection`, `Conclusion`,\n  `RunTimestamps`, `RunCompletedProps`, `RunFailedProps`,\n  `StageCompletedProps`, `StageFailedProps`, `RunBillingStage`, and\n  `RunBillingTotals`.\n- In `fabro-workflow`, rename run/stage execution fields from `duration_ms` to\n  `wall_time_ms` and thread timing through lifecycle events, terminal events,\n  conclusion building, pull request summaries, timeline/billing rollups, and\n  test support fixtures.\n- In `fabro-agent`, add timing data to agent events or session results so\n  `fabro-workflow` can aggregate:\n  - LLM stream/request elapsed time per assistant response.\n  - tool call elapsed time per tool completion.\n  - preserve token billing behavior separately from timing.\n- In `fabro-store`, update event projection to write stage `started_at`, timing\n  breakdowns, and run summary timing from the new event props.\n- In `fabro-server`, replace runtime billing aggregation with a timing rollup\n  owned by workflow/projection code. Billing endpoints may include timing, but\n  billing logic should not define timing semantics.\n- In `apps/fabro-web`, update run list/detail/stages/billing views and tests to\n  render wall time and active time from the new fields.\n- Remove all run/stage public API references to old timing names from\n  `docs/public/api-reference/fabro-api.yaml` and regenerated clients.\n\n## Test Plan\n\n- `fabro-types`:\n  - run and stage event round trips serialize the new timing payloads.\n  - old public run/stage timing properties are absent from serialized fixtures.\n  - API-facing timing structs round trip through generated schemas.\n- `fabro-store`:\n  - `stage.started` records `started_at`.\n  - stage terminal events store `wall_time_ms` and active breakdowns.\n  - run summaries expose timestamp fields and run timing without\n    `elapsed_secs`.\n  - retried stages reset per-attempt live wall-time state correctly.\n- `fabro-workflow`:\n  - prompt stages report inference-only active timing.\n  - command stages report tool-only active timing.\n  - native agent stages sum LLM turn timing and tool timing.\n  - human/wait/conditional/fan-in/start/exit stages report zero active timing.\n  - parallel stage rollups sum child active work and avoid container double\n    counting.\n  - repeated node visits sum timing by node in rollups.\n- `fabro-server`:\n  - `/runs/{id}/stages`, `/runs/{id}/billing`, run detail, and run list return\n    new timing fields only.\n  - aggregate billing/timing totals sum active work across completed runs.\n  - OpenAPI conformance passes after regeneration.\n- `apps/fabro-web`:\n  - run list/detail/billing/stages render wall time and active time.\n  - in-flight wall-time ticking still uses `started_at`.\n  - no UI code reads `runtime_secs`, `elapsed_secs`, or run/stage\n    `duration_ms`.\n\n## Validation\n\nRun focused checks first:\n\n```bash\ncargo nextest run -p fabro-types -p fabro-store -p fabro-workflow -p fabro-server\ncd apps/fabro-web && bun test && bun run typecheck\n```\n\nThen run full workspace checks before merging:\n\n```bash\ncargo build --workspace\ncargo nextest run --workspace\ncargo +nightly-2026-04-14 fmt --check --all\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\ngit diff --check\n```\n\n## Assumptions\n\n- Inference time is Fabro-observed LLM request/stream elapsed time, not\n  provider-reported model-only compute time.\n- LLM retry backoff, queueing outside a request/stream, human waits, steering\n  waits, and scheduler gaps are wall time but not active time.\n- Active timing is finalized-event based in v1; live active-time ticking can be\n  added later if it becomes necessary.\n- No compatibility layer is required for existing API clients or stored run\n  event data.\n",
           "internal.retry_count.start": 0,
           "failure_signature": "",
@@ -638,8 +709,9 @@
           "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
           "internal.retry_count.preflight_compile": 0,
           "thread.start.current_node": "toolchain",
+          "internal.retry_count.preflight_lint": 0,
           "graph.rankdir": "LR",
-          "current_node": "preflight_compile",
+          "current_node": "preflight_lint",
           "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
           "internal.run_id": "01KS5XKDG7DN8SH2QYFH2VME0S",
           "internal.node_visit_count": 1
@@ -661,16 +733,25 @@
             "notes": "Script completed: cargo check -q --workspace 2>&1",
             "usage": null
           },
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
           "start": {
             "status": "succeeded",
             "usage": null
           }
         },
-        "next_node_id": "preflight_lint",
+        "next_node_id": "implement",
         "node_visits": {
           "toolchain": 1,
-          "start": 1,
-          "preflight_compile": 1
+          "preflight_compile": 1,
+          "preflight_lint": 1,
+          "start": 1
         }
       },
       "diff": {}
@@ -697,22 +778,22 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
-    "preflight_compile@1": {
-      "first_event_seq": 31,
+    "preflight_lint@1": {
+      "first_event_seq": 41,
       "prompt": null,
       "response": null,
       "completion": null,
       "provider_used": null,
       "diff": null,
       "script_invocation": {
-        "script": "cargo check -q --workspace 2>&1",
-        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
+        "script": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+        "command": "exec 2>&1\ncargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
         "language": "shell"
       },
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-21T18:44:05.404877Z",
+      "started_at": "2026-05-21T18:46:16.842101Z",
       "handler": "command",
       "usage": {
         "input_tokens": 0,
@@ -723,6 +804,49 @@
         "cache_write_tokens": 0
       },
       "state": "running"
+    },
+    "preflight_compile@1": {
+      "first_event_seq": 31,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo check -q --workspace 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-21T18:46:12.197637Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "cargo check -q --workspace 2>&1",
+        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
+        "language": "shell"
+      },
+      "script_timing": {
+        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 126787,
+        "termination": "exited",
+        "output_bytes": 0,
+        "live_streaming": false
+      },
+      "parallel_results": null,
+      "output": null,
+      "output_bytes": 0,
+      "live_streaming": false,
+      "termination": "exited",
+      "started_at": "2026-05-21T18:44:05.404877Z",
+      "handler": "command",
+      "duration_ms": 126792,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
     },
     "start@1": {
       "first_event_seq": 16,
