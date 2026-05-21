@@ -1,0 +1,1 @@
+{"context_updates": {"demo.greeting": "Hello from the Context tab", "demo.answer": 42, "demo.payload": {"nested": true, "items": [1, 2, 3]}}, "preferred_next_label": "Done", "suggested_next_ids": ["exit"]}

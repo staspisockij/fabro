@@ -234,7 +234,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-21T18:22:25.245534Z",
-  "last_event_at": "2026-05-21T18:22:27.861676Z",
+  "last_event_at": "2026-05-21T18:22:35.140348Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -274,9 +274,9 @@
       "diff": {}
     },
     {
-      "seq": 0,
+      "seq": 27,
       "checkpoint": {
-        "timestamp": "2026-05-21T18:22:29.727732Z",
+        "timestamp": "2026-05-21T18:22:35.140236Z",
         "current_node": "emit",
         "completed_nodes": [
           "start",
@@ -284,18 +284,12 @@
         ],
         "node_retries": {},
         "context_values": {
-          "internal.retry_count.emit": 0,
-          "internal.fidelity": "compact",
-          "internal.node_visit_count": 1,
-          "internal.retry_count.start": 0,
-          "failure_class": "",
-          "demo.greeting": "Hello from the Context tab",
-          "thread.start.current_node": "emit",
-          "demo.answer": 42,
           "internal.run_id": "01KS5WBZAE7K8321NHR7KFAHF9",
-          "internal.work_dir": "/home/daytona/workspace/fabro",
           "current_node": "emit",
-          "failure_signature": "",
+          "preferred_label": "Done",
+          "internal.node_visit_count": 1,
+          "thread.start.current_node": "emit",
+          "graph.goal": "Emit structured outputs to demonstrate the stage Context tab",
           "demo.payload": {
             "nested": true,
             "items": [
@@ -304,14 +298,20 @@
               3
             ]
           },
-          "last_response": "{\"context_updates\": {\"demo.greeting\": \"Hello from the Context tab\", \"demo.answer\": 42, \"demo.payload\": {\"nested\": true, \"items\": [1, 2, 3]}}, \"preferred_next_label\": \"Done\", \"suggested_next_ids\": [\"ex",
-          "preferred_label": "Done",
           "graph.rankdir": "LR",
-          "response.emit": "{\"context_updates\": {\"demo.greeting\": \"Hello from the Context tab\", \"demo.answer\": 42, \"demo.payload\": {\"nested\": true, \"items\": [1, 2, 3]}}, \"preferred_next_label\": \"Done\", \"suggested_next_ids\": [\"exit\"]}",
-          "graph.goal": "Emit structured outputs to demonstrate the stage Context tab",
-          "outcome": "succeeded",
+          "demo.answer": 42,
+          "internal.retry_count.start": 0,
+          "internal.retry_count.emit": 0,
+          "last_stage": "emit",
+          "internal.fidelity": "compact",
           "internal.thread_id": "start",
-          "last_stage": "emit"
+          "outcome": "succeeded",
+          "failure_signature": "",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "response.emit": "{\"context_updates\": {\"demo.greeting\": \"Hello from the Context tab\", \"demo.answer\": 42, \"demo.payload\": {\"nested\": true, \"items\": [1, 2, 3]}}, \"preferred_next_label\": \"Done\", \"suggested_next_ids\": [\"exit\"]}",
+          "demo.greeting": "Hello from the Context tab",
+          "last_response": "{\"context_updates\": {\"demo.greeting\": \"Hello from the Context tab\", \"demo.answer\": 42, \"demo.payload\": {\"nested\": true, \"items\": [1, 2, 3]}}, \"preferred_next_label\": \"Done\", \"suggested_next_ids\": [\"ex",
+          "failure_class": ""
         },
         "node_outcomes": {
           "start": {
@@ -366,15 +366,53 @@
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "0f4ac60d44d38f871c970f6a67c5d9328e563387",
         "node_visits": {
-          "emit": 1,
-          "start": 1
+          "start": 1,
+          "emit": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-21T18:22:35.154321Z",
+    "status": "succeeded",
+    "duration_ms": 9896,
+    "final_git_commit_sha": "0f4ac60d44d38f871c970f6a67c5d9328e563387",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "emit",
+        "stage_label": "emit",
+        "duration_ms": 1998,
+        "billing_usd_micros": 21506,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 120,
+      "output_tokens": 72,
+      "total_tokens": 5543,
+      "reasoning_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 5351,
+      "total_usd_micros": 21506
+    },
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "image": "buildpack-deps:noble",
@@ -428,7 +466,12 @@
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: emit",
+        "failure_reason": null,
+        "timestamp": "2026-05-21T18:22:29.727629Z"
+      },
       "provider_used": {
         "mode": "prompt",
         "provider": "anthropic"
@@ -440,6 +483,41 @@
       "output": null,
       "started_at": "2026-05-21T18:22:27.728960Z",
       "handler": "prompt",
+      "duration_ms": 1998,
+      "usage": {
+        "input_tokens": 120,
+        "output_tokens": 72,
+        "total_tokens": 5543,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 5351,
+        "total_usd_micros": 21506
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-sonnet-4-6"
+      },
+      "state": "succeeded"
+    },
+    "exit@1": {
+      "first_event_seq": 30,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-21T18:22:35.140348Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-21T18:22:35.140323Z",
+      "handler": "exit",
+      "duration_ms": 0,
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -448,7 +526,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     }
   }
 }
