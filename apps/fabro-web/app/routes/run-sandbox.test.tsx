@@ -196,6 +196,10 @@ describe("formatBytesAsMemory", () => {
     expect(formatBytesAsMemory(51.8 * 1024 * 1024 * 1024, 0)).toBe("52 GiB");
     expect(formatBytesAsMemory(1536, 0)).toBe("2 KiB");
   });
+
+  test("groups large values with thousands separators", () => {
+    expect(formatBytesAsMemory(2173 * 1024 * 1024 * 1024, 0)).toBe("2,173 GiB");
+  });
 });
 
 describe("RunSandbox route", () => {

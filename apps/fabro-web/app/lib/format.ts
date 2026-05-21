@@ -109,14 +109,13 @@ const BYTES_PER_MIB = 1024 * 1024;
 const BYTES_PER_KIB = 1024;
 
 /**
- * Format a byte count as a memory/disk size (e.g. "8 GiB", "512 MiB", "4 KiB", "742 B").
- * Pass `fractionDigits: 0` to round to whole units.
+ * Format a byte count as a memory/disk size (e.g. "8 GiB", "2,173 GiB", "742 B").
+ * Large values get thousands separators. Pass `fractionDigits: 0` to round to
+ * whole units.
  */
 export function formatBytesAsMemory(bytes: number, fractionDigits = 1): string {
-  const scaled = (unit: number) => {
-    const value = bytes / unit;
-    return Number.isInteger(value) ? `${value}` : value.toFixed(fractionDigits);
-  };
+  const scaled = (unit: number) =>
+    (bytes / unit).toLocaleString("en-US", { maximumFractionDigits: fractionDigits });
   if (bytes >= BYTES_PER_GIB) return `${scaled(BYTES_PER_GIB)} GiB`;
   if (bytes >= BYTES_PER_MIB) return `${scaled(BYTES_PER_MIB)} MiB`;
   if (bytes >= BYTES_PER_KIB) return `${scaled(BYTES_PER_KIB)} KiB`;
