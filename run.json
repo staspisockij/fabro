@@ -516,7 +516,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-21T22:36:05.837824Z",
-  "last_event_at": "2026-05-21T23:20:10.785665Z",
+  "last_event_at": "2026-05-21T23:20:19.788123Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -1480,9 +1480,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 825,
       "checkpoint": {
-        "timestamp": "2026-05-21T23:20:14.567384Z",
+        "timestamp": "2026-05-21T23:20:19.787725Z",
         "current_node": "fmt",
         "completed_nodes": [
           "start",
@@ -1497,50 +1497,78 @@
         ],
         "node_retries": {},
         "context_values": {
-          "graph.rankdir": "LR",
-          "internal.node_visit_count": 1,
-          "thread.toolchain.current_node": "preflight_compile",
-          "graph.goal": "# Plan: Compute LLM cost on-read for in-flight stages\n\n## Context\n\nOn the run billing page (`/runs/{id}/billing`), an active stage shows token\nusage but no dollar cost — cost renders as `—` until the stage completes.\n\nRoot cause: while a stage runs, `AgentMessage` events carry usage built by\n`billed_token_counts_from_llm` (`fabro-workflow/src/outcome.rs:43`), which\nhard-codes `total_usd_micros: None`. Dollar cost is only computed by\n`billed_model_usage_from_llm` (`outcome.rs:14`) — which needs the pricing\n`Catalog` — and that runs only on `StageCompleted`/`PromptCompleted`/`StageFailed`.\nSo an in-flight stage's `StageProjection.usage.total_usd_micros` stays `None`.\n\nFix: price stages whose cost is `None` when the billing rollup is built for a\nread request, using the model + token counts already in the projection. The\nwire contract is unchanged (`total_usd_micros` is already nullable everywhere)\nand the frontend already renders whatever value comes back — no UI change.\n\n## Decisions\n\n- **Price any stage with `total_usd_micros == None`**, not just in-flight ones.\n  Completed stages with unpriceable providers (`BillingPolicy::None`) return\n  `None` again — harmless; no need to thread `StageState`.\n- **No \"estimated\" label.** Cost-so-far is exact for tokens consumed so far,\n  matching the already-unlabeled live token counts and ticking runtime.\n- **Aggregate billing stays finalized-only.** The `BillingAccumulator` call\n  sites pass `None` so a run's running estimate is never folded into org-wide\n  totals (avoids double-count when the run later finalizes).\n- Per-stage rows, `totals`, and `by_model` are all priced from the same source\n  so the billing page stays internally consistent.\n\n## Changes\n\n### 1. `lib/crates/fabro-model/src/billing.rs`\n\n- Add `BilledTokenCounts::token_counts(&self) -> TokenCounts` — drops\n  `total_tokens`/`total_usd_micros`, keeps the five disjoint buckets.\n- Add `Catalog::price_tokens(&self, model: &ModelRef, tokens: &TokenCounts) -> Option<i64>`\n  next to `pricing_for`/`billing_facts_for`. Body mirrors the cost lines of\n  `billed_model_usage_from_llm`: build `ModelBillingFacts` via\n  `billing_facts_for`, assemble `ModelBillingInput { ModelUsage { model, tokens }, facts }`,\n  then `pricing_for(model).and_then(|p| p.bill(&input)).map(|a| a.0)`. Returns\n  `None` when the provider has no billing policy.\n\n### 2. `lib/crates/fabro-workflow/src/billing_rollup.rs`\n\n- Change signature to\n  `billing_rollup_from_projection(projection: &RunProjection, catalog: Option<&Catalog>)`.\n- Add a module-private helper `stage_usage_with_cost(catalog, stage) -> BilledTokenCounts`:\n  clone `stage.usage`; if `total_usd_micros.is_none()` and both `catalog` and\n  `stage.model` are present, set it via `catalog.price_tokens(model, &usage.token_counts())`.\n- In the loop, compute `priced` once per stage and use it in place of\n  `&stage.usage` for the `is_zero` check, `row.billing.add_counts`,\n  `totals.add_counts`, and `model_entry.billing.add_counts`.\n- Update the existing tests to pass `None`; add one new test: an in-flight\n  stage (no `completion`, non-zero `usage` with `total_usd_micros: None`, a\n  builtin `model`) yields `Some(..)` cost on the stage row and in `totals` when\n  called with `Some(Catalog::builtin())`.\n\n### 3. Call sites of `billing_rollup_from_projection`\n\n- `lib/crates/fabro-server/src/server/handler/billing.rs:82` — bind\n  `let catalog = state.catalog();` (returns `Arc<Catalog>`) and pass\n  `Some(&catalog)`.\n- `lib/crates/fabro-server/src/server.rs` (2 aggregate-billing sites) — pass `None`.\n- `lib/crates/fabro-workflow/src/pipeline/finalize.rs` (4 sites) — pass `None`\n  (stages already priced at completion; pricing would be a no-op anyway).\n\nNo changes to `fabro-api.yaml`, the generated clients, or `apps/fabro-web`.\n\n## Out of scope / known limitation\n\nIn-flight **prompt** stages have no `model` until `PromptCompleted` (only\n`AgentMessage` sets `stage.model` mid-run), so they still show `—` while\nrunning. Acceptable: prompt stages are a single short LLM call. The bug report\nconcerns agent stages, where `model` is available.\n\n## Verification\n\n- `cargo nextest run -p fabro-workflow billing_rollup` — new + updated unit tests pass.\n- `cargo nextest run -p fabro-server billing` — handler conformance still passes.\n- `cargo build --workspace` and `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n- Manual: `fabro server start` + `cd apps/fabro-web && bun run dev`, start a\n  workflow with an agent stage, open `/runs/{id}/billing` mid-run — the active\n  stage row and totals show a non-`—` dollar amount that grows with tokens.\n",
-          "internal.retry_count.verify": 0,
-          "thread.start.current_node": "toolchain",
-          "response.simplify_gpt": "Implemented review cleanup on top of the billing cost-on-read changes.\n\nWhat changed:\n- Removed `BilledTokenCounts::ensure_priced`, which was an extra thin helper only used by rollup code.\n- Renamed `to_token_counts()` to `token_counts()` to match the requested API and nearby accessor style.\n- Updated `billing_rollup` pricing helper to avoid cloning stage usage unless a missing cost can actually be priced:\n  - borrows existing usage for finalized/already-priced/no-catalog/no-model/unpriceable cases\n  - only clones when setting a computed `total_usd_micros`\n\nReview outcome:\n- The parallel review agents did not return actionable findings.\n- I applied the above cleanup for reduced abstraction and less per-read work.\n\nVerification passed:\n- `cargo nextest run -p fabro-workflow billing_rollup`\n- `cargo nextest run -p fabro-server billing`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-model -p fabro-workflow -p fabro-server --all-targets -- -D warnings`\n\nCurrent working tree has modifications in:\n- `lib/crates/fabro-model/src/billing.rs`\n- `lib/crates/fabro-workflow/src/billing_rollup.rs`",
-          "thread.implement.current_node": "simplify_opus",
-          "last_stage": "simplify_gpt",
-          "internal.retry_count.start": 0,
-          "failure_signature": "",
-          "internal.retry_count.simplify_gpt": 0,
-          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
-          "current_node": "fmt",
-          "thread.simplify_opus.current_node": "simplify_gpt",
-          "internal.retry_count.preflight_lint": 0,
-          "thread.preflight_lint.current_node": "implement",
-          "internal.fidelity": "compact",
-          "last_response": "Implemented review cleanup on top of the billing cost-on-read changes.\n\nWhat changed:\n- Removed `BilledTokenCounts::ensure_priced`, which was an extra thin helper only used by rollup code.\n- Renamed `",
-          "thread.preflight_compile.current_node": "preflight_lint",
-          "response.simplify_opus": "All clean. Here's the summary:\n\n## Summary\n\nThree review agents (reuse, quality, efficiency) ran in parallel against the diff. Aggregated findings:\n\n### Fixed\n\n1. **Renamed `BilledTokenCounts::token_counts()` → `to_token_counts()`** (`fabro-model/src/billing.rs`)\n   - Quality finding: original name read like a field accessor and hid the fact that the conversion is lossy (drops `total_tokens` and `total_usd_micros`). The `to_` prefix is the established Rust convention for lossy conversions.\n\n2. **Moved pricing logic into `BilledTokenCounts::ensure_priced(catalog, model)`** (`fabro-model/src/billing.rs` + `fabro-workflow/src/billing_rollup.rs`)\n   - Quality finding: the previous `stage_usage_with_cost` helper cloned `BilledTokenCounts` across a crate boundary and directly poked the private `total_usd_micros` field, leaking knowledge of how to price a `BilledTokenCounts` out of `fabro-model`. The new method encapsulates that logic next to `add_billed_usage` / `replace_with_billed_usage`, and the rollup-side helper is now a 3-line wrapper.\n\n### Considered and skipped\n\n- **Reuse #1 (refactor `billed_model_usage_from_llm` to use `price_tokens`)** — the \"duplicated\" pricing tail is 3 lines and the surrounding error-vs-option shapes don't compose cleanly. Refactoring adds more indirection than it removes.\n- **`Option<&Catalog>` parameter sprawl** — 6 of 7 call sites pass `None`, but splitting into two functions doubles the public surface for marginal benefit; the single signature is fine.\n- **`pricing_for` memoization across stages** — real but minor (a few `String` clones per stage on a polled endpoint). Worth doing if the path ever shows up in profiles; not justified at the cost of HashMap setup for this fix.\n- **`Cow::Borrowed` for the usage clone** — `BilledTokenCounts` is ~64 bytes of POD; no heap allocation.\n- **Bare `i64` return from `price_tokens`** — matches the established `total_usd_micros: Option<i64>` convention used throughout the codebase.\n\n### Verified\n\n- `cargo nextest run -p fabro-workflow billing_rollup` — 4/4 pass (including the new in-flight pricing test).\n- `cargo nextest run -p fabro-model billed_token_counts` — 5/5 pass.\n- `cargo nextest run -p fabro-server billing` — 7/7 pass.\n- `cargo build --workspace` — clean.\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — clean.\n- `cargo +nightly-2026-04-14 fmt --check --all` — clean.",
-          "outcome": "succeeded",
-          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-          "internal.thread_id": "verify",
           "internal.retry_count.toolchain": 0,
-          "internal.work_dir": "/home/daytona/workspace/fabro",
-          "internal.retry_count.simplify_opus": 0,
-          "thread.verify.current_node": "fmt",
-          "internal.retry_count.fmt": 0,
-          "failure_class": "",
-          "thread.simplify_gpt.current_node": "verify",
+          "thread.toolchain.current_node": "preflight_compile",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.retry_count.verify": 0,
+          "internal.thread_id": "verify",
+          "internal.fidelity": "compact",
+          "thread.preflight_lint.current_node": "implement",
+          "internal.retry_count.simplify_gpt": 0,
+          "graph.goal": "# Plan: Compute LLM cost on-read for in-flight stages\n\n## Context\n\nOn the run billing page (`/runs/{id}/billing`), an active stage shows token\nusage but no dollar cost — cost renders as `—` until the stage completes.\n\nRoot cause: while a stage runs, `AgentMessage` events carry usage built by\n`billed_token_counts_from_llm` (`fabro-workflow/src/outcome.rs:43`), which\nhard-codes `total_usd_micros: None`. Dollar cost is only computed by\n`billed_model_usage_from_llm` (`outcome.rs:14`) — which needs the pricing\n`Catalog` — and that runs only on `StageCompleted`/`PromptCompleted`/`StageFailed`.\nSo an in-flight stage's `StageProjection.usage.total_usd_micros` stays `None`.\n\nFix: price stages whose cost is `None` when the billing rollup is built for a\nread request, using the model + token counts already in the projection. The\nwire contract is unchanged (`total_usd_micros` is already nullable everywhere)\nand the frontend already renders whatever value comes back — no UI change.\n\n## Decisions\n\n- **Price any stage with `total_usd_micros == None`**, not just in-flight ones.\n  Completed stages with unpriceable providers (`BillingPolicy::None`) return\n  `None` again — harmless; no need to thread `StageState`.\n- **No \"estimated\" label.** Cost-so-far is exact for tokens consumed so far,\n  matching the already-unlabeled live token counts and ticking runtime.\n- **Aggregate billing stays finalized-only.** The `BillingAccumulator` call\n  sites pass `None` so a run's running estimate is never folded into org-wide\n  totals (avoids double-count when the run later finalizes).\n- Per-stage rows, `totals`, and `by_model` are all priced from the same source\n  so the billing page stays internally consistent.\n\n## Changes\n\n### 1. `lib/crates/fabro-model/src/billing.rs`\n\n- Add `BilledTokenCounts::token_counts(&self) -> TokenCounts` — drops\n  `total_tokens`/`total_usd_micros`, keeps the five disjoint buckets.\n- Add `Catalog::price_tokens(&self, model: &ModelRef, tokens: &TokenCounts) -> Option<i64>`\n  next to `pricing_for`/`billing_facts_for`. Body mirrors the cost lines of\n  `billed_model_usage_from_llm`: build `ModelBillingFacts` via\n  `billing_facts_for`, assemble `ModelBillingInput { ModelUsage { model, tokens }, facts }`,\n  then `pricing_for(model).and_then(|p| p.bill(&input)).map(|a| a.0)`. Returns\n  `None` when the provider has no billing policy.\n\n### 2. `lib/crates/fabro-workflow/src/billing_rollup.rs`\n\n- Change signature to\n  `billing_rollup_from_projection(projection: &RunProjection, catalog: Option<&Catalog>)`.\n- Add a module-private helper `stage_usage_with_cost(catalog, stage) -> BilledTokenCounts`:\n  clone `stage.usage`; if `total_usd_micros.is_none()` and both `catalog` and\n  `stage.model` are present, set it via `catalog.price_tokens(model, &usage.token_counts())`.\n- In the loop, compute `priced` once per stage and use it in place of\n  `&stage.usage` for the `is_zero` check, `row.billing.add_counts`,\n  `totals.add_counts`, and `model_entry.billing.add_counts`.\n- Update the existing tests to pass `None`; add one new test: an in-flight\n  stage (no `completion`, non-zero `usage` with `total_usd_micros: None`, a\n  builtin `model`) yields `Some(..)` cost on the stage row and in `totals` when\n  called with `Some(Catalog::builtin())`.\n\n### 3. Call sites of `billing_rollup_from_projection`\n\n- `lib/crates/fabro-server/src/server/handler/billing.rs:82` — bind\n  `let catalog = state.catalog();` (returns `Arc<Catalog>`) and pass\n  `Some(&catalog)`.\n- `lib/crates/fabro-server/src/server.rs` (2 aggregate-billing sites) — pass `None`.\n- `lib/crates/fabro-workflow/src/pipeline/finalize.rs` (4 sites) — pass `None`\n  (stages already priced at completion; pricing would be a no-op anyway).\n\nNo changes to `fabro-api.yaml`, the generated clients, or `apps/fabro-web`.\n\n## Out of scope / known limitation\n\nIn-flight **prompt** stages have no `model` until `PromptCompleted` (only\n`AgentMessage` sets `stage.model` mid-run), so they still show `—` while\nrunning. Acceptable: prompt stages are a single short LLM call. The bug report\nconcerns agent stages, where `model` is available.\n\n## Verification\n\n- `cargo nextest run -p fabro-workflow billing_rollup` — new + updated unit tests pass.\n- `cargo nextest run -p fabro-server billing` — handler conformance still passes.\n- `cargo build --workspace` and `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n- Manual: `fabro server start` + `cd apps/fabro-web && bun run dev`, start a\n  workflow with an agent stage, open `/runs/{id}/billing` mid-run — the active\n  stage row and totals show a non-`—` dollar amount that grows with tokens.\n",
           "response.implement": "All changes implemented as specified in the plan:\n\n**1. `lib/crates/fabro-model/src/billing.rs`** ✅\n- Added `BilledTokenCounts::token_counts(&self) -> TokenCounts` (drops `total_tokens`/`total_usd_micros`).\n- Added `Catalog::price_tokens(&self, model, tokens) -> Option<i64>` that mirrors the cost lines of `billed_model_usage_from_llm`.\n\n**2. `lib/crates/fabro-workflow/src/billing_rollup.rs`** ✅\n- Changed `billing_rollup_from_projection` signature to take `catalog: Option<&Catalog>`.\n- Added private helper `stage_usage_with_cost` that clones `stage.usage` and prices it when `total_usd_micros.is_none()` and both `catalog` and `stage.model` are available.\n- Uses `priced` in place of `&stage.usage` for the `is_zero` check, `row.billing.add_counts`, `totals.add_counts`, and `model_entry.billing.add_counts`.\n- Updated existing tests to pass `None`; added a new `rollup_prices_in_flight_stage_usage_using_catalog` test (in-flight stage with no completion, non-zero usage, builtin model → `Some(..)` cost on stage row, totals, and `by_model`).\n\n**3. Call sites** ✅\n- `fabro-server/src/server/handler/billing.rs:82` — binds `let catalog = state.catalog();` and passes `Some(&catalog)`.\n- `fabro-server/src/server.rs` (2 aggregate-billing sites) — pass `None`.\n- `fabro-workflow/src/pipeline/finalize.rs` (4 sites) — pass `None`.\n\n**Verification** ✅\n- `cargo nextest run -p fabro-workflow billing_rollup` — 4 tests pass (new + 3 updated).\n- `cargo nextest run -p fabro-server billing` — 7 tests pass.\n- `cargo nextest run -p fabro-model billing` — 23 tests pass.\n- `cargo check --workspace --all-targets` — clean.\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — clean.\n- `cargo +nightly-2026-04-14 fmt --check --all` — clean.\n- Broader test sweep on `fabro-workflow` + `fabro-server`: 1674 passing; the 2 unrelated `*graph*svg*` failures are pre-existing graphviz subprocess env issues (confirmed by stashing my changes and reproducing).",
-          "internal.run_id": "01KS6AW28FZVV4M2EHBJA7JMNP",
+          "thread.simplify_opus.current_node": "simplify_gpt",
+          "current_node": "fmt",
+          "internal.retry_count.fmt": 0,
+          "internal.retry_count.simplify_opus": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "last_stage": "simplify_gpt",
+          "outcome": "succeeded",
+          "internal.retry_count.implement": 0,
+          "internal.retry_count.preflight_lint": 0,
+          "failure_class": "",
+          "internal.node_visit_count": 1,
+          "last_response": "Implemented review cleanup on top of the billing cost-on-read changes.\n\nWhat changed:\n- Removed `BilledTokenCounts::ensure_priced`, which was an extra thin helper only used by rollup code.\n- Renamed `",
+          "response.simplify_gpt": "Implemented review cleanup on top of the billing cost-on-read changes.\n\nWhat changed:\n- Removed `BilledTokenCounts::ensure_priced`, which was an extra thin helper only used by rollup code.\n- Renamed `to_token_counts()` to `token_counts()` to match the requested API and nearby accessor style.\n- Updated `billing_rollup` pricing helper to avoid cloning stage usage unless a missing cost can actually be priced:\n  - borrows existing usage for finalized/already-priced/no-catalog/no-model/unpriceable cases\n  - only clones when setting a computed `total_usd_micros`\n\nReview outcome:\n- The parallel review agents did not return actionable findings.\n- I applied the above cleanup for reduced abstraction and less per-read work.\n\nVerification passed:\n- `cargo nextest run -p fabro-workflow billing_rollup`\n- `cargo nextest run -p fabro-server billing`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-model -p fabro-workflow -p fabro-server --all-targets -- -D warnings`\n\nCurrent working tree has modifications in:\n- `lib/crates/fabro-model/src/billing.rs`\n- `lib/crates/fabro-workflow/src/billing_rollup.rs`",
+          "thread.verify.current_node": "fmt",
+          "response.simplify_opus": "All clean. Here's the summary:\n\n## Summary\n\nThree review agents (reuse, quality, efficiency) ran in parallel against the diff. Aggregated findings:\n\n### Fixed\n\n1. **Renamed `BilledTokenCounts::token_counts()` → `to_token_counts()`** (`fabro-model/src/billing.rs`)\n   - Quality finding: original name read like a field accessor and hid the fact that the conversion is lossy (drops `total_tokens` and `total_usd_micros`). The `to_` prefix is the established Rust convention for lossy conversions.\n\n2. **Moved pricing logic into `BilledTokenCounts::ensure_priced(catalog, model)`** (`fabro-model/src/billing.rs` + `fabro-workflow/src/billing_rollup.rs`)\n   - Quality finding: the previous `stage_usage_with_cost` helper cloned `BilledTokenCounts` across a crate boundary and directly poked the private `total_usd_micros` field, leaking knowledge of how to price a `BilledTokenCounts` out of `fabro-model`. The new method encapsulates that logic next to `add_billed_usage` / `replace_with_billed_usage`, and the rollup-side helper is now a 3-line wrapper.\n\n### Considered and skipped\n\n- **Reuse #1 (refactor `billed_model_usage_from_llm` to use `price_tokens`)** — the \"duplicated\" pricing tail is 3 lines and the surrounding error-vs-option shapes don't compose cleanly. Refactoring adds more indirection than it removes.\n- **`Option<&Catalog>` parameter sprawl** — 6 of 7 call sites pass `None`, but splitting into two functions doubles the public surface for marginal benefit; the single signature is fine.\n- **`pricing_for` memoization across stages** — real but minor (a few `String` clones per stage on a polled endpoint). Worth doing if the path ever shows up in profiles; not justified at the cost of HashMap setup for this fix.\n- **`Cow::Borrowed` for the usage clone** — `BilledTokenCounts` is ~64 bytes of POD; no heap allocation.\n- **Bare `i64` return from `price_tokens`** — matches the established `total_usd_micros: Option<i64>` convention used throughout the codebase.\n\n### Verified\n\n- `cargo nextest run -p fabro-workflow billing_rollup` — 4/4 pass (including the new in-flight pricing test).\n- `cargo nextest run -p fabro-model billed_token_counts` — 5/5 pass.\n- `cargo nextest run -p fabro-server billing` — 7/7 pass.\n- `cargo build --workspace` — clean.\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — clean.\n- `cargo +nightly-2026-04-14 fmt --check --all` — clean.",
           "internal.retry_count.preflight_compile": 0,
-          "internal.retry_count.implement": 0
+          "failure_signature": "",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.run_id": "01KS6AW28FZVV4M2EHBJA7JMNP",
+          "thread.implement.current_node": "simplify_opus",
+          "thread.simplify_gpt.current_node": "verify",
+          "thread.start.current_node": "toolchain",
+          "internal.retry_count.start": 0,
+          "graph.rankdir": "LR",
+          "thread.preflight_compile.current_node": "preflight_lint"
         },
         "node_outcomes": {
-          "fmt": {
+          "simplify_opus": {
             "status": "succeeded",
             "context_updates": {
-              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+              "response.simplify_opus": "All clean. Here's the summary:\n\n## Summary\n\nThree review agents (reuse, quality, efficiency) ran in parallel against the diff. Aggregated findings:\n\n### Fixed\n\n1. **Renamed `BilledTokenCounts::token_counts()` → `to_token_counts()`** (`fabro-model/src/billing.rs`)\n   - Quality finding: original name read like a field accessor and hid the fact that the conversion is lossy (drops `total_tokens` and `total_usd_micros`). The `to_` prefix is the established Rust convention for lossy conversions.\n\n2. **Moved pricing logic into `BilledTokenCounts::ensure_priced(catalog, model)`** (`fabro-model/src/billing.rs` + `fabro-workflow/src/billing_rollup.rs`)\n   - Quality finding: the previous `stage_usage_with_cost` helper cloned `BilledTokenCounts` across a crate boundary and directly poked the private `total_usd_micros` field, leaking knowledge of how to price a `BilledTokenCounts` out of `fabro-model`. The new method encapsulates that logic next to `add_billed_usage` / `replace_with_billed_usage`, and the rollup-side helper is now a 3-line wrapper.\n\n### Considered and skipped\n\n- **Reuse #1 (refactor `billed_model_usage_from_llm` to use `price_tokens`)** — the \"duplicated\" pricing tail is 3 lines and the surrounding error-vs-option shapes don't compose cleanly. Refactoring adds more indirection than it removes.\n- **`Option<&Catalog>` parameter sprawl** — 6 of 7 call sites pass `None`, but splitting into two functions doubles the public surface for marginal benefit; the single signature is fine.\n- **`pricing_for` memoization across stages** — real but minor (a few `String` clones per stage on a polled endpoint). Worth doing if the path ever shows up in profiles; not justified at the cost of HashMap setup for this fix.\n- **`Cow::Borrowed` for the usage clone** — `BilledTokenCounts` is ~64 bytes of POD; no heap allocation.\n- **Bare `i64` return from `price_tokens`** — matches the established `total_usd_micros: Option<i64>` convention used throughout the codebase.\n\n### Verified\n\n- `cargo nextest run -p fabro-workflow billing_rollup` — 4/4 pass (including the new in-flight pricing test).\n- `cargo nextest run -p fabro-model billed_token_counts` — 5/5 pass.\n- `cargo nextest run -p fabro-server billing` — 7/7 pass.\n- `cargo build --workspace` — clean.\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — clean.\n- `cargo +nightly-2026-04-14 fmt --check --all` — clean.",
+              "last_stage": "simplify_opus",
+              "last_response": "All clean. Here's the summary:\n\n## Summary\n\nThree review agents (reuse, quality, efficiency) ran in parallel against the diff. Aggregated findings:\n\n### Fixed\n\n1. **Renamed `BilledTokenCounts::token_c"
             },
-            "notes": "Script completed: cargo +nightly-2026-04-14 fmt --all 2>&1",
-            "usage": null
+            "notes": "Stage completed: simplify_opus",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 55570,
+                    "output_tokens": 17369,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 1126033,
+                    "cache_write_tokens": 66184
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 66184,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 1688741
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-model/src/billing.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/billing_rollup.rs"
+            ]
           },
           "implement": {
             "status": "succeeded",
@@ -1581,20 +1609,12 @@
               "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/pipeline/finalize.rs"
             ]
           },
-          "preflight_compile": {
+          "fmt": {
             "status": "succeeded",
             "context_updates": {
               "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
             },
-            "notes": "Script completed: cargo check -q --workspace 2>&1",
-            "usage": null
-          },
-          "preflight_lint": {
-            "status": "succeeded",
-            "context_updates": {
-              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
-            },
-            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "notes": "Script completed: cargo +nightly-2026-04-14 fmt --all 2>&1",
             "usage": null
           },
           "verify": {
@@ -1604,54 +1624,6 @@
             },
             "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1",
             "usage": null
-          },
-          "toolchain": {
-            "status": "succeeded",
-            "context_updates": {
-              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
-            },
-            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
-            "usage": null
-          },
-          "start": {
-            "status": "succeeded",
-            "usage": null
-          },
-          "simplify_opus": {
-            "status": "succeeded",
-            "context_updates": {
-              "response.simplify_opus": "All clean. Here's the summary:\n\n## Summary\n\nThree review agents (reuse, quality, efficiency) ran in parallel against the diff. Aggregated findings:\n\n### Fixed\n\n1. **Renamed `BilledTokenCounts::token_counts()` → `to_token_counts()`** (`fabro-model/src/billing.rs`)\n   - Quality finding: original name read like a field accessor and hid the fact that the conversion is lossy (drops `total_tokens` and `total_usd_micros`). The `to_` prefix is the established Rust convention for lossy conversions.\n\n2. **Moved pricing logic into `BilledTokenCounts::ensure_priced(catalog, model)`** (`fabro-model/src/billing.rs` + `fabro-workflow/src/billing_rollup.rs`)\n   - Quality finding: the previous `stage_usage_with_cost` helper cloned `BilledTokenCounts` across a crate boundary and directly poked the private `total_usd_micros` field, leaking knowledge of how to price a `BilledTokenCounts` out of `fabro-model`. The new method encapsulates that logic next to `add_billed_usage` / `replace_with_billed_usage`, and the rollup-side helper is now a 3-line wrapper.\n\n### Considered and skipped\n\n- **Reuse #1 (refactor `billed_model_usage_from_llm` to use `price_tokens`)** — the \"duplicated\" pricing tail is 3 lines and the surrounding error-vs-option shapes don't compose cleanly. Refactoring adds more indirection than it removes.\n- **`Option<&Catalog>` parameter sprawl** — 6 of 7 call sites pass `None`, but splitting into two functions doubles the public surface for marginal benefit; the single signature is fine.\n- **`pricing_for` memoization across stages** — real but minor (a few `String` clones per stage on a polled endpoint). Worth doing if the path ever shows up in profiles; not justified at the cost of HashMap setup for this fix.\n- **`Cow::Borrowed` for the usage clone** — `BilledTokenCounts` is ~64 bytes of POD; no heap allocation.\n- **Bare `i64` return from `price_tokens`** — matches the established `total_usd_micros: Option<i64>` convention used throughout the codebase.\n\n### Verified\n\n- `cargo nextest run -p fabro-workflow billing_rollup` — 4/4 pass (including the new in-flight pricing test).\n- `cargo nextest run -p fabro-model billed_token_counts` — 5/5 pass.\n- `cargo nextest run -p fabro-server billing` — 7/7 pass.\n- `cargo build --workspace` — clean.\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — clean.\n- `cargo +nightly-2026-04-14 fmt --check --all` — clean.",
-              "last_stage": "simplify_opus",
-              "last_response": "All clean. Here's the summary:\n\n## Summary\n\nThree review agents (reuse, quality, efficiency) ran in parallel against the diff. Aggregated findings:\n\n### Fixed\n\n1. **Renamed `BilledTokenCounts::token_c"
-            },
-            "notes": "Stage completed: simplify_opus",
-            "usage": {
-              "input": {
-                "usage": {
-                  "model": {
-                    "provider": "anthropic",
-                    "model_id": "claude-opus-4-7"
-                  },
-                  "tokens": {
-                    "input_tokens": 55570,
-                    "output_tokens": 17369,
-                    "reasoning_tokens": 0,
-                    "cache_read_tokens": 1126033,
-                    "cache_write_tokens": 66184
-                  }
-                },
-                "facts": {
-                  "algorithm": "anthropic",
-                  "cache_write_5m_tokens": 66184,
-                  "cache_write_1h_tokens": 0
-                }
-              },
-              "total_usd_micros": 1688741
-            },
-            "files_touched": [
-              "/home/daytona/workspace/fabro/lib/crates/fabro-model/src/billing.rs",
-              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/billing_rollup.rs"
-            ]
           },
           "simplify_gpt": {
             "status": "succeeded",
@@ -1682,25 +1654,135 @@
               },
               "total_usd_micros": 1643598
             }
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "cc7f63071f75b09f6639210abd2cc5bcb1747b31",
         "node_visits": {
-          "simplify_opus": 1,
-          "fmt": 1,
+          "preflight_lint": 1,
+          "toolchain": 1,
+          "verify": 1,
+          "implement": 1,
           "preflight_compile": 1,
           "start": 1,
-          "implement": 1,
           "simplify_gpt": 1,
-          "verify": 1,
-          "preflight_lint": 1,
-          "toolchain": 1
+          "fmt": 1,
+          "simplify_opus": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "summary": {
+          "files_changed": 5,
+          "additions": 118,
+          "deletions": 17
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-21T23:20:19.838528Z",
+    "status": "succeeded",
+    "duration_ms": 2653948,
+    "final_git_commit_sha": "cc7f63071f75b09f6639210abd2cc5bcb1747b31",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "duration_ms": 0,
+        "retries": 0
+      },
+      {
+        "stage_id": "toolchain",
+        "stage_label": "toolchain",
+        "duration_ms": 1671,
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_compile",
+        "stage_label": "preflight_compile",
+        "duration_ms": 246352,
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_lint",
+        "stage_label": "preflight_lint",
+        "duration_ms": 298559,
+        "retries": 0
+      },
+      {
+        "stage_id": "implement",
+        "stage_label": "implement",
+        "duration_ms": 804582,
+        "billing_usd_micros": 3841995,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_opus",
+        "stage_label": "simplify_opus",
+        "duration_ms": 634760,
+        "billing_usd_micros": 1688741,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_gpt",
+        "stage_label": "simplify_gpt",
+        "duration_ms": 358429,
+        "billing_usd_micros": 1643598,
+        "retries": 0
+      },
+      {
+        "stage_id": "verify",
+        "stage_label": "verify",
+        "duration_ms": 220240,
+        "retries": 0
+      },
+      {
+        "stage_id": "fmt",
+        "stage_label": "fmt",
+        "duration_ms": 3780,
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 238086,
+      "output_tokens": 40677,
+      "total_tokens": 7993585,
+      "reasoning_tokens": 3776,
+      "cache_read_tokens": 7543790,
+      "cache_write_tokens": 167256,
+      "total_usd_micros": 7174334
+    },
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "image": "buildpack-deps:noble",
@@ -2036,23 +2118,25 @@
       },
       "state": "succeeded"
     },
-    "fmt@1": {
-      "first_event_seq": 818,
+    "exit@1": {
+      "first_event_seq": 828,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-21T23:20:19.788123Z"
+      },
       "provider_used": null,
       "diff": null,
-      "script_invocation": {
-        "script": "cargo +nightly-2026-04-14 fmt --all 2>&1",
-        "command": "exec 2>&1\ncargo +nightly-2026-04-14 fmt --all 2>&1",
-        "language": "shell"
-      },
+      "script_invocation": null,
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-21T23:20:10.784946Z",
-      "handler": "command",
+      "started_at": "2026-05-21T23:20:19.788048Z",
+      "handler": "exit",
+      "duration_ms": 0,
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -2061,7 +2145,50 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
+    },
+    "fmt@1": {
+      "first_event_seq": 818,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo +nightly-2026-04-14 fmt --all 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-21T23:20:14.566089Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "cargo +nightly-2026-04-14 fmt --all 2>&1",
+        "command": "exec 2>&1\ncargo +nightly-2026-04-14 fmt --all 2>&1",
+        "language": "shell"
+      },
+      "script_timing": {
+        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 3763,
+        "termination": "exited",
+        "output_bytes": 0,
+        "live_streaming": false
+      },
+      "parallel_results": null,
+      "output": null,
+      "output_bytes": 0,
+      "live_streaming": false,
+      "termination": "exited",
+      "started_at": "2026-05-21T23:20:10.784946Z",
+      "handler": "command",
+      "duration_ms": 3780,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
     }
   }
 }
