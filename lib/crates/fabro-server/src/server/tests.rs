@@ -1516,92 +1516,53 @@ fn server_secrets_resolve_process_env_before_server_env() {
 
 #[cfg(unix)]
 #[test]
-fn worker_command_always_sets_worker_token_env() {
-    let github_only = tempfile::tempdir().unwrap();
-    let github_state =
-        worker_command_test_state(github_only.path(), &["github"], Some(TEST_DEV_TOKEN));
-    let github_run_id = RunId::new();
-    let github_cmd = worker_command(
-        github_state.as_ref(),
-        github_run_id,
-        RunExecutionMode::Start,
-        github_only.path(),
-    )
-    .unwrap();
-    assert!(matches!(
-        command_env_value(&github_cmd, "FABRO_WORKER_TOKEN"),
-        EnvOverride::Set(_)
-    ));
-    assert_eq!(
-        command_env_value(&github_cmd, "FABRO_DEV_TOKEN"),
-        EnvOverride::Unchanged
-    );
-    let github_args = github_cmd
-        .as_std()
-        .get_args()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    assert!(
-        !github_args
-            .iter()
-            .any(|arg| arg == "--artifact-upload-token")
-    );
-    assert!(!github_args.iter().any(|arg| arg == "--worker-token"));
-    let EnvOverride::Set(github_token) = command_env_value(&github_cmd, "FABRO_WORKER_TOKEN")
-    else {
-        panic!("worker token should be set");
-    };
-    let github_keys = WorkerTokenKeys::from_master_secret(TEST_SESSION_SECRET.as_bytes())
-        .expect("worker keys should derive");
-    let github_claims = jsonwebtoken::decode::<crate::worker_token::WorkerTokenClaims>(
-        &github_token,
-        github_keys.decoding_key(),
-        github_keys.validation(),
-    )
-    .expect("github worker token should decode")
-    .claims;
-    assert_eq!(github_claims.run_id, github_run_id.to_string());
-    assert_eq!(
-        github_claims.scope.split_whitespace().collect::<Vec<_>>(),
-        vec!["run:worker", "agent:run_tools"]
-    );
+fn worker_command_default_token_omits_agent_run_tools_scope() {
+    let storage_dir = tempfile::tempdir().unwrap();
+    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+    let run_id = RunId::new();
 
-    let dev_token = tempfile::tempdir().unwrap();
-    let dev_token_state =
-        worker_command_test_state(dev_token.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
-    let dev_token_run_id = RunId::new();
-    let dev_token_cmd = worker_command(
-        dev_token_state.as_ref(),
-        dev_token_run_id,
+    let cmd = worker_command(
+        state.as_ref(),
+        run_id,
         RunExecutionMode::Start,
-        dev_token.path(),
+        storage_dir.path(),
+        false,
     )
     .unwrap();
-    assert!(matches!(
-        command_env_value(&dev_token_cmd, "FABRO_WORKER_TOKEN"),
-        EnvOverride::Set(_)
-    ));
-    assert_eq!(
-        command_env_value(&dev_token_cmd, "FABRO_DEV_TOKEN"),
-        EnvOverride::Unchanged
-    );
-    let EnvOverride::Set(dev_worker_token) =
-        command_env_value(&dev_token_cmd, "FABRO_WORKER_TOKEN")
-    else {
-        panic!("worker token should be set");
-    };
-    let dev_claims = jsonwebtoken::decode::<crate::worker_token::WorkerTokenClaims>(
-        &dev_worker_token,
-        github_keys.decoding_key(),
-        github_keys.validation(),
+
+    assert_worker_command_passes_token_only_by_env(&cmd);
+    let claims = worker_token_claims(&cmd, state.as_ref());
+
+    assert_eq!(claims.run_id, run_id.to_string());
+    assert_eq!(claims.scope.split_whitespace().collect::<Vec<_>>(), vec![
+        "run:worker"
+    ]);
+}
+
+#[cfg(unix)]
+#[test]
+fn worker_command_opt_in_token_includes_agent_run_tools_scope() {
+    let storage_dir = tempfile::tempdir().unwrap();
+    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
+    let run_id = RunId::new();
+
+    let cmd = worker_command(
+        state.as_ref(),
+        run_id,
+        RunExecutionMode::Start,
+        storage_dir.path(),
+        true,
     )
-    .expect("dev-token worker token should decode")
-    .claims;
-    assert_eq!(dev_claims.run_id, dev_token_run_id.to_string());
-    assert_eq!(
-        dev_claims.scope.split_whitespace().collect::<Vec<_>>(),
-        vec!["run:worker", "agent:run_tools"]
-    );
+    .unwrap();
+
+    assert_worker_command_passes_token_only_by_env(&cmd);
+    let claims = worker_token_claims(&cmd, state.as_ref());
+
+    assert_eq!(claims.run_id, run_id.to_string());
+    assert_eq!(claims.scope.split_whitespace().collect::<Vec<_>>(), vec![
+        "run:worker",
+        "agent:run_tools"
+    ]);
 }
 
 #[cfg(unix)]
@@ -1621,6 +1582,7 @@ fn worker_command_forwards_github_app_private_key_from_server_secrets() {
         RunId::new(),
         RunExecutionMode::Start,
         storage_dir.path(),
+        false,
     )
     .unwrap();
 
@@ -1640,6 +1602,7 @@ fn worker_command_omits_github_app_private_key_when_unset() {
         RunId::new(),
         RunExecutionMode::Start,
         storage_dir.path(),
+        false,
     )
     .unwrap();
 
@@ -1669,6 +1632,7 @@ level = "debug"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        false,
     )
     .unwrap();
 
@@ -1698,6 +1662,7 @@ destination = "stdout"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        false,
     )
     .unwrap();
 
@@ -1726,6 +1691,7 @@ fn worker_command_sets_fabro_config_to_active_absolute_config_path() {
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        false,
     )
     .unwrap();
 
@@ -1767,6 +1733,7 @@ destination = "file"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        false,
     )
     .unwrap();
 
@@ -1798,6 +1765,7 @@ destination = "file"
         run_id,
         RunExecutionMode::Start,
         storage_dir.path(),
+        false,
     ) else {
         panic!("invalid env destination should fail");
     };
@@ -2104,6 +2072,40 @@ fn command_env_value(cmd: &Command, key: &str) -> EnvOverride {
             })
         })
         .unwrap_or(EnvOverride::Unchanged)
+}
+
+#[cfg(unix)]
+fn assert_worker_command_passes_token_only_by_env(cmd: &Command) {
+    assert!(matches!(
+        command_env_value(cmd, EnvVars::FABRO_WORKER_TOKEN),
+        EnvOverride::Set(_)
+    ));
+    assert_eq!(
+        command_env_value(cmd, EnvVars::FABRO_DEV_TOKEN),
+        EnvOverride::Unchanged
+    );
+    let args = cmd
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>();
+    assert!(!args.iter().any(|arg| arg == "--artifact-upload-token"));
+    assert!(!args.iter().any(|arg| arg == "--worker-token"));
+}
+
+#[cfg(unix)]
+fn worker_token_claims(cmd: &Command, state: &AppState) -> crate::worker_token::WorkerTokenClaims {
+    let EnvOverride::Set(token) = command_env_value(cmd, EnvVars::FABRO_WORKER_TOKEN) else {
+        panic!("worker token env should be set");
+    };
+
+    jsonwebtoken::decode::<crate::worker_token::WorkerTokenClaims>(
+        &token,
+        state.worker_token_keys().decoding_key(),
+        state.worker_token_keys().validation(),
+    )
+    .expect("worker token should decode")
+    .claims
 }
 
 #[tokio::test]

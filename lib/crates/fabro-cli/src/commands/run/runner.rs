@@ -93,14 +93,18 @@ pub(crate) async fn execute(
         client.clone_for_reuse(),
         worker_token.to_owned(),
     )));
-    let fabro_run_tools = build_fabro_run_tool_services(
-        worker_token,
-        client.clone_for_reuse(),
-        run_id,
-        run_spec.source_directory.as_deref(),
-        &run_dir,
-        Arc::clone(&catalog),
-    );
+    let fabro_run_tools = if run_spec.settings.run.agent.fabro_tools {
+        build_fabro_run_tool_services(
+            worker_token,
+            client.clone_for_reuse(),
+            run_id,
+            run_spec.source_directory.as_deref(),
+            &run_dir,
+            Arc::clone(&catalog),
+        )
+    } else {
+        None
+    };
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = CancellationToken::new();
     let emitter = Arc::new(Emitter::new(run_id));
