@@ -1,0 +1,541 @@
+{
+  "title": "Ask Fabro Sidebar Wiring — Implementation Plan",
+  "spec": {
+    "run_id": "01KS7S3QZC8GKYVCH0EXN4Q0E9",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Ask Fabro Sidebar Wiring — Implementation Plan\n\n> **For agentic workers:** Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use `- [ ]` checkboxes.\n\n**Goal:** Ship the Ask Fabro sidebar on run pages — wired to real session APIs, with the agent able to inspect *and control* its owning run.\n\n**Architecture:** Two phases. Phase 1 (Rust): give Ask Fabro agent sessions the full `fabro_run_interact` + `fabro_run_events` tools, scoped to the owning run, via the existing HTTP `FabroClient` backend. Phase 2 (web): replace the scripted sidebar adapter with real session calls; drop `?ask=1`, gate on `run.ask_fabro.available`.\n\n**Tech Stack:** Rust (fabro-server, fabro-workflow, fabro-tool), React 19 + assistant-ui (fabro-web), generated API clients.\n\n**Decisions locked:**\n- Reuse `fabro-tool` — no new tool.\n- Subset = `fabro_run_interact` + `fabro_run_events`, **full access** (incl. mutating actions: start/cancel/steer/archive/answer).\n- Backend = existing HTTP `FabroClient` (already implements all reads + mutations).\n- Scoped to owning run — enforced by a same-run worker token; the API 403s cross-run calls.\n- File/shell tools stay read-only in Ask Fabro sessions (only the two run tools get full access).\n- Gate the sidebar on `run.ask_fabro.available`; drop `?ask=1`.\n\n---\n\n## Background (current state)\n\n- API endpoints exist (`296fbddec`): `SessionDetail`, `/sessions/{id}/events`, `/sessions/{id}/attach`, turn submission w/ `x-fabro-turn-id`, `Run.ask_fabro` readiness. Web helpers exist: `session-stream.ts`, `sessionsApi`.\n- Sidebar (`ask-fabro-sidebar.tsx`) is a prototype: scripted adapter (`chats-runtime.ts`/`chats-script.ts`), no API calls, gated behind `?ask=1` (`run-detail.tsx:363`).\n- Ask Fabro sessions built by `build_agent_session` (`fabro-server/.../handler/sessions.rs:633`): profile + run sandbox + `ReadOnly` gate (`build_ask_fabro_tool_approval`, `sessions.rs:867`). **No `fabro_run_*` tools.**\n- `fabro-tool`: tools built on the `FabroToolBackend` trait. `fabro_client::FabroClient` is the HTTP impl — already implements every trait method (reads + mutations). `FabroRunToolServices`, `register_fabro_run_tools`, `execute_fabro_run_tool` live in `fabro-workflow` (`handler/llm/api.rs`, `services.rs`); `register_fabro_run_tools` registers all 5 tools.\n- Worker tokens: `worker_token.rs` — `issue_worker_token(keys, &run_id)` mints a base same-run token; `AppState::worker_token_keys()` exposes the keys. `server.rs` already mints tokens this way for dispatched workers.\n- `register_fabro_run_tools` is `pub(crate)`; `fabro-server` already depends on `fabro-workflow`.\n\n---\n\n## File structure\n\n**Phase 1 — Rust**\n- Modify: `lib/crates/fabro-workflow/src/handler/llm/api.rs` — make `register_fabro_run_tools` `pub`; add subset variant.\n- Modify: `lib/crates/fabro-server/src/server/handler/sessions.rs` — `build_profile` returns `Box`; mint worker token, build `FabroClient`, register subset; allowlist the two tools in the gate.\n\n**Phase 2 — Web**\n- Create: `apps/fabro-web/app/lib/ask-fabro-runtime.ts` — real session adapter.\n- Modify: `apps/fabro-web/app/components/chats/ask-fabro-sidebar.tsx` — use real adapter, take `runId`.\n- Modify: `apps/fabro-web/app/routes/run-detail.tsx` — drop `?ask=1`, gate on `run.ask_fabro`.\n- Delete (verify orphaned first): `apps/fabro-web/app/lib/chats-script.ts` + scripted paths in `chats-runtime.ts`.\n\n---\n\n## Phase 1: Run tools for Ask Fabro sessions\n\n### Task 1 — Make run-tool registration callable from fabro-server\n\n- [ ] In `fabro-workflow/src/handler/llm/api.rs`: change `register_fabro_run_tools` from `pub(crate)` to `pub`. Add a subset variant:\n  ```rust\n  pub fn register_fabro_run_tools_subset(\n      registry: &mut ToolRegistry,\n      services: &FabroRunToolServices,\n      only: &[&str],\n  ) {\n      for definition in fabro_tool::tool_definitions() {\n          if only.is_empty() || only.contains(&definition.name) {\n              registry.register(fabro_run_tool(definition, services.clone()));\n          }\n      }\n  }\n  ```\n  Refactor `register_fabro_run_tools` to call it with `&[]`. `fabro_run_tool` stays private.\n- [ ] Confirm `FabroRunToolServices` (`fabro-workflow/src/services.rs`) is `pub` — it is. No change.\n- [ ] `cargo build --workspace`; `cargo nextest run -p fabro-workflow agent_run`.\n- [ ] Commit: `refactor(fabro-workflow): expose run-tool registration with tool subset`.\n\n### Task 2 — Wire FabroClient + worker token into `build_agent_session`\n\nThe session's run-control backend is the HTTP `FabroClient` pointed at the server's own API, authed with a same-run worker token. The token enforces run scoping (cross-run calls 403).\n\n**Files:** `fabro-server/src/server/handler/sessions.rs`\n\n- [ ] Change `build_profile` to return `Box<dyn AgentProfile>` (currently `Arc`); the caller registers tools on `&mut` then `Arc::from`s.\n- [ ] In `build_agent_session`, after `build_profile`, before `Session::from_record`:\n  ```rust\n  let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)\n      .map_err(|err| AskFabroBuildError::Agent(anyhow::Error::new(err)))?;\n  // fabro_client::Client = generated reqwest client from the `fabro-client` crate.\n  let api_client = fabro_client::Client::new_with_client(\n      &state.self_base_url(),                 // server's own loopback base URL\n      reqwest_client_with_bearer(&worker_token),\n  );\n  let backend = fabro_tool::fabro_client::FabroClient::new(Arc::new(api_client));\n  let services = FabroRunToolServices {\n      backend:            Arc::new(backend),\n      current_run_id:     run_id,\n      base_cwd:           PathBuf::new(),     // unused by events/interact\n      user_settings_path: PathBuf::new(),    // unused by events/interact\n  };\n  register_fabro_run_tools_subset(\n      profile.tool_registry_mut(),\n      &services,\n      &[fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME, fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME],\n  );\n  ```\n  Reference impls: the worker-token mint in `server.rs`; `FabroRunToolServices` construction in `fabro-cli/src/commands/run/runner.rs`.\n- [ ] Resolve `self_base_url()` — the server's own loopback address. If `AppState` doesn't already expose it, add an accessor from the bound listen addr (`http://127.0.0.1:<port>`). Local-only call; never the public URL.\n- [ ] Ensure the session prompt/context names the owning run id so the agent passes the correct `run_id` to the tools. (Backstop: wrong id → API 403, agent self-corrects.)\n- [ ] `cargo build --workspace`.\n- [ ] Commit: `feat(fabro-server): give Ask Fabro sessions run-control tools`.\n\n### Task 3 — Allowlist the two run tools in the session gate\n\n`build_ask_fabro_tool_approval` (`sessions.rs:867`) currently denies everything not `ReadOnly`-approved. The two run tools need full access; file/shell stay read-only.\n\n- [ ] Update the closure:\n  ```rust\n  Arc::new(move |tool_name: &str, _args: &Value| {\n      if matches!(tool_name, \"fabro_run_interact\" | \"fabro_run_events\") {\n          return Ok(()); // run-control tools: full access, scoped by worker token\n      }\n      if is_tool_auto_approved(PermissionLevel::ReadOnly, tool_name) {\n          Ok(())\n      } else {\n          Err(format!(\"{tool_name} tool denied by Ask Fabro tool policy\"))\n      }\n  })\n  ```\n- [ ] Rename `build_ask_fabro_tool_approval` comment / any \"read-only policy\" wording — the session is no longer read-only (it can control its run via the API).\n- [ ] Tests: `fabro_run_interact` and `fabro_run_events` approved; `write_file` and shell denied; `read_file` approved.\n- [ ] `cargo +nightly-2026-04-14 fmt --all && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n- [ ] `cargo nextest run -p fabro-server --features test-support api::sessions`.\n- [ ] Commit: `feat(fabro-server): allow run tools through the Ask Fabro session gate`.\n\n### Task 4 — E2E coverage\n\n- [ ] E2E test (twin), mirroring `tests/it/api/sessions.rs`: create a run with a sandbox, open an Ask Fabro session, submit a turn asking about run stages — assert the agent calls a run tool and the turn completes. Add a second case: a turn that triggers a mutating `fabro_run_interact` action (e.g. `questions`/`answer` against a run with a pending question) succeeds.\n- [ ] Cross-run guard test: a tool call with a different `run_id` is rejected (worker-token scope).\n- [ ] `cargo nextest run -p fabro-server --features test-support --test it api::sessions`.\n- [ ] Commit: `test(fabro-server): Ask Fabro run-tool E2E coverage`.\n\n---\n\n## Phase 2: Wire the sidebar\n\n### Task 5 — Real session adapter\n\n**Files:** Create `apps/fabro-web/app/lib/ask-fabro-runtime.ts`\n\n- [ ] assistant-ui adapter parameterized by `runId`:\n  - First turn: `sessionsApi.createRunSession(runId, { model })` (model from `run.ask_fabro.default_model`); persist session id in `sessionStorage` keyed by `runId` so reopen resumes.\n  - Open with existing session id: `sessionsApi.getSession(id)` → render `SessionDetail.messages`, then `attachSessionEvents(id, { sinceSeq: last_seq })`.\n  - Send: `streamSessionTurn(id, { input })`; map streamed `EventEnvelope`s (incl. `run.session.*` tool-call events) to assistant-ui messages.\n- [ ] Route tool-call events through the existing `tool-fallback.tsx` renderer.\n- [ ] `bun test app/lib/ask-fabro-runtime.test.ts` (mock SSE as `session-stream.test.ts` does).\n- [ ] Commit: `feat(web): real session adapter for Ask Fabro sidebar`.\n\n### Task 6 — Sidebar uses the adapter\n\n- [ ] `ask-fabro-sidebar.tsx`: accept a `runId` prop; replace `createScriptedAdapter` with `ask-fabro-runtime`; remove `EMPTY_CHAT`/`scriptIndexRef`.\n- [ ] `rg createScriptedAdapter` — if `chats-script.ts`/scripted paths are orphaned, delete them.\n- [ ] `bun run typecheck`.\n- [ ] Commit: `feat(web): drive Ask Fabro sidebar from session API`.\n\n### Task 7 — Drop `?ask=1`, gate on readiness\n\n- [ ] `run-detail.tsx`: remove `askEnabled`/`searchParams.get(\"ask\")` (lines ~363-368, 635-648, 724-730).\n- [ ] Render the Ask Fabro button always; `disabled={!run.ask_fabro.available}`. Disabled tooltip from `unavailable_reason`: `feature_disabled` → \"Ask Fabro is disabled\"; `no_sandbox`/`sandbox_not_ready` → \"Run sandbox isn't ready\"; `llm_unconfigured` → \"No LLM configured\".\n- [ ] Pass `runId={params.id}` to `<AskFabroSidebar>`.\n- [ ] `bun run typecheck && bun test`.\n- [ ] Commit: `feat(web): enable Ask Fabro sidebar on run pages`.\n\n---\n\n## Tests to run before each PR\n\n- Rust: `cargo +nightly-2026-04-14 fmt --check --all` · `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` · `cargo build --workspace` · `cargo nextest run -p fabro-server -p fabro-workflow`\n- Web: `cd apps/fabro-web && bun run typecheck && bun test`\n\n## Unresolved questions\n\n1. **`interact:get` payload size** — `get` may return a large `RunProjection` (all stage data). If it blows agent context, consider a trimmed projection. Verify before Task 4.\n2. **Server self-base-URL** — does `AppState` already expose its bound loopback address? If not, Task 2 must add an accessor. Confirm the server always binds a loopback-reachable addr (vs. a unix socket only — see `server.listen`).\n3. **Session reuse** — one Ask Fabro session per run reused across sidebar opens (plan assumes this via `sessionStorage`), or fresh each open?\n4. **Capability scope** — Ask Fabro can now cancel/archive/steer/answer its run. Confirm that's the intended product surface; consider whether `archive`/`unarchive` should be excluded even though `interact` is otherwise full-access.\n5. **Phase split** — Phase 1 + 2 as two PRs (Phase 2 works without 1; agent just lacks run tools), or ship together so the feature only appears once useful?\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": [],
+          "controls": {
+            "reasoning_effort": null,
+            "speed": null
+          }
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt"
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "clone": {
+          "enabled": true
+        },
+        "run_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "meta_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "stop_on_terminal": true,
+          "devcontainer": false,
+          "env": {},
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {}
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "volumes": [],
+            "snapshot": {
+              "name": "fabro-v11",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \\\n        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \\\n        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install real Chromium (not the snap stub) via xtradeb PPA\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        software-properties-common curl gnupg \\\n    && add-apt-repository -y ppa:xtradeb/apps \\\n    && apt-get update \\\n    && apt-get install -y --no-install-recommends chromium \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Wrapper: Chromium needs --no-sandbox when running as root in a container,\n# and --disable-dev-shm-usage avoids crashes from small /dev/shm\nRUN printf '#!/bin/bash\\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage \"$@\"\\n' \\\n        > /usr/local/bin/chromium-wrapper \\\n    && chmod +x /usr/local/bin/chromium-wrapper\n\n# Make the wrapper the default in the system .desktop file and via alternatives\nRUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \\\n        /usr/share/applications/chromium.desktop \\\n    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \\\n        /usr/local/bin/chromium-wrapper 100\n\n# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)\nRUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \\\n    && printf 'WebBrowser=custom-WebBrowser\\n' > /etc/xdg/xfce4/helpers.rc \\\n    && printf '[Desktop Entry]\\n\\\nVersion=1.0\\n\\\nType=X-XFCE-Helper\\n\\\nName=Chromium\\n\\\nIcon=chromium\\n\\\nX-XFCE-Category=WebBrowser\\n\\\nX-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper \"%%s\"\\n\\\nX-XFCE-Commands=/usr/local/bin/chromium-wrapper\\n' \\\n        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\\n        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\\n    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" \\\n        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\\n    && apt-get update && apt-get install -y --no-install-recommends gh \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null
+        },
+        "agent": {
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        },
+        "integrations": {
+          "github": {
+            "permissions": {}
+          }
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "goal_gate": {
+              "Boolean": true
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "retry_target": {
+              "String": "fixup"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Start"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "label": {
+              "String": "Fix Lints"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Format"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "rankdir": {
+          "String": "LR"
+        },
+        "goal": {
+          "String": "# Ask Fabro Sidebar Wiring — Implementation Plan\n\n> **For agentic workers:** Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use `- [ ]` checkboxes.\n\n**Goal:** Ship the Ask Fabro sidebar on run pages — wired to real session APIs, with the agent able to inspect *and control* its owning run.\n\n**Architecture:** Two phases. Phase 1 (Rust): give Ask Fabro agent sessions the full `fabro_run_interact` + `fabro_run_events` tools, scoped to the owning run, via the existing HTTP `FabroClient` backend. Phase 2 (web): replace the scripted sidebar adapter with real session calls; drop `?ask=1`, gate on `run.ask_fabro.available`.\n\n**Tech Stack:** Rust (fabro-server, fabro-workflow, fabro-tool), React 19 + assistant-ui (fabro-web), generated API clients.\n\n**Decisions locked:**\n- Reuse `fabro-tool` — no new tool.\n- Subset = `fabro_run_interact` + `fabro_run_events`, **full access** (incl. mutating actions: start/cancel/steer/archive/answer).\n- Backend = existing HTTP `FabroClient` (already implements all reads + mutations).\n- Scoped to owning run — enforced by a same-run worker token; the API 403s cross-run calls.\n- File/shell tools stay read-only in Ask Fabro sessions (only the two run tools get full access).\n- Gate the sidebar on `run.ask_fabro.available`; drop `?ask=1`.\n\n---\n\n## Background (current state)\n\n- API endpoints exist (`296fbddec`): `SessionDetail`, `/sessions/{id}/events`, `/sessions/{id}/attach`, turn submission w/ `x-fabro-turn-id`, `Run.ask_fabro` readiness. Web helpers exist: `session-stream.ts`, `sessionsApi`.\n- Sidebar (`ask-fabro-sidebar.tsx`) is a prototype: scripted adapter (`chats-runtime.ts`/`chats-script.ts`), no API calls, gated behind `?ask=1` (`run-detail.tsx:363`).\n- Ask Fabro sessions built by `build_agent_session` (`fabro-server/.../handler/sessions.rs:633`): profile + run sandbox + `ReadOnly` gate (`build_ask_fabro_tool_approval`, `sessions.rs:867`). **No `fabro_run_*` tools.**\n- `fabro-tool`: tools built on the `FabroToolBackend` trait. `fabro_client::FabroClient` is the HTTP impl — already implements every trait method (reads + mutations). `FabroRunToolServices`, `register_fabro_run_tools`, `execute_fabro_run_tool` live in `fabro-workflow` (`handler/llm/api.rs`, `services.rs`); `register_fabro_run_tools` registers all 5 tools.\n- Worker tokens: `worker_token.rs` — `issue_worker_token(keys, &run_id)` mints a base same-run token; `AppState::worker_token_keys()` exposes the keys. `server.rs` already mints tokens this way for dispatched workers.\n- `register_fabro_run_tools` is `pub(crate)`; `fabro-server` already depends on `fabro-workflow`.\n\n---\n\n## File structure\n\n**Phase 1 — Rust**\n- Modify: `lib/crates/fabro-workflow/src/handler/llm/api.rs` — make `register_fabro_run_tools` `pub`; add subset variant.\n- Modify: `lib/crates/fabro-server/src/server/handler/sessions.rs` — `build_profile` returns `Box`; mint worker token, build `FabroClient`, register subset; allowlist the two tools in the gate.\n\n**Phase 2 — Web**\n- Create: `apps/fabro-web/app/lib/ask-fabro-runtime.ts` — real session adapter.\n- Modify: `apps/fabro-web/app/components/chats/ask-fabro-sidebar.tsx` — use real adapter, take `runId`.\n- Modify: `apps/fabro-web/app/routes/run-detail.tsx` — drop `?ask=1`, gate on `run.ask_fabro`.\n- Delete (verify orphaned first): `apps/fabro-web/app/lib/chats-script.ts` + scripted paths in `chats-runtime.ts`.\n\n---\n\n## Phase 1: Run tools for Ask Fabro sessions\n\n### Task 1 — Make run-tool registration callable from fabro-server\n\n- [ ] In `fabro-workflow/src/handler/llm/api.rs`: change `register_fabro_run_tools` from `pub(crate)` to `pub`. Add a subset variant:\n  ```rust\n  pub fn register_fabro_run_tools_subset(\n      registry: &mut ToolRegistry,\n      services: &FabroRunToolServices,\n      only: &[&str],\n  ) {\n      for definition in fabro_tool::tool_definitions() {\n          if only.is_empty() || only.contains(&definition.name) {\n              registry.register(fabro_run_tool(definition, services.clone()));\n          }\n      }\n  }\n  ```\n  Refactor `register_fabro_run_tools` to call it with `&[]`. `fabro_run_tool` stays private.\n- [ ] Confirm `FabroRunToolServices` (`fabro-workflow/src/services.rs`) is `pub` — it is. No change.\n- [ ] `cargo build --workspace`; `cargo nextest run -p fabro-workflow agent_run`.\n- [ ] Commit: `refactor(fabro-workflow): expose run-tool registration with tool subset`.\n\n### Task 2 — Wire FabroClient + worker token into `build_agent_session`\n\nThe session's run-control backend is the HTTP `FabroClient` pointed at the server's own API, authed with a same-run worker token. The token enforces run scoping (cross-run calls 403).\n\n**Files:** `fabro-server/src/server/handler/sessions.rs`\n\n- [ ] Change `build_profile` to return `Box<dyn AgentProfile>` (currently `Arc`); the caller registers tools on `&mut` then `Arc::from`s.\n- [ ] In `build_agent_session`, after `build_profile`, before `Session::from_record`:\n  ```rust\n  let worker_token = issue_worker_token(state.worker_token_keys(), &run_id)\n      .map_err(|err| AskFabroBuildError::Agent(anyhow::Error::new(err)))?;\n  // fabro_client::Client = generated reqwest client from the `fabro-client` crate.\n  let api_client = fabro_client::Client::new_with_client(\n      &state.self_base_url(),                 // server's own loopback base URL\n      reqwest_client_with_bearer(&worker_token),\n  );\n  let backend = fabro_tool::fabro_client::FabroClient::new(Arc::new(api_client));\n  let services = FabroRunToolServices {\n      backend:            Arc::new(backend),\n      current_run_id:     run_id,\n      base_cwd:           PathBuf::new(),     // unused by events/interact\n      user_settings_path: PathBuf::new(),    // unused by events/interact\n  };\n  register_fabro_run_tools_subset(\n      profile.tool_registry_mut(),\n      &services,\n      &[fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME, fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME],\n  );\n  ```\n  Reference impls: the worker-token mint in `server.rs`; `FabroRunToolServices` construction in `fabro-cli/src/commands/run/runner.rs`.\n- [ ] Resolve `self_base_url()` — the server's own loopback address. If `AppState` doesn't already expose it, add an accessor from the bound listen addr (`http://127.0.0.1:<port>`). Local-only call; never the public URL.\n- [ ] Ensure the session prompt/context names the owning run id so the agent passes the correct `run_id` to the tools. (Backstop: wrong id → API 403, agent self-corrects.)\n- [ ] `cargo build --workspace`.\n- [ ] Commit: `feat(fabro-server): give Ask Fabro sessions run-control tools`.\n\n### Task 3 — Allowlist the two run tools in the session gate\n\n`build_ask_fabro_tool_approval` (`sessions.rs:867`) currently denies everything not `ReadOnly`-approved. The two run tools need full access; file/shell stay read-only.\n\n- [ ] Update the closure:\n  ```rust\n  Arc::new(move |tool_name: &str, _args: &Value| {\n      if matches!(tool_name, \"fabro_run_interact\" | \"fabro_run_events\") {\n          return Ok(()); // run-control tools: full access, scoped by worker token\n      }\n      if is_tool_auto_approved(PermissionLevel::ReadOnly, tool_name) {\n          Ok(())\n      } else {\n          Err(format!(\"{tool_name} tool denied by Ask Fabro tool policy\"))\n      }\n  })\n  ```\n- [ ] Rename `build_ask_fabro_tool_approval` comment / any \"read-only policy\" wording — the session is no longer read-only (it can control its run via the API).\n- [ ] Tests: `fabro_run_interact` and `fabro_run_events` approved; `write_file` and shell denied; `read_file` approved.\n- [ ] `cargo +nightly-2026-04-14 fmt --all && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n- [ ] `cargo nextest run -p fabro-server --features test-support api::sessions`.\n- [ ] Commit: `feat(fabro-server): allow run tools through the Ask Fabro session gate`.\n\n### Task 4 — E2E coverage\n\n- [ ] E2E test (twin), mirroring `tests/it/api/sessions.rs`: create a run with a sandbox, open an Ask Fabro session, submit a turn asking about run stages — assert the agent calls a run tool and the turn completes. Add a second case: a turn that triggers a mutating `fabro_run_interact` action (e.g. `questions`/`answer` against a run with a pending question) succeeds.\n- [ ] Cross-run guard test: a tool call with a different `run_id` is rejected (worker-token scope).\n- [ ] `cargo nextest run -p fabro-server --features test-support --test it api::sessions`.\n- [ ] Commit: `test(fabro-server): Ask Fabro run-tool E2E coverage`.\n\n---\n\n## Phase 2: Wire the sidebar\n\n### Task 5 — Real session adapter\n\n**Files:** Create `apps/fabro-web/app/lib/ask-fabro-runtime.ts`\n\n- [ ] assistant-ui adapter parameterized by `runId`:\n  - First turn: `sessionsApi.createRunSession(runId, { model })` (model from `run.ask_fabro.default_model`); persist session id in `sessionStorage` keyed by `runId` so reopen resumes.\n  - Open with existing session id: `sessionsApi.getSession(id)` → render `SessionDetail.messages`, then `attachSessionEvents(id, { sinceSeq: last_seq })`.\n  - Send: `streamSessionTurn(id, { input })`; map streamed `EventEnvelope`s (incl. `run.session.*` tool-call events) to assistant-ui messages.\n- [ ] Route tool-call events through the existing `tool-fallback.tsx` renderer.\n- [ ] `bun test app/lib/ask-fabro-runtime.test.ts` (mock SSE as `session-stream.test.ts` does).\n- [ ] Commit: `feat(web): real session adapter for Ask Fabro sidebar`.\n\n### Task 6 — Sidebar uses the adapter\n\n- [ ] `ask-fabro-sidebar.tsx`: accept a `runId` prop; replace `createScriptedAdapter` with `ask-fabro-runtime`; remove `EMPTY_CHAT`/`scriptIndexRef`.\n- [ ] `rg createScriptedAdapter` — if `chats-script.ts`/scripted paths are orphaned, delete them.\n- [ ] `bun run typecheck`.\n- [ ] Commit: `feat(web): drive Ask Fabro sidebar from session API`.\n\n### Task 7 — Drop `?ask=1`, gate on readiness\n\n- [ ] `run-detail.tsx`: remove `askEnabled`/`searchParams.get(\"ask\")` (lines ~363-368, 635-648, 724-730).\n- [ ] Render the Ask Fabro button always; `disabled={!run.ask_fabro.available}`. Disabled tooltip from `unavailable_reason`: `feature_disabled` → \"Ask Fabro is disabled\"; `no_sandbox`/`sandbox_not_ready` → \"Run sandbox isn't ready\"; `llm_unconfigured` → \"No LLM configured\".\n- [ ] Pass `runId={params.id}` to `<AskFabroSidebar>`.\n- [ ] `bun run typecheck && bun test`.\n- [ ] Commit: `feat(web): enable Ask Fabro sidebar on run pages`.\n\n---\n\n## Tests to run before each PR\n\n- Rust: `cargo +nightly-2026-04-14 fmt --check --all` · `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` · `cargo build --workspace` · `cargo nextest run -p fabro-server -p fabro-workflow`\n- Web: `cd apps/fabro-web && bun run typecheck && bun test`\n\n## Unresolved questions\n\n1. **`interact:get` payload size** — `get` may return a large `RunProjection` (all stage data). If it blows agent context, consider a trimmed projection. Verify before Task 4.\n2. **Server self-base-URL** — does `AppState` already expose its bound loopback address? If not, Task 2 must add an accessor. Confirm the server always binds a loopback-reachable addr (vs. a unix socket only — see `server.listen`).\n3. **Session reuse** — one Ask Fabro session per run reused across sidebar opens (plan assumes this via `sessionStorage`), or fresh each open?\n4. **Capability scope** — Ask Fabro can now cancel/archive/steer/answer its run. Confirm that's the intended product surface; consider whether `archive`/`unarchive` should be excluded even though `interact` is otherwise full-access.\n5. **Phase split** — Phase 1 + 2 as two PRs (Phase 2 works without 1; agent just lacks run tools), or ship together so the feature only appears once useful?\n"
+        }
+      }
+    },
+    "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.240.0-nightly.1"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.240.0-nightly.1",
+        "name": "fabro-cli",
+        "version": "0.240.0-nightly.1"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "7d155fb4dc2b95af5186a09f5cf03ddec6b219f724dd1af68cf1431b6e10077c",
+    "definition_blob": "5ace3f97710c4df8f504c4d2063948448720ee6c698e9cc4fd1d2fc99249e085",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "web/thread-pair-events",
+      "sha": "90d706aa851218bd45afdde06b0a92bf8eead0aa",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "succeeded",
+        "remote": "origin",
+        "branch": "web/thread-pair-events"
+      }
+    }
+  },
+  "web_url": "http://127.0.0.1:32276/runs/01KS7S3QZC8GKYVCH0EXN4Q0E9",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-22T12:03:40.758069Z",
+  "last_event_at": "2026-05-22T12:03:57.565461Z",
+  "pending_control": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "sandbox": {
+    "provider": "daytona",
+    "image": "buildpack-deps:noble",
+    "snapshot": "fabro-v11",
+    "runtime": {
+      "id": "fabro-01KS7S3QZC8GKYVCH0EXN4Q0E9",
+      "working_directory": "/home/daytona/workspace/fabro",
+      "repo_cloned": true,
+      "clone_origin_url": "https://github.com/fabro-sh/fabro",
+      "clone_branch": "web/thread-pair-events",
+      "workspace_root": "/home/daytona/workspace",
+      "repos_root": "/home/daytona/repos",
+      "primary_repo_path": "/home/daytona/repos/fabro-sh/fabro",
+      "primary_repo_link": "/home/daytona/workspace/fabro"
+    }
+  },
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
