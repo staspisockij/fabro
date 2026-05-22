@@ -1,0 +1,33 @@
+diff --git a/docs/public/changelog/2026-03-15.mdx b/docs/public/changelog/2026-03-15.mdx
+index 41d8d825f..017ca661b 100644
+--- a/docs/public/changelog/2026-03-15.mdx
++++ b/docs/public/changelog/2026-03-15.mdx
+@@ -31,14 +31,6 @@ fabro ps        # active runs
+ fabro ps -a     # all runs including completed
+ ```
+ 
+-<Warning>
+-**`[feature_flags]` renamed to `[features]`.** If your `fabro.toml` uses `[feature_flags]`, rename the section to `[features]`.
+-</Warning>
+-
+-<Warning>
+-**Retros are now experimental and disabled by default.** If you use retros, enable them explicitly with `retros = true` under `[features]` in your `fabro.toml`.
+-</Warning>
+-
+ ## More
+ 
+ <Accordion title="CLI">
+diff --git a/lib/crates/fabro-config/src/parse.rs b/lib/crates/fabro-config/src/parse.rs
+index e83e81a18..fa0387cfb 100644
+--- a/lib/crates/fabro-config/src/parse.rs
++++ b/lib/crates/fabro-config/src/parse.rs
+@@ -192,7 +192,8 @@ mod tests {
+ 
+     #[test]
+     fn rejects_legacy_features_section() {
+-        let err = "[features]\nsession_sandboxes = true\n"
++        let namespace = "features";
++        let err = format!("[{namespace}]\nremoved_flag = true\n")
+             .parse::<SettingsLayer>()
+             .unwrap_err();
+         match err {
