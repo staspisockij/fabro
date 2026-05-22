@@ -519,7 +519,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-22T14:38:35.312818Z",
-  "last_event_at": "2026-05-22T14:38:37.358299Z",
+  "last_event_at": "2026-05-22T14:38:45.792945Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -560,13 +560,71 @@
       "diff": {}
     },
     {
-      "seq": 0,
+      "seq": 27,
       "checkpoint": {
-        "timestamp": "2026-05-22T14:38:39.512039Z",
+        "timestamp": "2026-05-22T14:38:45.791342Z",
         "current_node": "toolchain",
         "completed_nodes": [
           "start",
           "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.thread_id": "start",
+          "failure_class": "",
+          "internal.node_visit_count": 1,
+          "internal.fidelity": "compact",
+          "internal.run_id": "01KS81YS88Z6Z726MGJ1YH0PCN",
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "thread.start.current_node": "toolchain",
+          "current_node": "toolchain",
+          "outcome": "succeeded",
+          "graph.goal": "# Remove `features.session_sandboxes`\n\n## Summary\n\nRemove the `session_sandboxes` feature flag and the now-empty `[features]` settings namespace entirely. Behavior should be as if `session_sandboxes = true` was always set: Ask Fabro is never disabled by a feature flag, and UI controls previously hidden behind the flag are always shown.\n\n## Key Changes\n\n- Remove the settings namespace from config:\n  - Delete `FeaturesNamespace`, `FeaturesLayer`, `resolve_features`, and `[features]` defaults.\n  - Remove `features` from resolved `ServerSettings` and `UserSettings`.\n  - Remove `features` from the top-level settings parser allow-list, so old `[features]` config is rejected as unknown.\n- Remove the runtime gate:\n  - Simplify Ask Fabro readiness to check only sandbox presence/runtime and LLM configuration.\n  - Remove `AskFabroUnavailableReason::FeatureDisabled` and the \"Ask Fabro is disabled\" tooltip.\n- Update frontend behavior:\n  - Run detail page no longer handles `FEATURE_DISABLED`.\n  - Start page always renders the project/branch controls and no longer fetches system info just for this flag.\n- Remove public API surfaces:\n  - `/api/v1/settings` `ServerSettings` no longer includes `features`.\n  - `/api/v1/system/info` no longer includes `features`.\n  - OpenAPI removes `FeaturesNamespace`, `SystemFeatures`, `ServerSettings.features`, `SystemInfoResponse.features`, and `feature_disabled`.\n  - Regenerate Rust API types and TypeScript Axios client.\n- Update current docs:\n  - Remove `[features]` from active configuration docs, generated options docs, API docs, and unknown-key guidance.\n  - Do not touch unrelated meanings of \"features\" such as Cargo features, LLM model features, or devcontainer features.\n\n## Test Plan\n\n- Update or remove tests that assert `features.session_sandboxes` in config, settings, system info, and Ask Fabro readiness.\n- Add or adjust coverage for:\n  - Ask Fabro unavailable reasons are only `no_sandbox`, `sandbox_not_ready`, or `llm_unconfigured`.\n  - Settings parsing rejects top-level `[features]`.\n  - `/api/v1/settings` response contains only `server` at the top level.\n  - `/api/v1/system/info` has no `features` field.\n  - Start page renders project/branch controls without consulting `SystemInfo.features`.\n- Run:\n  - `cargo build -p fabro-api`\n  - `cd lib/packages/fabro-api-client && bun run generate`\n  - `cargo dev docs refresh && cargo dev docs check`\n  - `cargo nextest run -p fabro-config -p fabro-api -p fabro-server -p fabro-cli`\n  - `cd apps/fabro-web && bun test && bun run typecheck`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n## Acceptance Checks\n\n- `rg -n \"session_sandboxes|FeaturesNamespace|SystemFeatures|feature_disabled|Ask Fabro is disabled\" lib apps docs/public` returns no relevant matches.\n- `rg -n \"\\\\[features\\\\]\" docs/public lib/crates/fabro-config/src lib/crates/fabro-types/src lib/crates/fabro-server/src apps/fabro-web/app` returns no settings-namespace matches.\n- Existing sandbox runtime behavior remains unchanged; only the feature flag and schema surface are removed.\n\n## Assumptions\n\n- This is intentionally a breaking config/API cleanup: existing user config containing `[features]` should fail validation until removed.\n- Historical internal plans may still contain old text unless they are part of active public docs; implementation should prioritize product code, generated clients, and current docs.\n",
+          "graph.rankdir": "LR",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "failure_signature": "",
+          "internal.retry_count.toolchain": 0,
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.retry_count.start": 0
+        },
+        "node_outcomes": {
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "git_commit_sha": "3ed3c92c5309ab39d7cf25ea0439382eb3c9eee8",
+        "node_visits": {
+          "toolchain": 1,
+          "start": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-22T14:40:51.506950Z",
+        "current_node": "preflight_compile",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile"
         ],
         "node_retries": {},
         "context_values": {
@@ -576,18 +634,28 @@
           "internal.run_id": "01KS81YS88Z6Z726MGJ1YH0PCN",
           "internal.retry_count.start": 0,
           "thread.start.current_node": "toolchain",
-          "internal.thread_id": "start",
+          "thread.toolchain.current_node": "preflight_compile",
+          "internal.thread_id": "toolchain",
           "graph.goal": "# Remove `features.session_sandboxes`\n\n## Summary\n\nRemove the `session_sandboxes` feature flag and the now-empty `[features]` settings namespace entirely. Behavior should be as if `session_sandboxes = true` was always set: Ask Fabro is never disabled by a feature flag, and UI controls previously hidden behind the flag are always shown.\n\n## Key Changes\n\n- Remove the settings namespace from config:\n  - Delete `FeaturesNamespace`, `FeaturesLayer`, `resolve_features`, and `[features]` defaults.\n  - Remove `features` from resolved `ServerSettings` and `UserSettings`.\n  - Remove `features` from the top-level settings parser allow-list, so old `[features]` config is rejected as unknown.\n- Remove the runtime gate:\n  - Simplify Ask Fabro readiness to check only sandbox presence/runtime and LLM configuration.\n  - Remove `AskFabroUnavailableReason::FeatureDisabled` and the \"Ask Fabro is disabled\" tooltip.\n- Update frontend behavior:\n  - Run detail page no longer handles `FEATURE_DISABLED`.\n  - Start page always renders the project/branch controls and no longer fetches system info just for this flag.\n- Remove public API surfaces:\n  - `/api/v1/settings` `ServerSettings` no longer includes `features`.\n  - `/api/v1/system/info` no longer includes `features`.\n  - OpenAPI removes `FeaturesNamespace`, `SystemFeatures`, `ServerSettings.features`, `SystemInfoResponse.features`, and `feature_disabled`.\n  - Regenerate Rust API types and TypeScript Axios client.\n- Update current docs:\n  - Remove `[features]` from active configuration docs, generated options docs, API docs, and unknown-key guidance.\n  - Do not touch unrelated meanings of \"features\" such as Cargo features, LLM model features, or devcontainer features.\n\n## Test Plan\n\n- Update or remove tests that assert `features.session_sandboxes` in config, settings, system info, and Ask Fabro readiness.\n- Add or adjust coverage for:\n  - Ask Fabro unavailable reasons are only `no_sandbox`, `sandbox_not_ready`, or `llm_unconfigured`.\n  - Settings parsing rejects top-level `[features]`.\n  - `/api/v1/settings` response contains only `server` at the top level.\n  - `/api/v1/system/info` has no `features` field.\n  - Start page renders project/branch controls without consulting `SystemInfo.features`.\n- Run:\n  - `cargo build -p fabro-api`\n  - `cd lib/packages/fabro-api-client && bun run generate`\n  - `cargo dev docs refresh && cargo dev docs check`\n  - `cargo nextest run -p fabro-config -p fabro-api -p fabro-server -p fabro-cli`\n  - `cd apps/fabro-web && bun test && bun run typecheck`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n## Acceptance Checks\n\n- `rg -n \"session_sandboxes|FeaturesNamespace|SystemFeatures|feature_disabled|Ask Fabro is disabled\" lib apps docs/public` returns no relevant matches.\n- `rg -n \"\\\\[features\\\\]\" docs/public lib/crates/fabro-config/src lib/crates/fabro-types/src lib/crates/fabro-server/src apps/fabro-web/app` returns no settings-namespace matches.\n- Existing sandbox runtime behavior remains unchanged; only the feature flag and schema surface are removed.\n\n## Assumptions\n\n- This is intentionally a breaking config/API cleanup: existing user config containing `[features]` should fail validation until removed.\n- Historical internal plans may still contain old text unless they are part of active public docs; implementation should prioritize product code, generated clients, and current docs.\n",
           "failure_signature": "",
-          "current_node": "toolchain",
+          "current_node": "preflight_compile",
           "internal.node_visit_count": 1,
           "failure_class": "",
-          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.retry_count.preflight_compile": 0,
           "outcome": "succeeded",
           "graph.rankdir": "LR",
           "internal.work_dir": "/home/daytona/workspace/fabro"
         },
         "node_outcomes": {
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
           "start": {
             "status": "succeeded",
             "usage": null
@@ -601,10 +669,11 @@
             "usage": null
           }
         },
-        "next_node_id": "preflight_compile",
+        "next_node_id": "preflight_lint",
         "node_visits": {
           "start": 1,
-          "toolchain": 1
+          "toolchain": 1,
+          "preflight_compile": 1
         }
       },
       "diff": {}
@@ -635,7 +704,12 @@
       "first_event_seq": 20,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-22T14:38:39.511027Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -643,10 +717,53 @@
         "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
         "language": "shell"
       },
+      "script_timing": {
+        "output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+        "exit_code": 0,
+        "duration_ms": 2148,
+        "termination": "exited",
+        "output_bytes": 36,
+        "live_streaming": true
+      },
+      "parallel_results": null,
+      "output": null,
+      "output_bytes": 36,
+      "live_streaming": true,
+      "termination": "exited",
+      "started_at": "2026-05-22T14:38:37.358273Z",
+      "handler": "command",
+      "timing": {
+        "wall_time_ms": 2152,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "preflight_compile@1": {
+      "first_event_seq": 30,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "cargo check -q --workspace 2>&1",
+        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
+        "language": "shell"
+      },
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-22T14:38:37.358273Z",
+      "started_at": "2026-05-22T14:38:45.792607Z",
       "handler": "command",
       "usage": {
         "input_tokens": 0,
