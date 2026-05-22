@@ -1,0 +1,807 @@
+diff --git a/lib/crates/fabro-agent/src/lib.rs b/lib/crates/fabro-agent/src/lib.rs
+index 00be22526..13e6aa049 100644
+--- a/lib/crates/fabro-agent/src/lib.rs
++++ b/lib/crates/fabro-agent/src/lib.rs
+@@ -70,10 +70,7 @@ pub use tools::{
+     make_shell_tool, make_shell_tool_with_config, make_write_file_tool, register_core_tools,
+ };
+ pub use truncation::{TruncationMode, truncate_lines, truncate_output, truncate_tool_output};
+-pub use types::{
+-    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
+-    SkillActivationSource, SkillSummary,
+-};
++pub use types::{AgentEvent, Message, SessionEvent, SessionState};
+ 
+ #[cfg(test)]
+ #[allow(
+diff --git a/lib/crates/fabro-agent/src/memory.rs b/lib/crates/fabro-agent/src/memory.rs
+index 07e59c6da..7d413556c 100644
+--- a/lib/crates/fabro-agent/src/memory.rs
++++ b/lib/crates/fabro-agent/src/memory.rs
+@@ -11,14 +11,14 @@ pub const BUDGET_BYTES: usize = 32768;
+ 
+ /// One discovered memory file. `content` is what gets inlined into the
+ /// system prompt. The remaining fields describe the file for
+-/// observability and never carry the file's text.
++/// observability and never carry the file's text. The number of bytes
++/// actually loaded into the prompt is `content.len()`.
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct MemoryDocument {
+-    pub path:         String,
+-    pub content:      String,
+-    pub byte_count:   usize,
+-    pub loaded_bytes: usize,
+-    pub truncated:    bool,
++    pub path:       String,
++    pub content:    String,
++    pub byte_count: usize,
++    pub truncated:  bool,
+ }
+ 
+ pub async fn discover_memory(
+@@ -67,7 +67,6 @@ pub async fn discover_memory(
+                         path,
+                         content,
+                         byte_count,
+-                        loaded_bytes: byte_count,
+                         truncated: false,
+                     });
+                 } else if budget_remaining > 0 {
+@@ -78,13 +77,11 @@ pub async fn discover_memory(
+                         "Project doc truncated to fit budget"
+                     );
+                     let truncated = truncate_to_budget(&content, budget_remaining);
+-                    let loaded_bytes = truncated.len();
+                     budget_remaining = 0;
+                     results.push(MemoryDocument {
+                         path,
+                         content: truncated,
+                         byte_count,
+-                        loaded_bytes,
+                         truncated: true,
+                     });
+                 } else {
+@@ -94,7 +91,7 @@ pub async fn discover_memory(
+         }
+     }
+ 
+-    let total_bytes: usize = results.iter().map(|doc| doc.loaded_bytes).sum();
++    let total_bytes: usize = results.iter().map(|doc| doc.content.len()).sum();
+     info!(files = results.len(), total_bytes, "Project docs loaded");
+ 
+     Ok(results)
+@@ -173,7 +170,7 @@ mod tests {
+         assert_eq!(docs[0].content, "Agent instructions");
+         assert_eq!(docs[0].path, "/repo/AGENTS.md");
+         assert_eq!(docs[0].byte_count, "Agent instructions".len());
+-        assert_eq!(docs[0].loaded_bytes, "Agent instructions".len());
++        assert_eq!(docs[0].content.len(), docs[0].byte_count);
+         assert!(!docs[0].truncated);
+     }
+ 
+@@ -262,7 +259,7 @@ mod tests {
+         assert_eq!(docs.len(), 2);
+         assert_eq!(docs[0].content, large_content);
+         assert!(!docs[0].truncated);
+-        assert_eq!(docs[0].byte_count, docs[0].loaded_bytes);
++        assert_eq!(docs[0].byte_count, docs[0].content.len());
+         // Second doc should be truncated to fit remaining budget
+         assert!(
+             docs[1]
+@@ -270,7 +267,7 @@ mod tests {
+                 .ends_with("[Project instructions truncated at 32KB]")
+         );
+         assert!(docs[1].truncated);
+-        assert!(docs[1].byte_count > docs[1].loaded_bytes);
++        assert!(docs[1].byte_count > docs[1].content.len());
+         assert!(docs[0].content.len() + docs[1].content.len() <= BUDGET_BYTES);
+     }
+ 
+@@ -342,8 +339,8 @@ mod tests {
+         assert_eq!(docs.len(), 1);
+         assert!(docs[0].truncated);
+         assert_eq!(docs[0].byte_count, large_content.len());
+-        assert!(docs[0].loaded_bytes < docs[0].byte_count);
+-        assert!(docs[0].loaded_bytes <= BUDGET_BYTES);
++        assert!(docs[0].content.len() < docs[0].byte_count);
++        assert!(docs[0].content.len() <= BUDGET_BYTES);
+     }
+ 
+     #[tokio::test]
+diff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs
+index 4163e70ed..30a1b1201 100644
+--- a/lib/crates/fabro-agent/src/session.rs
++++ b/lib/crates/fabro-agent/src/session.rs
+@@ -39,10 +39,7 @@ use crate::skills::{
+ };
+ use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
+ use crate::tool_execution::execute_tool_calls;
+-use crate::types::{
+-    AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
+-    SkillActivationSource, SkillSummary,
+-};
++use crate::types::{AgentEvent, Message, SessionEvent, SessionState};
+ 
+ /// One queued external control item for a live session.
+ #[derive(Debug, Clone)]
+@@ -492,26 +489,24 @@ impl Session {
+         )
+         .await?;
+ 
+-        let provider_profile_name = self.provider_profile.profile_kind().to_string();
++        let provider_profile = self.provider_profile.profile_kind();
+ 
+         // Emit memory loaded event with file metadata. Contents are deliberately
+         // omitted so the durable event stream never carries file bytes.
+-        let memory_files: Vec<MemoryFileSummary> = self
++        let memory_files: Vec<fabro_types::AgentMemoryFileProps> = self
+             .memory
+             .iter()
+-            .map(|doc| MemoryFileSummary {
++            .map(|doc| fabro_types::AgentMemoryFileProps {
+                 path:         doc.path.clone(),
+                 byte_count:   doc.byte_count,
+-                loaded_bytes: doc.loaded_bytes,
++                loaded_bytes: doc.content.len(),
+                 truncated:    doc.truncated,
+             })
+             .collect();
+-        let total_loaded_bytes: usize = self.memory.iter().map(|doc| doc.loaded_bytes).sum();
+         self.event_emitter
+             .emit(self.id.clone(), AgentEvent::MemoryLoaded {
+-                provider_profile: provider_profile_name.clone(),
++                provider_profile,
+                 files: memory_files,
+-                total_loaded_bytes,
+                 budget_bytes: BUDGET_BYTES,
+             });
+ 
+@@ -526,19 +521,19 @@ impl Session {
+         self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs, &cancel_token).await?;
+         debug!(skill_count = self.skills.len(), "Skills discovered");
+ 
+-        let skill_summaries: Vec<SkillSummary> = self
++        let skill_summaries: Vec<fabro_types::AgentSkillSummary> = self
+             .skills
+             .iter()
+-            .map(|skill| SkillSummary {
++            .map(|skill| fabro_types::AgentSkillSummary {
+                 name:        skill.name.clone(),
+                 description: skill.description.clone(),
+             })
+             .collect();
+         self.event_emitter
+             .emit(self.id.clone(), AgentEvent::SkillsDiscovered {
+-                provider_profile: provider_profile_name.clone(),
+-                source_dirs:      skill_dirs.clone(),
+-                skills:           skill_summaries,
++                provider_profile,
++                source_dirs: skill_dirs.clone(),
++                skills: skill_summaries,
+             });
+ 
+         // Register use_skill tool when skills are available
+@@ -562,11 +557,11 @@ impl Session {
+ 
+             for (server_name, result) in &results {
+                 match result {
+-                    Ok(tool_count) => {
++                    Ok(_) => {
+                         let tools = manager
+                             .tool_summaries_for_server(server_name)
+                             .into_iter()
+-                            .map(|(name, original_name)| McpToolSummary {
++                            .map(|(name, original_name)| fabro_types::AgentMcpToolSummary {
+                                 name,
+                                 original_name,
+                             })
+@@ -574,7 +569,6 @@ impl Session {
+                         self.event_emitter
+                             .emit(self.id.clone(), AgentEvent::McpServerReady {
+                                 server_name: server_name.clone(),
+-                                tool_count: *tool_count,
+                                 tools,
+                             });
+                     }
+@@ -1194,7 +1188,7 @@ impl Session {
+             self.event_emitter
+                 .emit(self.id.clone(), AgentEvent::SkillActivated {
+                     skill_name: name.clone(),
+-                    source:     SkillActivationSource::Slash,
++                    source:     fabro_types::AgentSkillActivationSource::Slash,
+                 });
+         }
+         let expanded_input = expanded.text;
+@@ -3709,14 +3703,8 @@ mod tests {
+         // summaries pulled from the connection manager.
+         let mut mcp_ready = false;
+         while let Ok(event) = rx.try_recv() {
+-            if let AgentEvent::McpServerReady {
+-                server_name,
+-                tool_count,
+-                tools,
+-            } = &event.event
+-            {
++            if let AgentEvent::McpServerReady { server_name, tools } = &event.event {
+                 assert_eq!(server_name, "test-echo");
+-                assert_eq!(*tool_count, 1);
+                 assert_eq!(tools.len(), 1);
+                 assert_eq!(tools[0].name, "mcp__test_echo__echo");
+                 assert_eq!(tools[0].original_name, "echo");
+@@ -3957,20 +3945,18 @@ mod tests {
+         while let Ok(envelope) = rx.try_recv() {
+             if let AgentEvent::MemoryLoaded {
+                 files,
+-                total_loaded_bytes,
+                 budget_bytes,
+                 provider_profile,
+             } = envelope.event
+             {
+-                memory_event = Some((files, total_loaded_bytes, budget_bytes, provider_profile));
++                memory_event = Some((files, budget_bytes, provider_profile));
+                 break;
+             }
+         }
+-        let (files, total_loaded_bytes, budget_bytes, provider_profile) =
++        let (files, budget_bytes, provider_profile) =
+             memory_event.expect("MemoryLoaded should be emitted");
+-        assert_eq!(provider_profile, "anthropic");
++        assert_eq!(provider_profile, fabro_model::AgentProfileKind::Anthropic);
+         assert_eq!(budget_bytes, 32768);
+-        assert_eq!(total_loaded_bytes, "Hello world".len());
+         assert_eq!(files.len(), 1);
+         assert_eq!(files[0].path, "/home/test/AGENTS.md");
+         assert_eq!(files[0].byte_count, "Hello world".len());
+@@ -4039,7 +4025,7 @@ mod tests {
+         }
+         let (provider_profile, source_dirs, skills) =
+             got.expect("SkillsDiscovered must be emitted");
+-        assert_eq!(provider_profile, "anthropic");
++        assert_eq!(provider_profile, fabro_model::AgentProfileKind::Anthropic);
+         assert_eq!(source_dirs, vec!["/skills".to_string()]);
+         assert_eq!(skills.len(), 1);
+         assert_eq!(skills[0].name, "commit");
+@@ -4098,16 +4084,15 @@ mod tests {
+         let mut rx = session.subscribe();
+         session.process_input("/commit fix things").await.unwrap();
+ 
+-        let mut activations: Vec<(String, SkillActivationSource)> = Vec::new();
++        let mut activations: Vec<(String, fabro_types::AgentSkillActivationSource)> = Vec::new();
+         while let Ok(envelope) = rx.try_recv() {
+             if let AgentEvent::SkillActivated { skill_name, source } = envelope.event {
+                 activations.push((skill_name, source));
+             }
+         }
+         assert!(
+-            activations
+-                .iter()
+-                .any(|(name, source)| name == "commit" && *source == SkillActivationSource::Slash),
++            activations.iter().any(|(name, source)| name == "commit"
++                && *source == fabro_types::AgentSkillActivationSource::Slash),
+             "expected slash skill activation, got {activations:?}"
+         );
+     }
+@@ -4150,7 +4135,8 @@ mod tests {
+         let mut tool_activations = 0;
+         while let Ok(envelope) = rx.try_recv() {
+             if let AgentEvent::SkillActivated { source, skill_name } = envelope.event {
+-                if source == SkillActivationSource::Tool && skill_name == "commit" {
++                if source == fabro_types::AgentSkillActivationSource::Tool && skill_name == "commit"
++                {
+                     tool_activations += 1;
+                 }
+             }
+diff --git a/lib/crates/fabro-agent/src/skills.rs b/lib/crates/fabro-agent/src/skills.rs
+index f7b4e3eaf..34c6e126b 100644
+--- a/lib/crates/fabro-agent/src/skills.rs
++++ b/lib/crates/fabro-agent/src/skills.rs
+@@ -7,7 +7,7 @@ use crate::error::{Error, InterruptReason};
+ use crate::sandbox::Sandbox;
+ use crate::tool_registry::RegisteredTool;
+ use crate::tools::required_str;
+-use crate::types::{AgentEvent, SkillActivationSource};
++use crate::types::AgentEvent;
+ 
+ #[derive(Debug, Clone)]
+ pub struct Skill {
+@@ -187,7 +187,7 @@ pub fn make_use_skill_tool(skills: Arc<Vec<Skill>>) -> RegisteredTool {
+                     .ok_or_else(|| format!("Unknown skill: {name}"))?;
+                 ctx.emit_agent_event(AgentEvent::SkillActivated {
+                     skill_name: name.to_string(),
+-                    source:     SkillActivationSource::Tool,
++                    source:     fabro_types::AgentSkillActivationSource::Tool,
+                 });
+                 Ok(skill.template.clone())
+             })
+diff --git a/lib/crates/fabro-agent/src/types.rs b/lib/crates/fabro-agent/src/types.rs
+index 95833a2d8..9e497bbd0 100644
+--- a/lib/crates/fabro-agent/src/types.rs
++++ b/lib/crates/fabro-agent/src/types.rs
+@@ -3,7 +3,7 @@ use std::time::SystemTime;
+ use chrono::{DateTime, Utc};
+ use fabro_llm::Error as LlmError;
+ use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
+-use fabro_model::ModelRef;
++use fabro_model::{AgentProfileKind, ModelRef};
+ use fabro_types::SessionMessage;
+ use serde::de::DeserializeOwned;
+ use serde::{Deserialize, Serialize};
+@@ -194,33 +194,6 @@ pub enum SessionState {
+     Closed,
+ }
+ 
+-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+-pub struct MemoryFileSummary {
+-    pub path:         String,
+-    pub byte_count:   usize,
+-    pub loaded_bytes: usize,
+-    pub truncated:    bool,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+-pub struct SkillSummary {
+-    pub name:        String,
+-    pub description: String,
+-}
+-
+-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+-pub struct McpToolSummary {
+-    pub name:          String,
+-    pub original_name: String,
+-}
+-
+-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+-#[serde(rename_all = "snake_case")]
+-pub enum SkillActivationSource {
+-    Slash,
+-    Tool,
+-}
+-
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub enum AgentEvent {
+     SessionStarted {
+@@ -279,9 +252,6 @@ pub enum AgentEvent {
+     TurnLimitReached {
+         max_turns: usize,
+     },
+-    SkillExpanded {
+-        skill_name: String,
+-    },
+     SteeringInjected {
+         text:  String,
+         /// Principal that authored the steer. Lifted to top-level
+@@ -329,27 +299,25 @@ pub enum AgentEvent {
+     },
+     McpServerReady {
+         server_name: String,
+-        tool_count:  usize,
+-        tools:       Vec<McpToolSummary>,
++        tools:       Vec<fabro_types::AgentMcpToolSummary>,
+     },
+     McpServerFailed {
+         server_name: String,
+         error:       String,
+     },
+     MemoryLoaded {
+-        provider_profile:   String,
+-        files:              Vec<MemoryFileSummary>,
+-        total_loaded_bytes: usize,
+-        budget_bytes:       usize,
++        provider_profile: AgentProfileKind,
++        files:            Vec<fabro_types::AgentMemoryFileProps>,
++        budget_bytes:     usize,
+     },
+     SkillsDiscovered {
+-        provider_profile: String,
++        provider_profile: AgentProfileKind,
+         source_dirs:      Vec<String>,
+-        skills:           Vec<SkillSummary>,
++        skills:           Vec<fabro_types::AgentSkillSummary>,
+     },
+     SkillActivated {
+         skill_name: String,
+-        source:     SkillActivationSource,
++        source:     fabro_types::AgentSkillActivationSource,
+     },
+     /// New todo / task was created. Carries the full row so the projection
+     /// can be reconstructed from `todo.created` alone.
+@@ -373,7 +341,6 @@ impl AgentEvent {
+                 | Self::TextDelta { .. }
+                 | Self::ReasoningDelta { .. }
+                 | Self::ToolCallOutputDelta { .. }
+-                | Self::SkillExpanded { .. }
+         )
+     }
+ 
+@@ -463,9 +430,6 @@ impl AgentEvent {
+             Self::TurnLimitReached { max_turns } => {
+                 warn!(session_id, max_turns, "Message limit reached");
+             }
+-            Self::SkillExpanded { skill_name } => {
+-                debug!(session_id, skill = skill_name.as_str(), "Skill expanded");
+-            }
+             Self::SteeringInjected { text, .. } => {
+                 debug!(session_id, text_len = text.len(), "Steering injected");
+             }
+@@ -544,30 +508,24 @@ impl AgentEvent {
+             Self::SubAgentClosed { agent_id, depth } => {
+                 debug!(session_id, agent_id, depth, "Sub-agent closed");
+             }
+-            Self::McpServerReady {
+-                server_name,
+-                tool_count,
+-                tools,
+-            } => {
++            Self::McpServerReady { server_name, tools } => {
+                 info!(
+                     session_id,
+                     server = server_name.as_str(),
+-                    tool_count,
+-                    summary_count = tools.len(),
++                    tool_count = tools.len(),
+                     "MCP server ready"
+                 );
+             }
+             Self::MemoryLoaded {
+                 provider_profile,
+                 files,
+-                total_loaded_bytes,
+                 budget_bytes,
+             } => {
+                 info!(
+                     session_id,
+-                    provider_profile = provider_profile.as_str(),
++                    provider_profile = %provider_profile,
+                     file_count = files.len(),
+-                    total_loaded_bytes,
++                    total_loaded_bytes = files.iter().map(|f| f.loaded_bytes).sum::<usize>(),
+                     budget_bytes,
+                     "Agent memory loaded"
+                 );
+@@ -579,7 +537,7 @@ impl AgentEvent {
+             } => {
+                 info!(
+                     session_id,
+-                    provider_profile = provider_profile.as_str(),
++                    provider_profile = %provider_profile,
+                     skill_count = skills.len(),
+                     source_dir_count = source_dirs.len(),
+                     "Agent skills discovered"
+@@ -690,16 +648,6 @@ mod tests {
+         }));
+     }
+ 
+-    #[test]
+-    fn skill_expanded_constructible() {
+-        let event = AgentEvent::SkillExpanded {
+-            skill_name: "commit".into(),
+-        };
+-        assert!(
+-            matches!(event, AgentEvent::SkillExpanded { skill_name } if skill_name == "commit")
+-        );
+-    }
+-
+     #[test]
+     fn subagent_spawned_constructible() {
+         let event = AgentEvent::SubAgentSpawned {
+@@ -832,13 +780,12 @@ mod tests {
+     fn mcp_server_ready_constructible() {
+         let event = AgentEvent::McpServerReady {
+             server_name: "filesystem".into(),
+-            tool_count:  3,
+             tools:       Vec::new(),
+         };
+-        assert!(matches!(event, AgentEvent::McpServerReady {
+-            tool_count: 3,
+-            ..
+-        }));
++        assert!(matches!(
++            event,
++            AgentEvent::McpServerReady { server_name, .. } if server_name == "filesystem"
++        ));
+     }
+ 
+     #[test]
+@@ -857,7 +804,6 @@ mod tests {
+         let events = vec![
+             AgentEvent::McpServerReady {
+                 server_name: "fs".into(),
+-                tool_count:  5,
+                 tools:       Vec::new(),
+             },
+             AgentEvent::McpServerFailed {
+@@ -868,10 +814,10 @@ mod tests {
+         let json = serde_json::to_string(&events).unwrap();
+         let deserialized: Vec<AgentEvent> = serde_json::from_str(&json).unwrap();
+         assert_eq!(deserialized.len(), 2);
+-        assert!(matches!(&deserialized[0], AgentEvent::McpServerReady {
+-            tool_count: 5,
+-            ..
+-        }));
++        assert!(matches!(
++            &deserialized[0],
++            AgentEvent::McpServerReady { server_name, .. } if server_name == "fs"
++        ));
+         assert!(matches!(
+             &deserialized[1],
+             AgentEvent::McpServerFailed { .. }
+diff --git a/lib/crates/fabro-types/src/lib.rs b/lib/crates/fabro-types/src/lib.rs
+index 45f1d1f4d..2430a7cc3 100644
+--- a/lib/crates/fabro-types/src/lib.rs
++++ b/lib/crates/fabro-types/src/lib.rs
+@@ -93,6 +93,7 @@ pub use run::{
+ };
+ pub use run_blob_id::RunBlobId;
+ pub use run_event::{
++    AgentMcpToolSummary, AgentMemoryFileProps, AgentSkillActivationSource, AgentSkillSummary,
+     EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
+     RunEvent, RunNoticeCode, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason,
+     SessionCapability, TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,
+diff --git a/lib/crates/fabro-types/src/run_event/agent.rs b/lib/crates/fabro-types/src/run_event/agent.rs
+index 56106dc60..1666e6c43 100644
+--- a/lib/crates/fabro-types/src/run_event/agent.rs
++++ b/lib/crates/fabro-types/src/run_event/agent.rs
+@@ -1,3 +1,4 @@
++use fabro_model::AgentProfileKind;
+ use serde::{Deserialize, Serialize};
+ use serde_json::Value;
+ 
+@@ -235,7 +236,7 @@ pub struct AgentMcpFailedProps {
+ 
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub struct AgentMemoryLoadedProps {
+-    pub provider_profile:   String,
++    pub provider_profile:   AgentProfileKind,
+     pub files:              Vec<AgentMemoryFileProps>,
+     pub total_loaded_bytes: usize,
+     pub budget_bytes:       usize,
+@@ -252,7 +253,7 @@ pub struct AgentMemoryFileProps {
+ 
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub struct AgentSkillsDiscoveredProps {
+-    pub provider_profile: String,
++    pub provider_profile: AgentProfileKind,
+     pub source_dirs:      Vec<String>,
+     pub skills:           Vec<AgentSkillSummary>,
+     pub visit:            u32,
+diff --git a/lib/crates/fabro-types/src/run_event/mod.rs b/lib/crates/fabro-types/src/run_event/mod.rs
+index 564dea99a..91fba066d 100644
+--- a/lib/crates/fabro-types/src/run_event/mod.rs
++++ b/lib/crates/fabro-types/src/run_event/mod.rs
+@@ -1999,7 +1999,7 @@ mod tests {
+     #[test]
+     fn agent_memory_loaded_serializes_with_canonical_name() {
+         let body = EventBody::AgentMemoryLoaded(AgentMemoryLoadedProps {
+-            provider_profile:   "anthropic".to_string(),
++            provider_profile:   fabro_model::AgentProfileKind::Anthropic,
+             files:              vec![AgentMemoryFileProps {
+                 path:         "/repo/AGENTS.md".to_string(),
+                 byte_count:   100,
+@@ -2029,7 +2029,7 @@ mod tests {
+     #[test]
+     fn agent_skills_discovered_serializes_with_canonical_name() {
+         let body = EventBody::AgentSkillsDiscovered(AgentSkillsDiscoveredProps {
+-            provider_profile: "openai".to_string(),
++            provider_profile: fabro_model::AgentProfileKind::OpenAi,
+             source_dirs:      vec!["/repo/.fabro/skills".to_string()],
+             skills:           vec![AgentSkillSummary {
+                 name:        "commit".to_string(),
+diff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs
+index c1e008159..bc038d71c 100644
+--- a/lib/crates/fabro-workflow/src/event/convert.rs
++++ b/lib/crates/fabro-workflow/src/event/convert.rs
+@@ -719,22 +719,14 @@ fn event_body_from_event(event: &Event) -> EventBody {
+                     visit:    *visit,
+                 })
+             }
+-            AgentEvent::McpServerReady {
+-                server_name,
+-                tool_count,
+-                tools,
+-            } => EventBody::AgentMcpReady(fabro_types::AgentMcpReadyProps {
+-                server_name: server_name.clone(),
+-                tool_count:  *tool_count,
+-                tools:       tools
+-                    .iter()
+-                    .map(|tool| fabro_types::AgentMcpToolSummary {
+-                        name:          tool.name.clone(),
+-                        original_name: tool.original_name.clone(),
+-                    })
+-                    .collect(),
+-                visit:       *visit,
+-            }),
++            AgentEvent::McpServerReady { server_name, tools } => {
++                EventBody::AgentMcpReady(fabro_types::AgentMcpReadyProps {
++                    server_name: server_name.clone(),
++                    tool_count:  tools.len(),
++                    tools:       tools.clone(),
++                    visit:       *visit,
++                })
++            }
+             AgentEvent::McpServerFailed { server_name, error } => {
+                 EventBody::AgentMcpFailed(fabro_types::AgentMcpFailedProps {
+                     server_name: server_name.clone(),
+@@ -745,20 +737,11 @@ fn event_body_from_event(event: &Event) -> EventBody {
+             AgentEvent::MemoryLoaded {
+                 provider_profile,
+                 files,
+-                total_loaded_bytes,
+                 budget_bytes,
+             } => EventBody::AgentMemoryLoaded(fabro_types::AgentMemoryLoadedProps {
+-                provider_profile:   provider_profile.clone(),
+-                files:              files
+-                    .iter()
+-                    .map(|file| fabro_types::AgentMemoryFileProps {
+-                        path:         file.path.clone(),
+-                        byte_count:   file.byte_count,
+-                        loaded_bytes: file.loaded_bytes,
+-                        truncated:    file.truncated,
+-                    })
+-                    .collect(),
+-                total_loaded_bytes: *total_loaded_bytes,
++                provider_profile:   *provider_profile,
++                total_loaded_bytes: files.iter().map(|f| f.loaded_bytes).sum(),
++                files:              files.clone(),
+                 budget_bytes:       *budget_bytes,
+                 visit:              *visit,
+             }),
+@@ -767,28 +750,15 @@ fn event_body_from_event(event: &Event) -> EventBody {
+                 source_dirs,
+                 skills,
+             } => EventBody::AgentSkillsDiscovered(fabro_types::AgentSkillsDiscoveredProps {
+-                provider_profile: provider_profile.clone(),
++                provider_profile: *provider_profile,
+                 source_dirs:      source_dirs.clone(),
+-                skills:           skills
+-                    .iter()
+-                    .map(|skill| fabro_types::AgentSkillSummary {
+-                        name:        skill.name.clone(),
+-                        description: skill.description.clone(),
+-                    })
+-                    .collect(),
++                skills:           skills.clone(),
+                 visit:            *visit,
+             }),
+             AgentEvent::SkillActivated { skill_name, source } => {
+                 EventBody::AgentSkillActivated(fabro_types::AgentSkillActivatedProps {
+                     skill_name: skill_name.clone(),
+-                    source:     match source {
+-                        fabro_agent::SkillActivationSource::Slash => {
+-                            fabro_types::AgentSkillActivationSource::Slash
+-                        }
+-                        fabro_agent::SkillActivationSource::Tool => {
+-                            fabro_types::AgentSkillActivationSource::Tool
+-                        }
+-                    },
++                    source:     *source,
+                     visit:      *visit,
+                 })
+             }
+@@ -800,7 +770,6 @@ fn event_body_from_event(event: &Event) -> EventBody {
+             | AgentEvent::TextDelta { .. }
+             | AgentEvent::ReasoningDelta { .. }
+             | AgentEvent::ToolCallOutputDelta { .. }
+-            | AgentEvent::SkillExpanded { .. }
+             | AgentEvent::SessionStarted { .. }
+             | AgentEvent::SessionEnded => panic!(
+                 "agent event should not be converted through the stage-scoped Event::Agent wrapper"
+@@ -2327,15 +2296,14 @@ mod tests {
+             stage:             "code".to_string(),
+             visit:             3,
+             event:             AgentEvent::MemoryLoaded {
+-                provider_profile:   "anthropic".to_string(),
+-                files:              vec![fabro_agent::MemoryFileSummary {
++                provider_profile: fabro_model::AgentProfileKind::Anthropic,
++                files:            vec![fabro_types::AgentMemoryFileProps {
+                     path:         "/repo/AGENTS.md".to_string(),
+                     byte_count:   200,
+                     loaded_bytes: 200,
+                     truncated:    false,
+                 }],
+-                total_loaded_bytes: 200,
+-                budget_bytes:       32768,
++                budget_bytes:     32768,
+             },
+             session_id:        Some("ses_1".to_string()),
+             parent_session_id: None,
+@@ -2345,7 +2313,10 @@ mod tests {
+         match stored.body {
+             EventBody::AgentMemoryLoaded(props) => {
+                 assert_eq!(props.visit, 3);
+-                assert_eq!(props.provider_profile, "anthropic");
++                assert_eq!(
++                    props.provider_profile,
++                    fabro_model::AgentProfileKind::Anthropic
++                );
+                 assert_eq!(props.budget_bytes, 32768);
+                 assert_eq!(props.total_loaded_bytes, 200);
+                 assert_eq!(props.files.len(), 1);
+@@ -2364,15 +2335,14 @@ mod tests {
+             stage:             "code".to_string(),
+             visit:             1,
+             event:             AgentEvent::MemoryLoaded {
+-                provider_profile:   "openai".to_string(),
+-                files:              vec![fabro_agent::MemoryFileSummary {
++                provider_profile: fabro_model::AgentProfileKind::OpenAi,
++                files:            vec![fabro_types::AgentMemoryFileProps {
+                     path:         "/repo/AGENTS.md".to_string(),
+                     byte_count:   100,
+                     loaded_bytes: 100,
+                     truncated:    false,
+                 }],
+-                total_loaded_bytes: 100,
+-                budget_bytes:       32768,
++                budget_bytes:     32768,
+             },
+             session_id:        None,
+             parent_session_id: None,
+@@ -2391,9 +2361,9 @@ mod tests {
+             stage:             "code".to_string(),
+             visit:             2,
+             event:             AgentEvent::SkillsDiscovered {
+-                provider_profile: "anthropic".to_string(),
++                provider_profile: fabro_model::AgentProfileKind::Anthropic,
+                 source_dirs:      vec!["/repo/.fabro/skills".to_string()],
+-                skills:           vec![fabro_agent::SkillSummary {
++                skills:           vec![fabro_types::AgentSkillSummary {
+                     name:        "commit".to_string(),
+                     description: "Make a commit".to_string(),
+                 }],
+@@ -2406,7 +2376,10 @@ mod tests {
+         match stored.body {
+             EventBody::AgentSkillsDiscovered(props) => {
+                 assert_eq!(props.visit, 2);
+-                assert_eq!(props.provider_profile, "anthropic");
++                assert_eq!(
++                    props.provider_profile,
++                    fabro_model::AgentProfileKind::Anthropic
++                );
+                 assert_eq!(props.source_dirs, vec!["/repo/.fabro/skills".to_string()]);
+                 assert_eq!(props.skills.len(), 1);
+                 assert_eq!(props.skills[0].name, "commit");
+@@ -2423,7 +2396,7 @@ mod tests {
+             visit:             1,
+             event:             AgentEvent::SkillActivated {
+                 skill_name: "commit".to_string(),
+-                source:     fabro_agent::SkillActivationSource::Slash,
++                source:     fabro_types::AgentSkillActivationSource::Slash,
+             },
+             session_id:        Some("ses_1".to_string()),
+             parent_session_id: None,
+@@ -2444,7 +2417,7 @@ mod tests {
+             visit:             4,
+             event:             AgentEvent::SkillActivated {
+                 skill_name: "review".to_string(),
+-                source:     fabro_agent::SkillActivationSource::Tool,
++                source:     fabro_types::AgentSkillActivationSource::Tool,
+             },
+             session_id:        None,
+             parent_session_id: None,
+@@ -2467,13 +2440,12 @@ mod tests {
+             visit:             5,
+             event:             AgentEvent::McpServerReady {
+                 server_name: "github".to_string(),
+-                tool_count:  2,
+                 tools:       vec![
+-                    fabro_agent::McpToolSummary {
++                    fabro_types::AgentMcpToolSummary {
+                         name:          "mcp__github__create_issue".to_string(),
+                         original_name: "create_issue".to_string(),
+                     },
+-                    fabro_agent::McpToolSummary {
++                    fabro_types::AgentMcpToolSummary {
+                         name:          "mcp__github__list_issues".to_string(),
+                         original_name: "list_issues".to_string(),
+                     },
+diff --git a/lib/crates/fabro-workflow/src/event/names.rs b/lib/crates/fabro-workflow/src/event/names.rs
+index d730c1872..51eea15c8 100644
+--- a/lib/crates/fabro-workflow/src/event/names.rs
++++ b/lib/crates/fabro-workflow/src/event/names.rs
+@@ -78,7 +78,6 @@ pub fn event_name(event: &Event) -> &'static str {
+             AgentEvent::Warning { .. } => "agent.warning",
+             AgentEvent::LoopDetected => "agent.loop.detected",
+             AgentEvent::TurnLimitReached { .. } => "agent.turn.limit",
+-            AgentEvent::SkillExpanded { .. } => "agent.skill.expanded",
+             AgentEvent::SteeringInjected { .. } => "agent.steering.injected",
+             AgentEvent::CompactionStarted { .. } => "agent.compaction.started",
+             AgentEvent::CompactionCompleted { .. } => "agent.compaction.completed",
