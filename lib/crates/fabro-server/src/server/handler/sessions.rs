@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -530,6 +531,24 @@ async fn run_streaming_turn(
         let cancel_token = session.cancel_token();
         turn_lease.attach_cancel_token(&cancel_token);
         let initialize = !runtime_entry.is_initialized();
+        let model_input = match run_store.state().await {
+            Ok(projection) => {
+                let snapshot = build_ask_fabro_run_snapshot(&projection, run_id);
+                build_ask_fabro_turn_input(&input, &snapshot)
+            }
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    session_id = %session_id,
+                    turn_id = %turn_id,
+                    "Failed to build Ask Fabro run snapshot"
+                );
+                let snapshot = format!(
+                    "Run ID: {run_id}\nRun snapshot unavailable: failed to load current run projection."
+                );
+                build_ask_fabro_turn_input(&input, &snapshot)
+            }
+        };
         let mut output = None;
         let result = Box::pin(drive_agent_session(
             &run_store,
@@ -537,7 +556,7 @@ async fn run_streaming_turn(
             run_id,
             session_id,
             turn_id,
-            &input,
+            &model_input,
             initialize,
             &sender,
             &mut output,
@@ -950,8 +969,16 @@ fn build_ask_fabro_system_prompt(
     let tool_guidance = render_ask_fabro_tool_guidance(registry, policy);
     let core_prompt = format!(
         "\
-You are Ask Fabro, a read-only, run-scoped assistant for inspecting this Fabro run and its workspace.
-Use the run event history and workspace files to answer questions about this run. Stay within the current run scope.
+You are Ask Fabro, an interactive read-only, run-scoped analyst.
+
+Answer questions about the current Fabro run, its event history, and its workspace. Stay scoped to this run. Do not modify the run or workspace, and do not take control actions.
+
+Use the provided run snapshot for orientation. Treat it as possibly stale. Use `fabro_run_events` for current status, exact timestamps, failures, tool calls, stage outputs, and event-backed claims. Use workspace file tools only when the question asks about files, code, artifacts, or implementation details.
+
+When answering:
+- Be concise by default.
+- Cite the source of important facts in plain language, such as \"from run events\" or \"from workspace file <path>\".
+- If evidence is incomplete, say what you could not inspect.
 
 {{env_block}}
 
@@ -964,6 +991,116 @@ Do not claim access to tools that are not listed. Treat tool failures as real fa
     );
 
     assemble_system_prompt(&core_prompt, env, env_context, &[], user_instructions, &[])
+}
+
+fn build_ask_fabro_run_snapshot(projection: &fabro_types::RunProjection, run_id: RunId) -> String {
+    let mut lines = Vec::new();
+    let graph = &projection.spec().graph;
+    lines.push(format!("Run ID: {run_id}"));
+    lines.push(format!("Goal: {}", graph.goal()));
+    lines.push(format!("Status: {}", projection.status()));
+
+    let total_non_meta = graph
+        .nodes
+        .values()
+        .filter(|node| !is_ask_fabro_meta_node(node))
+        .count();
+    let completed_non_meta = projection
+        .iter_stages()
+        .filter(|(stage_id, stage)| {
+            graph
+                .nodes
+                .get(stage_id.node_id())
+                .is_none_or(|node| !is_ask_fabro_meta_node(node))
+                && stage.effective_state().is_terminal()
+        })
+        .count();
+    lines.push(format!(
+        "Progress: {completed_non_meta} of {total_non_meta} non-meta stages completed"
+    ));
+
+    let recent_stages = projection
+        .iter_stages()
+        .filter(|(stage_id, _)| {
+            graph
+                .nodes
+                .get(stage_id.node_id())
+                .is_none_or(|node| !is_ask_fabro_meta_node(node))
+        })
+        .collect::<Vec<_>>();
+    let recent_stages = recent_stages
+        .iter()
+        .rev()
+        .take(5)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    if !recent_stages.is_empty() {
+        lines.push(String::new());
+        lines.push("Recent stages:".to_string());
+        for (stage_id, stage) in recent_stages {
+            lines.push(format!("- {}", ask_fabro_stage_summary(stage_id, stage)));
+        }
+    }
+
+    if let Some((_, record)) = projection.pending_interviews().iter().next() {
+        lines.push(String::new());
+        lines.push("Pending human input:".to_string());
+        let question_id = if record.question.id.trim().is_empty() {
+            "question"
+        } else {
+            record.question.id.as_str()
+        };
+        lines.push(format!("- {question_id}: awaiting response"));
+    }
+
+    lines.push(String::new());
+    lines.push("Use this snapshot as orientation only. For exact, current, or disputed details, inspect run events with `fabro_run_events`.".to_string());
+    lines.join("\n")
+}
+
+fn is_ask_fabro_meta_node(node: &fabro_types::Node) -> bool {
+    matches!(node.handler_type(), Some("start" | "exit"))
+}
+
+fn ask_fabro_stage_summary(
+    stage_id: &fabro_types::StageId,
+    stage: &fabro_types::StageProjection,
+) -> String {
+    let mut line = format!("{}: {}", stage_id.node_id(), stage.effective_state());
+    if let Some(handler) = stage
+        .handler
+        .as_ref()
+        .map(ToString::to_string)
+        .filter(|handler| !handler.is_empty())
+    {
+        let _ = write!(line, ", {handler}");
+    }
+    if let Some(model) = &stage.model {
+        let _ = write!(line, ", model {}", model.model_id);
+    }
+    if let Some(completion) = &stage.completion {
+        if let Some(reason) = completion.failure_reason.as_deref() {
+            let _ = write!(line, ", reason: {reason}");
+        }
+    }
+    line
+}
+
+fn build_ask_fabro_turn_input(input: &str, snapshot: &str) -> String {
+    format!(
+        "\
+Use the following run snapshot as orientation for this turn. Treat it as possibly stale. For exact or current details, inspect run events with `fabro_run_events`.
+
+<run_snapshot>
+{snapshot}
+</run_snapshot>
+
+User question:
+{input}"
+    )
 }
 
 struct AskFabroProfile {
@@ -1355,6 +1492,7 @@ fn parse_turn_id(value: &str) -> Result<TurnId, ApiError> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use fabro_agent::config::ToolAccess;
@@ -1510,6 +1648,106 @@ mod tests {
         }
         assert!(prompt.contains("read-only"));
         assert!(prompt.contains("run-scoped"));
+        assert!(prompt.contains("interactive read-only"));
+        assert!(prompt.contains("Use the provided run snapshot for orientation"));
+        assert!(prompt.contains("Use `fabro_run_events` for current status"));
+        assert!(prompt.contains("Use workspace file tools only when the question asks"));
+    }
+
+    #[test]
+    fn ask_fabro_run_snapshot_summarizes_goal_progress_and_recent_stages() {
+        let run_id = RunId::new();
+        let now = Utc::now();
+        let mut graph = fabro_types::Graph::new("test");
+        graph.attrs.insert(
+            "goal".to_string(),
+            fabro_types::AttrValue::String("Ship the feature".to_string()),
+        );
+        for node_id in ["start", "plan", "code", "test", "review", "deploy", "exit"] {
+            let mut node = fabro_types::Node::new(node_id);
+            let shape = match node_id {
+                "start" => "Mdiamond",
+                "exit" => "Msquare",
+                "test" => "parallelogram",
+                _ => "box",
+            };
+            node.attrs.insert(
+                "shape".to_string(),
+                fabro_types::AttrValue::String(shape.to_string()),
+            );
+            graph.nodes.insert(node_id.to_string(), node);
+        }
+        let spec = fabro_types::RunSpec {
+            run_id,
+            settings: fabro_types::WorkflowSettings::default(),
+            graph,
+            graph_source: None,
+            workflow_slug: None,
+            source_directory: None,
+            labels: HashMap::default(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
+            git: None,
+            fork_source_ref: None,
+        };
+        let mut projection = fabro_types::RunProjection::new(String::new(), spec, now);
+        for (index, node_id) in ["start", "plan", "code", "test", "review", "deploy"]
+            .iter()
+            .enumerate()
+        {
+            let handler = projection
+                .spec
+                .graph
+                .nodes
+                .get(*node_id)
+                .and_then(fabro_types::Node::handler_type)
+                .and_then(|handler| handler.parse().ok());
+            let stage = projection.stage_entry(
+                node_id,
+                1,
+                std::num::NonZeroU32::new(u32::try_from(index + 1).unwrap()).unwrap(),
+            );
+            stage.handler = handler;
+            stage.state = if *node_id == "deploy" {
+                fabro_types::StageState::Running
+            } else {
+                fabro_types::StageState::Succeeded
+            };
+            if *node_id == "test" {
+                stage.completion = Some(fabro_types::StageCompletion {
+                    outcome:        fabro_types::StageOutcome::Failed {
+                        retry_requested: false,
+                    },
+                    notes:          None,
+                    failure_reason: Some("tests failed".to_string()),
+                    timestamp:      now,
+                });
+                stage.state = fabro_types::StageState::Failed;
+            }
+        }
+
+        let snapshot = build_ask_fabro_run_snapshot(&projection, run_id);
+
+        assert!(snapshot.contains(&format!("Run ID: {run_id}")));
+        assert!(snapshot.contains("Goal: Ship the feature"));
+        assert!(snapshot.contains("Progress: 4 of 5 non-meta stages completed"));
+        assert!(!snapshot.contains("start"));
+        assert!(snapshot.contains("- plan: succeeded, agent"));
+        assert!(snapshot.contains("- test: failed, command, reason: tests failed"));
+        assert!(snapshot.contains("- deploy: running, agent"));
+        assert!(snapshot.contains("Use this snapshot as orientation only."));
+    }
+
+    #[test]
+    fn ask_fabro_turn_input_wraps_snapshot_without_losing_user_question() {
+        let input =
+            build_ask_fabro_turn_input("Why did it fail?", "Run ID: run_123\nGoal: Fix tests");
+
+        assert!(input.contains("<run_snapshot>"));
+        assert!(input.contains("Run ID: run_123"));
+        assert!(input.contains("Treat it as possibly stale"));
+        assert!(input.ends_with("User question:\nWhy did it fail?"));
     }
 
     #[tokio::test]
@@ -1558,6 +1796,7 @@ mod tests {
                 tokio_util::sync::CancellationToken::new(),
                 &config,
                 &fabro_agent::Emitter::new(),
+                "test-session",
                 "test-session",
                 None,
             )
