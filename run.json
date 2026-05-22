@@ -517,7 +517,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-22T13:56:40.215025Z",
-  "last_event_at": "2026-05-22T13:59:00.196916Z",
+  "last_event_at": "2026-05-22T14:42:58.073555Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -684,9 +684,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 47,
       "checkpoint": {
-        "timestamp": "2026-05-22T14:01:20.895866Z",
+        "timestamp": "2026-05-22T14:01:27.515957Z",
         "current_node": "preflight_lint",
         "completed_nodes": [
           "start",
@@ -696,32 +696,28 @@
         ],
         "node_retries": {},
         "context_values": {
-          "graph.rankdir": "LR",
-          "thread.preflight_compile.current_node": "preflight_lint",
-          "failure_class": "",
-          "internal.fidelity": "compact",
-          "graph.goal": "# Event-Sourced Agent Todo Tools\n\nDate: 2026-05-22\n\n## Summary\n\nAdd one shared todo/task engine behind two model-native tool surfaces:\n\n- OpenAI models get Codex-compatible `update_plan`.\n- Anthropic models get Claude-compatible `TaskCreate`, `TaskUpdate`, and `TaskList`.\n- All mutations persist as individual `todo.created`, `todo.updated`, and `todo.deleted` run events.\n- `RunProjection` maintains current todo state by replaying those events.\n\nScoping matches latest upstream behavior:\n\n- OpenAI plan todos are scoped to the emitting session: `openai_plan:<session_id>`.\n- Anthropic task todos are scoped to the root agent session: `anthropic_tasks:<root_session_id>`, shared by subagents.\n\n## Key Changes\n\n- Add shared todo domain types in `fabro-types`: `TodoStatus`, `TodoListKind`, `TodoProjection`, `TodoListProjection`, and `todos_by_list` on `RunProjection`.\n- Add run event bodies for `todo.created`, `todo.updated`, and `todo.deleted`; map them through Fabro's typed event pipeline and replay them in `fabro-store`'s `RunProjectionReducer`.\n- Extend `fabro-agent` tool runtime context with `session_id`, `root_session_id`, `tool_call_id`, and a narrow agent-event emitter so tools can emit todo mutation events with correct session metadata.\n- Add a shared `TodoRuntime` in `fabro-agent` that owns the in-memory current todo projection for active sessions and emits individual mutation events.\n- Register `update_plan` only in `OpenAiProfile`. It accepts Codex's schema, diffs incoming steps by exact `step`, and emits create/update/delete events so the projected list equals the submitted plan.\n- Register `TaskCreate`, `TaskUpdate`, and `TaskList` only in `AnthropicProfile`. Use generated numeric task IDs per Anthropic task list, preserve Claude field names and result text, and support status `deleted` as a delete operation.\n- Thread root session identity through parent and child sessions. Root sessions use their own ID as `root_session_id`; subagent sessions inherit the parent root ID while retaining their own `session_id`.\n- Update OpenAPI `RunProjection` schema and regenerate Rust/TypeScript API types. Existing run-state and run-events APIs remain the exposure point; no new HTTP route is required.\n- Update web run-event invalidation so `todo.*` events refresh `getRunState` consumers and the run events list.\n\n## Tool Semantics\n\n### OpenAI `update_plan`\n\nInput:\n\n- `explanation?: string`\n- `plan: [{ step: string, status: \"pending\" | \"in_progress\" | \"completed\" }]`\n\nBehavior:\n\n- Return Codex-compatible success text: `Plan updated`.\n- Scope todos to `openai_plan:<session_id>`.\n- Use exact `step` string as identity within that scope.\n- Reject duplicate `step` strings with a model-visible tool error.\n- New step string emits `todo.created`.\n- Existing step with changed status or order emits `todo.updated`.\n- Omitted previous step emits `todo.deleted`.\n- Todo ID is deterministic from `list_id + step`.\n\n### Anthropic `TaskCreate`\n\nInput:\n\n- `subject: string`\n- `description: string`\n- `activeForm?: string`\n- `metadata?: object`\n\nBehavior:\n\n- Scope tasks to `anthropic_tasks:<root_session_id>`.\n- Generate numeric task IDs per Anthropic task list.\n- Emit `todo.created`.\n- Return `Task #<id> created successfully: <subject>`.\n\n### Anthropic `TaskUpdate`\n\nInput:\n\n- `taskId: string`\n- `subject?: string`\n- `description?: string`\n- `activeForm?: string`\n- `status?: \"pending\" | \"in_progress\" | \"completed\" | \"deleted\"`\n- `owner?: string`\n- `addBlocks?: string[]`\n- `addBlockedBy?: string[]`\n- `metadata?: object`\n\nBehavior:\n\n- `status: \"deleted\"` emits `todo.deleted`.\n- Other changes emit `todo.updated`.\n- Metadata merges into existing metadata; a `null` metadata value deletes that key.\n- Missing task returns a non-error tool result: `Task not found`.\n\n### Anthropic `TaskList`\n\nInput:\n\n```json\n{}\n```\n\nBehavior:\n\n- Reads the projected Anthropic task list for `anthropic_tasks:<root_session_id>`.\n- Returns Claude-style task lines containing ID, status, subject, optional owner, and uncompleted blockers.\n- Returns `No tasks found` when the list is empty.\n\n## Test Plan\n\n- Unit-test tool schemas and registration:\n  - OpenAI profile includes `update_plan`; Anthropic profile does not.\n  - Anthropic profile includes `TaskCreate`, `TaskUpdate`, `TaskList`; OpenAI profile does not.\n- Unit-test OpenAI reconciliation:\n  - create initial steps\n  - update status and order\n  - delete omitted steps\n  - subagent session writes to a different OpenAI list than parent\n- Unit-test Anthropic task behavior:\n  - create, list, update, complete, and delete\n  - metadata merge and `null` deletion\n  - `addBlocks` and `addBlockedBy`\n  - parent and subagent share the same Anthropic task list\n- Unit-test event serialization and conversion:\n  - `todo.created`, `todo.updated`, `todo.deleted` have stable event names and properties\n  - envelope includes emitting `session_id`, `parent_session_id` when present, and `tool_call_id`\n- Unit-test `RunProjection` replay:\n  - replaying todo events reconstructs current lists\n  - deleted todos are absent from current projection\n  - multiple lists in one run remain isolated\n- API and web checks:\n  - `cargo build -p fabro-api`\n  - `cargo nextest run -p fabro-server`\n  - `cd lib/packages/fabro-api-client && bun run generate`\n  - `cd apps/fabro-web && bun test && bun run typecheck`\n\n## Assumptions\n\n- Ignore deprecated Claude `TodoWrite`; implement only latest Anthropic Task tools.\n- Duplicate OpenAI `step` strings are rejected with a model-visible tool error because step text is the identity.\n- Todo events are individual mutations only; no plan-replace event is added.\n- Todo state is exposed through existing run projection and event APIs, not a new endpoint.\n",
-          "internal.retry_count.start": 0,
-          "outcome": "succeeded",
-          "internal.node_visit_count": 1,
           "thread.start.current_node": "toolchain",
-          "thread.toolchain.current_node": "preflight_compile",
+          "internal.fidelity": "compact",
           "internal.retry_count.toolchain": 0,
-          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
-          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "current_node": "preflight_lint",
+          "failure_signature": "",
           "internal.retry_count.preflight_compile": 0,
+          "failure_class": "",
+          "internal.retry_count.start": 0,
+          "internal.node_visit_count": 1,
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "graph.goal": "# Event-Sourced Agent Todo Tools\n\nDate: 2026-05-22\n\n## Summary\n\nAdd one shared todo/task engine behind two model-native tool surfaces:\n\n- OpenAI models get Codex-compatible `update_plan`.\n- Anthropic models get Claude-compatible `TaskCreate`, `TaskUpdate`, and `TaskList`.\n- All mutations persist as individual `todo.created`, `todo.updated`, and `todo.deleted` run events.\n- `RunProjection` maintains current todo state by replaying those events.\n\nScoping matches latest upstream behavior:\n\n- OpenAI plan todos are scoped to the emitting session: `openai_plan:<session_id>`.\n- Anthropic task todos are scoped to the root agent session: `anthropic_tasks:<root_session_id>`, shared by subagents.\n\n## Key Changes\n\n- Add shared todo domain types in `fabro-types`: `TodoStatus`, `TodoListKind`, `TodoProjection`, `TodoListProjection`, and `todos_by_list` on `RunProjection`.\n- Add run event bodies for `todo.created`, `todo.updated`, and `todo.deleted`; map them through Fabro's typed event pipeline and replay them in `fabro-store`'s `RunProjectionReducer`.\n- Extend `fabro-agent` tool runtime context with `session_id`, `root_session_id`, `tool_call_id`, and a narrow agent-event emitter so tools can emit todo mutation events with correct session metadata.\n- Add a shared `TodoRuntime` in `fabro-agent` that owns the in-memory current todo projection for active sessions and emits individual mutation events.\n- Register `update_plan` only in `OpenAiProfile`. It accepts Codex's schema, diffs incoming steps by exact `step`, and emits create/update/delete events so the projected list equals the submitted plan.\n- Register `TaskCreate`, `TaskUpdate`, and `TaskList` only in `AnthropicProfile`. Use generated numeric task IDs per Anthropic task list, preserve Claude field names and result text, and support status `deleted` as a delete operation.\n- Thread root session identity through parent and child sessions. Root sessions use their own ID as `root_session_id`; subagent sessions inherit the parent root ID while retaining their own `session_id`.\n- Update OpenAPI `RunProjection` schema and regenerate Rust/TypeScript API types. Existing run-state and run-events APIs remain the exposure point; no new HTTP route is required.\n- Update web run-event invalidation so `todo.*` events refresh `getRunState` consumers and the run events list.\n\n## Tool Semantics\n\n### OpenAI `update_plan`\n\nInput:\n\n- `explanation?: string`\n- `plan: [{ step: string, status: \"pending\" | \"in_progress\" | \"completed\" }]`\n\nBehavior:\n\n- Return Codex-compatible success text: `Plan updated`.\n- Scope todos to `openai_plan:<session_id>`.\n- Use exact `step` string as identity within that scope.\n- Reject duplicate `step` strings with a model-visible tool error.\n- New step string emits `todo.created`.\n- Existing step with changed status or order emits `todo.updated`.\n- Omitted previous step emits `todo.deleted`.\n- Todo ID is deterministic from `list_id + step`.\n\n### Anthropic `TaskCreate`\n\nInput:\n\n- `subject: string`\n- `description: string`\n- `activeForm?: string`\n- `metadata?: object`\n\nBehavior:\n\n- Scope tasks to `anthropic_tasks:<root_session_id>`.\n- Generate numeric task IDs per Anthropic task list.\n- Emit `todo.created`.\n- Return `Task #<id> created successfully: <subject>`.\n\n### Anthropic `TaskUpdate`\n\nInput:\n\n- `taskId: string`\n- `subject?: string`\n- `description?: string`\n- `activeForm?: string`\n- `status?: \"pending\" | \"in_progress\" | \"completed\" | \"deleted\"`\n- `owner?: string`\n- `addBlocks?: string[]`\n- `addBlockedBy?: string[]`\n- `metadata?: object`\n\nBehavior:\n\n- `status: \"deleted\"` emits `todo.deleted`.\n- Other changes emit `todo.updated`.\n- Metadata merges into existing metadata; a `null` metadata value deletes that key.\n- Missing task returns a non-error tool result: `Task not found`.\n\n### Anthropic `TaskList`\n\nInput:\n\n```json\n{}\n```\n\nBehavior:\n\n- Reads the projected Anthropic task list for `anthropic_tasks:<root_session_id>`.\n- Returns Claude-style task lines containing ID, status, subject, optional owner, and uncompleted blockers.\n- Returns `No tasks found` when the list is empty.\n\n## Test Plan\n\n- Unit-test tool schemas and registration:\n  - OpenAI profile includes `update_plan`; Anthropic profile does not.\n  - Anthropic profile includes `TaskCreate`, `TaskUpdate`, `TaskList`; OpenAI profile does not.\n- Unit-test OpenAI reconciliation:\n  - create initial steps\n  - update status and order\n  - delete omitted steps\n  - subagent session writes to a different OpenAI list than parent\n- Unit-test Anthropic task behavior:\n  - create, list, update, complete, and delete\n  - metadata merge and `null` deletion\n  - `addBlocks` and `addBlockedBy`\n  - parent and subagent share the same Anthropic task list\n- Unit-test event serialization and conversion:\n  - `todo.created`, `todo.updated`, `todo.deleted` have stable event names and properties\n  - envelope includes emitting `session_id`, `parent_session_id` when present, and `tool_call_id`\n- Unit-test `RunProjection` replay:\n  - replaying todo events reconstructs current lists\n  - deleted todos are absent from current projection\n  - multiple lists in one run remain isolated\n- API and web checks:\n  - `cargo build -p fabro-api`\n  - `cargo nextest run -p fabro-server`\n  - `cd lib/packages/fabro-api-client && bun run generate`\n  - `cd apps/fabro-web && bun test && bun run typecheck`\n\n## Assumptions\n\n- Ignore deprecated Claude `TodoWrite`; implement only latest Anthropic Task tools.\n- Duplicate OpenAI `step` strings are rejected with a model-visible tool error because step text is the identity.\n- Todo events are individual mutations only; no plan-replace event is added.\n- Todo state is exposed through existing run projection and event APIs, not a new endpoint.\n",
           "internal.run_id": "01KS7ZJ2MBT0KJKKGRZ6FNW2TG",
           "internal.work_dir": "/home/daytona/workspace/fabro",
-          "failure_signature": "",
-          "current_node": "preflight_lint",
+          "outcome": "succeeded",
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "graph.rankdir": "LR",
           "internal.retry_count.preflight_lint": 0,
-          "internal.thread_id": "preflight_compile"
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.thread_id": "preflight_compile",
+          "thread.toolchain.current_node": "preflight_compile"
         },
         "node_outcomes": {
-          "start": {
-            "status": "succeeded",
-            "usage": null
-          },
           "preflight_compile": {
             "status": "succeeded",
             "context_updates": {
@@ -745,10 +741,165 @@
             },
             "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
             "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
           }
         },
         "next_node_id": "implement",
+        "git_commit_sha": "7bb53c9aa264978dc6392705d601f987a73326d0",
         "node_visits": {
+          "preflight_compile": 1,
+          "toolchain": 1,
+          "start": 1,
+          "preflight_lint": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-22T14:42:58.330371Z",
+        "current_node": "implement",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint",
+          "implement"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.rankdir": "LR",
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "thread.preflight_lint.current_node": "implement",
+          "response.implement": "The implementation is complete. Summary of changes:\n\n## Summary\n\n**Domain types in `fabro-types`** (new `todo.rs`):\n- `TodoStatus` (pending/in_progress/completed/deleted), `TodoListKind` (openai_plan/anthropic_tasks), `TodoProjection`, `TodoListProjection` with `upsert`/`remove`/`get`.\n- Added `todos_by_list: BTreeMap<String, TodoListProjection>` to `RunProjection`.\n\n**Run-event bodies** (new `run_event/todo.rs`):\n- `TodoCreatedProps`, `TodoUpdatedProps`, `TodoDeletedProps` with full field-level patch semantics for updates.\n- Wired into `EventBody` enum, `event_name()` match, and `is_known_event_name`.\n\n**Reducer in `fabro-store`**:\n- Three new arms in `RunProjectionReducer::apply_event` that replay `todo.created`/`updated`/`deleted` into `todos_by_list`. Supports metadata patches with `null` deletion and `addBlocks`/`addBlockedBy` deduplication.\n\n**Agent runtime (`fabro-agent`)**:\n- `AgentEvent::TodoCreated/Updated/Deleted` variants with full payloads.\n- Extended `ToolContext` with `session_id`, `root_session_id`, `tool_call_id`, and an `AgentEventEmitter` trait.\n- New `TodoRuntime` (`todo_runtime.rs`) maintaining in-memory projection per `list_id`, emitting one event per mutation.\n- New `update_plan` (OpenAI), `TaskCreate`/`TaskUpdate`/`TaskList` (Anthropic) tools in `todo_tools.rs`, registered only in their respective profiles.\n- `Session.root_session_id` field with accessor + setter; `spawn_agent` tool inherits the parent's root into subagent sessions.\n- `Emitter::emit_with_parent` + `SessionBoundEmitter` plug into `tool_execution::execute_one_tool`, populating `ToolContext` with the live session metadata.\n\n**Conversion in `fabro-workflow`**:\n- Added arms in `event/convert.rs` and `event/names.rs` to translate `AgentEvent::Todo*` into `EventBody::Todo*`.\n\n**OpenAPI + TypeScript**:\n- Extended `docs/public/api-reference/fabro-api.yaml` with `todos_by_list`, `TodoStatus`, `TodoListKind`, `TodoProjection`, `TodoListProjection` schemas.\n- Added corresponding TS models in `lib/packages/fabro-api-client/src/models/` and updated `RunProjection` model.\n\n**Web (`apps/fabro-web`)**:\n- Added `TODO_EVENTS` set in `run-events.ts`; `todo.*` events now invalidate `queryKeys.runs.state(id)` and `queryKeys.runs.events(id, 1000)`, plus the current stage's events.\n\n**Tests added** (all passing):\n- 4 unit tests in `fabro-types::todo` (`list_id_is_prefix_colon_session`, ordering, upsert/remove).\n- 4 event-serde tests in `fabro-types::run_event` (event names known, envelope metadata, round-trip create/delete).\n- 4 reducer tests in `fabro-store` (replay reconstructs list, deletes absent, multi-list isolation, metadata patch + null).\n- 3 `TodoRuntime` tests (create/update/delete cycle, deleted-status emits delete, missing-todo returns false).\n- 11 tool tests in `todo_tools` (`update_plan`: create initial / status+order / delete omitted / reject duplicate / subagent different list; `TaskCreate`/`TaskUpdate`/`TaskList`: numeric IDs, cycle, metadata merge + null, addBlocks dedupe, empty list, missing taskId, parent+subagent share Anthropic list).\n- Profile tests updated to assert exact tool registration (OpenAI has `update_plan`, Anthropic has the three Task tools, neither bleeds).\n- 2 web tests for `queryKeysForRunEvent` on `todo.*` events.\n\n**Verified clean**:\n- `cargo +nightly-2026-04-14 fmt --check --all` — clean.\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — clean.\n- `cargo nextest run` across `fabro-types`, `fabro-store`, `fabro-workflow`, `fabro-agent`, `fabro-server`, `fabro-api`: 2638 passed (3 pre-existing graphviz-env failures unrelated to this change).\n- `cargo build -p fabro-api` — clean.\n- `cd apps/fabro-web && bun run typecheck` — clean. `bun test`: 421 pass (7 pre-existing failures unrelated to this change).",
+          "failure_class": "",
+          "internal.fidelity": "compact",
+          "graph.goal": "# Event-Sourced Agent Todo Tools\n\nDate: 2026-05-22\n\n## Summary\n\nAdd one shared todo/task engine behind two model-native tool surfaces:\n\n- OpenAI models get Codex-compatible `update_plan`.\n- Anthropic models get Claude-compatible `TaskCreate`, `TaskUpdate`, and `TaskList`.\n- All mutations persist as individual `todo.created`, `todo.updated`, and `todo.deleted` run events.\n- `RunProjection` maintains current todo state by replaying those events.\n\nScoping matches latest upstream behavior:\n\n- OpenAI plan todos are scoped to the emitting session: `openai_plan:<session_id>`.\n- Anthropic task todos are scoped to the root agent session: `anthropic_tasks:<root_session_id>`, shared by subagents.\n\n## Key Changes\n\n- Add shared todo domain types in `fabro-types`: `TodoStatus`, `TodoListKind`, `TodoProjection`, `TodoListProjection`, and `todos_by_list` on `RunProjection`.\n- Add run event bodies for `todo.created`, `todo.updated`, and `todo.deleted`; map them through Fabro's typed event pipeline and replay them in `fabro-store`'s `RunProjectionReducer`.\n- Extend `fabro-agent` tool runtime context with `session_id`, `root_session_id`, `tool_call_id`, and a narrow agent-event emitter so tools can emit todo mutation events with correct session metadata.\n- Add a shared `TodoRuntime` in `fabro-agent` that owns the in-memory current todo projection for active sessions and emits individual mutation events.\n- Register `update_plan` only in `OpenAiProfile`. It accepts Codex's schema, diffs incoming steps by exact `step`, and emits create/update/delete events so the projected list equals the submitted plan.\n- Register `TaskCreate`, `TaskUpdate`, and `TaskList` only in `AnthropicProfile`. Use generated numeric task IDs per Anthropic task list, preserve Claude field names and result text, and support status `deleted` as a delete operation.\n- Thread root session identity through parent and child sessions. Root sessions use their own ID as `root_session_id`; subagent sessions inherit the parent root ID while retaining their own `session_id`.\n- Update OpenAPI `RunProjection` schema and regenerate Rust/TypeScript API types. Existing run-state and run-events APIs remain the exposure point; no new HTTP route is required.\n- Update web run-event invalidation so `todo.*` events refresh `getRunState` consumers and the run events list.\n\n## Tool Semantics\n\n### OpenAI `update_plan`\n\nInput:\n\n- `explanation?: string`\n- `plan: [{ step: string, status: \"pending\" | \"in_progress\" | \"completed\" }]`\n\nBehavior:\n\n- Return Codex-compatible success text: `Plan updated`.\n- Scope todos to `openai_plan:<session_id>`.\n- Use exact `step` string as identity within that scope.\n- Reject duplicate `step` strings with a model-visible tool error.\n- New step string emits `todo.created`.\n- Existing step with changed status or order emits `todo.updated`.\n- Omitted previous step emits `todo.deleted`.\n- Todo ID is deterministic from `list_id + step`.\n\n### Anthropic `TaskCreate`\n\nInput:\n\n- `subject: string`\n- `description: string`\n- `activeForm?: string`\n- `metadata?: object`\n\nBehavior:\n\n- Scope tasks to `anthropic_tasks:<root_session_id>`.\n- Generate numeric task IDs per Anthropic task list.\n- Emit `todo.created`.\n- Return `Task #<id> created successfully: <subject>`.\n\n### Anthropic `TaskUpdate`\n\nInput:\n\n- `taskId: string`\n- `subject?: string`\n- `description?: string`\n- `activeForm?: string`\n- `status?: \"pending\" | \"in_progress\" | \"completed\" | \"deleted\"`\n- `owner?: string`\n- `addBlocks?: string[]`\n- `addBlockedBy?: string[]`\n- `metadata?: object`\n\nBehavior:\n\n- `status: \"deleted\"` emits `todo.deleted`.\n- Other changes emit `todo.updated`.\n- Metadata merges into existing metadata; a `null` metadata value deletes that key.\n- Missing task returns a non-error tool result: `Task not found`.\n\n### Anthropic `TaskList`\n\nInput:\n\n```json\n{}\n```\n\nBehavior:\n\n- Reads the projected Anthropic task list for `anthropic_tasks:<root_session_id>`.\n- Returns Claude-style task lines containing ID, status, subject, optional owner, and uncompleted blockers.\n- Returns `No tasks found` when the list is empty.\n\n## Test Plan\n\n- Unit-test tool schemas and registration:\n  - OpenAI profile includes `update_plan`; Anthropic profile does not.\n  - Anthropic profile includes `TaskCreate`, `TaskUpdate`, `TaskList`; OpenAI profile does not.\n- Unit-test OpenAI reconciliation:\n  - create initial steps\n  - update status and order\n  - delete omitted steps\n  - subagent session writes to a different OpenAI list than parent\n- Unit-test Anthropic task behavior:\n  - create, list, update, complete, and delete\n  - metadata merge and `null` deletion\n  - `addBlocks` and `addBlockedBy`\n  - parent and subagent share the same Anthropic task list\n- Unit-test event serialization and conversion:\n  - `todo.created`, `todo.updated`, `todo.deleted` have stable event names and properties\n  - envelope includes emitting `session_id`, `parent_session_id` when present, and `tool_call_id`\n- Unit-test `RunProjection` replay:\n  - replaying todo events reconstructs current lists\n  - deleted todos are absent from current projection\n  - multiple lists in one run remain isolated\n- API and web checks:\n  - `cargo build -p fabro-api`\n  - `cargo nextest run -p fabro-server`\n  - `cd lib/packages/fabro-api-client && bun run generate`\n  - `cd apps/fabro-web && bun test && bun run typecheck`\n\n## Assumptions\n\n- Ignore deprecated Claude `TodoWrite`; implement only latest Anthropic Task tools.\n- Duplicate OpenAI `step` strings are rejected with a model-visible tool error because step text is the identity.\n- Todo events are individual mutations only; no plan-replace event is added.\n- Todo state is exposed through existing run projection and event APIs, not a new endpoint.\n",
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "internal.node_visit_count": 1,
+          "thread.start.current_node": "toolchain",
+          "thread.toolchain.current_node": "preflight_compile",
+          "internal.retry_count.toolchain": 0,
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "last_stage": "implement",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.retry_count.preflight_compile": 0,
+          "last_response": "The implementation is complete. Summary of changes:\n\n## Summary\n\n**Domain types in `fabro-types`** (new `todo.rs`):\n- `TodoStatus` (pending/in_progress/completed/deleted), `TodoListKind` (openai_plan/",
+          "internal.run_id": "01KS7ZJ2MBT0KJKKGRZ6FNW2TG",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "failure_signature": "",
+          "current_node": "implement",
+          "internal.retry_count.preflight_lint": 0,
+          "internal.thread_id": "preflight_lint",
+          "internal.retry_count.implement": 0
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.implement": "The implementation is complete. Summary of changes:\n\n## Summary\n\n**Domain types in `fabro-types`** (new `todo.rs`):\n- `TodoStatus` (pending/in_progress/completed/deleted), `TodoListKind` (openai_plan/anthropic_tasks), `TodoProjection`, `TodoListProjection` with `upsert`/`remove`/`get`.\n- Added `todos_by_list: BTreeMap<String, TodoListProjection>` to `RunProjection`.\n\n**Run-event bodies** (new `run_event/todo.rs`):\n- `TodoCreatedProps`, `TodoUpdatedProps`, `TodoDeletedProps` with full field-level patch semantics for updates.\n- Wired into `EventBody` enum, `event_name()` match, and `is_known_event_name`.\n\n**Reducer in `fabro-store`**:\n- Three new arms in `RunProjectionReducer::apply_event` that replay `todo.created`/`updated`/`deleted` into `todos_by_list`. Supports metadata patches with `null` deletion and `addBlocks`/`addBlockedBy` deduplication.\n\n**Agent runtime (`fabro-agent`)**:\n- `AgentEvent::TodoCreated/Updated/Deleted` variants with full payloads.\n- Extended `ToolContext` with `session_id`, `root_session_id`, `tool_call_id`, and an `AgentEventEmitter` trait.\n- New `TodoRuntime` (`todo_runtime.rs`) maintaining in-memory projection per `list_id`, emitting one event per mutation.\n- New `update_plan` (OpenAI), `TaskCreate`/`TaskUpdate`/`TaskList` (Anthropic) tools in `todo_tools.rs`, registered only in their respective profiles.\n- `Session.root_session_id` field with accessor + setter; `spawn_agent` tool inherits the parent's root into subagent sessions.\n- `Emitter::emit_with_parent` + `SessionBoundEmitter` plug into `tool_execution::execute_one_tool`, populating `ToolContext` with the live session metadata.\n\n**Conversion in `fabro-workflow`**:\n- Added arms in `event/convert.rs` and `event/names.rs` to translate `AgentEvent::Todo*` into `EventBody::Todo*`.\n\n**OpenAPI + TypeScript**:\n- Extended `docs/public/api-reference/fabro-api.yaml` with `todos_by_list`, `TodoStatus`, `TodoListKind`, `TodoProjection`, `TodoListProjection` schemas.\n- Added corresponding TS models in `lib/packages/fabro-api-client/src/models/` and updated `RunProjection` model.\n\n**Web (`apps/fabro-web`)**:\n- Added `TODO_EVENTS` set in `run-events.ts`; `todo.*` events now invalidate `queryKeys.runs.state(id)` and `queryKeys.runs.events(id, 1000)`, plus the current stage's events.\n\n**Tests added** (all passing):\n- 4 unit tests in `fabro-types::todo` (`list_id_is_prefix_colon_session`, ordering, upsert/remove).\n- 4 event-serde tests in `fabro-types::run_event` (event names known, envelope metadata, round-trip create/delete).\n- 4 reducer tests in `fabro-store` (replay reconstructs list, deletes absent, multi-list isolation, metadata patch + null).\n- 3 `TodoRuntime` tests (create/update/delete cycle, deleted-status emits delete, missing-todo returns false).\n- 11 tool tests in `todo_tools` (`update_plan`: create initial / status+order / delete omitted / reject duplicate / subagent different list; `TaskCreate`/`TaskUpdate`/`TaskList`: numeric IDs, cycle, metadata merge + null, addBlocks dedupe, empty list, missing taskId, parent+subagent share Anthropic list).\n- Profile tests updated to assert exact tool registration (OpenAI has `update_plan`, Anthropic has the three Task tools, neither bleeds).\n- 2 web tests for `queryKeysForRunEvent` on `todo.*` events.\n\n**Verified clean**:\n- `cargo +nightly-2026-04-14 fmt --check --all` — clean.\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — clean.\n- `cargo nextest run` across `fabro-types`, `fabro-store`, `fabro-workflow`, `fabro-agent`, `fabro-server`, `fabro-api`: 2638 passed (3 pre-existing graphviz-env failures unrelated to this change).\n- `cargo build -p fabro-api` — clean.\n- `cd apps/fabro-web && bun run typecheck` — clean. `bun test`: 421 pass (7 pre-existing failures unrelated to this change).",
+              "last_stage": "implement",
+              "last_response": "The implementation is complete. Summary of changes:\n\n## Summary\n\n**Domain types in `fabro-types`** (new `todo.rs`):\n- `TodoStatus` (pending/in_progress/completed/deleted), `TodoListKind` (openai_plan/"
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 321974,
+                    "output_tokens": 101195,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 64004226,
+                    "cache_write_tokens": 331551
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 331551,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 38214051
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/apps/fabro-web/app/lib/run-events.test.tsx",
+              "/home/daytona/workspace/fabro/apps/fabro-web/app/lib/run-events.ts",
+              "/home/daytona/workspace/fabro/docs/public/api-reference/fabro-api.yaml",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/Cargo.toml",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/event.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/lib.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/profiles/anthropic.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/profiles/openai.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/session.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/subagent.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/todo_runtime.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/todo_tools.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/tool_execution.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/tool_registry.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/types.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-store/src/run_state.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-types/src/lib.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-types/src/run_event/mod.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-types/src/run_event/todo.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-types/src/run_projection.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-types/src/todo.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/event/convert.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/event/names.rs",
+              "/home/daytona/workspace/fabro/lib/packages/fabro-api-client/src/models/index.ts",
+              "/home/daytona/workspace/fabro/lib/packages/fabro-api-client/src/models/run-projection.ts",
+              "/home/daytona/workspace/fabro/lib/packages/fabro-api-client/src/models/todo-list-kind.ts",
+              "/home/daytona/workspace/fabro/lib/packages/fabro-api-client/src/models/todo-list-projection.ts",
+              "/home/daytona/workspace/fabro/lib/packages/fabro-api-client/src/models/todo-projection.ts",
+              "/home/daytona/workspace/fabro/lib/packages/fabro-api-client/src/models/todo-status.ts"
+            ]
+          },
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "simplify_opus",
+        "node_visits": {
+          "implement": 1,
           "toolchain": 1,
           "preflight_compile": 1,
           "preflight_lint": 1,
@@ -779,6 +930,38 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
+    "implement@1": {
+      "first_event_seq": 50,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-opus-4-7"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-22T14:01:27.519786Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 321974,
+        "output_tokens": 101195,
+        "total_tokens": 64758946,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 64004226,
+        "cache_write_tokens": 331551,
+        "total_usd_micros": 38214051
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-opus-4-7"
+      },
+      "state": "running"
+    },
     "preflight_compile@1": {
       "first_event_seq": 30,
       "prompt": null,
@@ -913,7 +1096,12 @@
       "first_event_seq": 40,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-22T14:01:20.894716Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -921,11 +1109,27 @@
         "command": "exec 2>&1\ncargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 140689,
+        "termination": "exited",
+        "output_bytes": 0,
+        "live_streaming": false
+      },
       "parallel_results": null,
       "output": null,
+      "output_bytes": 0,
+      "live_streaming": false,
+      "termination": "exited",
       "started_at": "2026-05-22T13:59:00.196354Z",
       "handler": "command",
+      "timing": {
+        "wall_time_ms": 140697,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -934,7 +1138,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     }
   }
 }
