@@ -1,0 +1,542 @@
+{
+  "title": "Plan file: /Users/bhelmkamp/p/fabro-sh/fabro/docs/superpowers/plans/2026-05-22-agent-context-obse...",
+  "spec": {
+    "run_id": "01KS8EFSRE0C0X4WKD56ZF0BGG",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "Plan file: /Users/bhelmkamp/p/fabro-sh/fabro/docs/superpowers/plans/2026-05-22-agent-context-observability-events.md\n\n# Agent Context Observability Events Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Add durable API/backend events that report loaded memory files, discovered and activated skills, and per-server MCP tool names for agent runs.\n\n**Architecture:** Keep this API-backend scoped. Emit typed `AgentEvent` variants from the existing `fabro-agent` initialization and skill activation paths, convert them through `fabro-workflow` into durable `fabro-types` run events, and document the event contracts. Do not add run projection fields in this pass; consumers can read the event stream/history.\n\n**Tech Stack:** Rust, Serde, Fabro agent/session events, Fabro workflow event conversion, Fabro MCP connection manager, `cargo nextest`.\n\n---\n\n## Scope\n\nImplement these event changes:\n\n- Add `agent.memory.loaded` with memory file paths, byte counts, loaded byte counts, truncation flags, provider profile, total loaded bytes, and budget bytes.\n- Add `agent.skills.discovered` with source directories, provider profile, and sorted skill summaries.\n- Add persisted `agent.skill.activated` for slash skill expansion and successful `use_skill` tool calls.\n- Enrich `agent.mcp.ready` with names-only tool summaries: qualified tool name and original server tool name.\n\nDo not implement ACP-native equivalents in this pass. Do not include memory file contents in any event payload. Do not include MCP tool descriptions or schemas.\n\n## Existing Patterns To Follow\n\n- Read `docs/internal/events-strategy.md` before changing event variants, names, conversion, or progress JSONL behavior.\n- Read `docs/internal/testing-strategy.md` before adding or reorganizing tests.\n- Follow the current `AgentEvent` flow:\n  - `lib/crates/fabro-agent/src/types.rs`\n  - `lib/crates/fabro-agent/src/session.rs`\n  - `lib/crates/fabro-workflow/src/handler/llm/api.rs`\n  - `lib/crates/fabro-workflow/src/event/convert.rs`\n  - `lib/crates/fabro-workflow/src/event/names.rs`\n  - `lib/crates/fabro-types/src/run_event/agent.rs`\n  - `lib/crates/fabro-types/src/run_event/mod.rs`\n- Follow Rust import style from `AGENTS.md`: import types by name, import functions through their parent module, and avoid glob imports in production code.\n\n## File Map\n\n- Modify `lib/crates/fabro-types/src/run_event/agent.rs`: add new prop structs and extend `AgentMcpReadyProps`.\n- Modify `lib/crates/fabro-types/src/run_event/mod.rs`: add `EventBody` variants for the new event names.\n- Modify `lib/crates/fabro-agent/src/types.rs`: add internal `AgentEvent` variants, trace output, and noise filtering decisions.\n- Modify `lib/crates/fabro-agent/src/memory.rs`: return memory content plus metadata instead of bare strings.\n- Modify `lib/crates/fabro-agent/src/session.rs`: emit memory, skills, skill activation, and enriched MCP events.\n- Modify `lib/crates/fabro-agent/src/skills.rs`: emit tool-sourced skill activation from `use_skill`.\n- Modify `lib/crates/fabro-mcp/src/connection_manager.rs`: expose or support deterministic names-only tool summaries per server.\n- Modify `lib/crates/fabro-workflow/src/event/convert.rs`: convert new agent events to durable event bodies.\n- Modify `lib/crates/fabro-workflow/src/event/names.rs`: add event names.\n- Modify `lib/crates/fabro-workflow/src/event/events.rs` only if the agent event name mapping also lives there for these variants.\n- Modify `lib/crates/fabro-workflow/src/event/stored_fields.rs` only if a new event needs non-standard stored fields; otherwise rely on existing `Event::Agent` handling.\n- Modify `docs/internal/events.md`: document new event shapes and the richer MCP payload.\n- Add or update tests in `lib/crates/fabro-agent`, `lib/crates/fabro-mcp`, `lib/crates/fabro-types`, and `lib/crates/fabro-workflow`.\n\n---\n\n### Task 1: Add Typed Durable Event Contracts\n\n**Files:**\n- Modify: `lib/crates/fabro-types/src/run_event/agent.rs`\n- Modify: `lib/crates/fabro-types/src/run_event/mod.rs`\n- Test: existing `fabro-types` run event serde tests, or add focused coverage near the existing run event tests.\n\n- [ ] **Step 1: Add agent memory props**\n\nAdd event prop structs with this shape:\n\n```rust\npub struct AgentMemoryLoadedProps {\n    pub provider_profile:  String,\n    pub files:             Vec<AgentMemoryFileProps>,\n    pub total_loaded_bytes: usize,\n    pub budget_bytes:      usize,\n    pub visit:             u32,\n}\n\npub struct AgentMemoryFileProps {\n    pub path:         String,\n    pub byte_count:   usize,\n    pub loaded_bytes: usize,\n    pub truncated:    bool,\n}\n```\n\n- [ ] **Step 2: Add skill props**\n\nAdd skill discovery and activation props:\n\n```rust\npub struct AgentSkillsDiscoveredProps {\n    pub provider_profile: String,\n    pub source_dirs:      Vec<String>,\n    pub skills:           Vec<AgentSkillSummary>,\n    pub visit:            u32,\n}\n\npub struct AgentSkillSummary {\n    pub name:        String,\n    pub description: String,\n}\n\npub enum AgentSkillActivationSource {\n    Slash,\n    Tool,\n}\n\npub struct AgentSkillActivatedProps {\n    pub skill_name: String,\n    pub source:     AgentSkillActivationSource,\n    pub visit:      u32,\n}\n```\n\nUse serde names `slash` and `tool` for `AgentSkillActivationSource`. If a local enum string pattern already exists, follow that pattern.\n\n- [ ] **Step 3: Extend MCP ready props**\n\nExtend `AgentMcpReadyProps` with a backwards-compatible field:\n\n```rust\n#[serde(default, skip_serializing_if = \"Vec::is_empty\")]\npub tools: Vec<AgentMcpToolSummary>,\n```\n\nAdd:\n\n```rust\npub struct AgentMcpToolSummary {\n    pub name:          String,\n    pub original_name: String,\n}\n```\n\n- [ ] **Step 4: Add EventBody variants**\n\nAdd `EventBody` variants using these serialized event names:\n\n- `agent.memory.loaded`\n- `agent.skills.discovered`\n- `agent.skill.activated`\n\nKeep existing `agent.mcp.ready` name unchanged and only enrich its props.\n\n- [ ] **Step 5: Add serde tests**\n\nCover:\n\n- New event names serialize to the expected dot names.\n- `AgentSkillActivationSource` serializes as `slash` and `tool`.\n- Old `agent.mcp.ready` JSON without `tools` still deserializes with `tools == []`.\n\n---\n\n### Task 2: Add Internal Agent Events And Conversion\n\n**Files:**\n- Modify: `lib/crates/fabro-agent/src/types.rs`\n- Modify: `lib/crates/fabro-workflow/src/event/convert.rs`\n- Modify: `lib/crates/fabro-workflow/src/event/names.rs`\n- Modify: `lib/crates/fabro-workflow/src/event/events.rs` if needed by the existing name mapping.\n- Test: `lib/crates/fabro-workflow` event conversion tests.\n\n- [ ] **Step 1: Add internal AgentEvent variants**\n\nAdd variants equivalent to:\n\n```rust\nMemoryLoaded {\n    provider_profile: String,\n    files: Vec<MemoryFileSummary>,\n    total_loaded_bytes: usize,\n    budget_bytes: usize,\n}\n\nSkillsDiscovered {\n    provider_profile: String,\n    source_dirs: Vec<String>,\n    skills: Vec<SkillSummary>,\n}\n\nSkillActivated {\n    skill_name: String,\n    source: SkillActivationSource,\n}\n\nMcpServerReady {\n    server_name: String,\n    tool_count: usize,\n    tools: Vec<McpToolSummary>,\n}\n```\n\nPrefer small shared internal structs near `AgentEvent` if that matches the existing file organization.\n\n- [ ] **Step 2: Persist skill activation**\n\nDo not classify `SkillActivated` as streaming noise. The existing `SkillExpanded` event is currently filtered before persistence; replace slash expansion emissions with `SkillActivated { source: Slash }` or keep `SkillExpanded` internal-only if removing it would create unnecessary churn.\n\n- [ ] **Step 3: Add trace behavior**\n\nUpdate `AgentEvent::trace` so the new events emit concise tracing summaries:\n\n- memory loaded: profile, file count, total loaded bytes, budget bytes\n- skills discovered: profile, skill count, source dir count\n- skill activated: name and source\n- MCP ready: server, count, and summary count\n\n- [ ] **Step 4: Convert to durable events**\n\nUpdate `fabro-workflow` event conversion so the new agent events map to the new `fabro-types` props and include `visit`.\n\n- [ ] **Step 5: Add conversion tests**\n\nCover each new event with a focused conversion assertion that checks:\n\n- durable event name\n- `visit`\n- core fields\n- no memory content in the converted payload\n\n---\n\n### Task 3: Emit Memory Loaded Metadata\n\n**Files:**\n- Modify: `lib/crates/fabro-agent/src/memory.rs`\n- Modify: `lib/crates/fabro-agent/src/session.rs`\n- Test: relevant `fabro-agent` memory/session tests.\n\n- [ ] **Step 1: Change memory discovery return type**\n\nChange memory discovery from bare `Vec<String>` to a document type carrying both prompt content and event metadata:\n\n```rust\npub struct MemoryDocument {\n    pub path:         String,\n    pub content:      String,\n    pub byte_count:   usize,\n    pub loaded_bytes: usize,\n    pub truncated:    bool,\n}\n```\n\nKeep existing behavior unchanged:\n\n- provider profile filename candidates stay the same\n- root-to-working-dir walk stays the same\n- content dedupe stays the same\n- empty files are skipped\n- total budget remains 32 KiB\n- truncated content keeps the existing truncation marker\n\n- [ ] **Step 2: Preserve prompt assembly behavior**\n\nAdjust session/profile prompt assembly to pass only memory contents where prompt assembly expects memory text. The system prompt should be byte-for-byte equivalent except where existing tests allow non-semantic ordering differences.\n\n- [ ] **Step 3: Emit agent.memory.loaded**\n\nIn `Session::initialize()`, emit `AgentEvent::MemoryLoaded` immediately after memory discovery, before skills and MCP initialization.\n\nEmit the event even when no memory files are loaded. That lets consumers distinguish \"no memory\" from \"not reported.\"\n\n- [ ] **Step 4: Add memory tests**\n\nCover:\n\n- loaded file path appears in event metadata\n- `byte_count` is the original file byte count\n- `loaded_bytes` reflects bytes actually loaded into the prompt budget\n- `truncated` is true only for truncated files\n- event payload never contains memory file contents\n- empty discovery still emits a memory-loaded event with `files == []`\n\n---\n\n### Task 4: Emit Skills Discovered And Skill Activated\n\n**Files:**\n- Modify: `lib/crates/fabro-agent/src/session.rs`\n- Modify: `lib/crates/fabro-agent/src/skills.rs`\n- Test: relevant `fabro-agent` skill/session tests.\n\n- [ ] **Step 1: Emit skills discovered**\n\nAfter `discover_skills(...)`, emit `AgentEvent::SkillsDiscovered` with:\n\n- `provider_profile`\n- `source_dirs`\n- sorted `skills: [{ name, description }]`\n\nEmit the event even when no skills are discovered.\n\n- [ ] **Step 2: Emit slash activation**\n\nWhere slash skill expansion currently emits or creates `SkillExpanded`, emit:\n\n```rust\nAgentEvent::SkillActivated {\n    skill_name,\n    source: SkillActivationSource::Slash,\n}\n```\n\n- [ ] **Step 3: Emit tool activation**\n\nIn `make_use_skill_tool`, use `ToolContext::emit_agent_event(...)` after a requested skill is found and before returning the skill template. Emit:\n\n```rust\nAgentEvent::SkillActivated {\n    skill_name: name.to_string(),\n    source: SkillActivationSource::Tool,\n}\n```\n\nDo not emit activation for failed `use_skill` lookups.\n\n- [ ] **Step 4: Add skill tests**\n\nCover:\n\n- discovery event includes all discovered skills sorted by name\n- discovery event includes configured source directories\n- empty discovery emits `skills == []`\n- slash expansion emits `source == slash`\n- successful `use_skill` emits `source == tool`\n- failed `use_skill` does not emit activation\n\n---\n\n### Task 5: Enrich agent.mcp.ready With Names-Only Tool Summaries\n\n**Files:**\n- Modify: `lib/crates/fabro-mcp/src/connection_manager.rs`\n- Modify: `lib/crates/fabro-agent/src/session.rs`\n- Test: relevant `fabro-mcp` or `fabro-agent` MCP tests.\n\n- [ ] **Step 1: Add deterministic tool summaries**\n\nExpose a helper on `McpConnectionManager` or compute in `Session` from `all_tools()`:\n\n- filter tools by `server_name`\n- return qualified tool name as `name`\n- return server-provided tool name as `original_name`\n- sort by qualified `name`\n\n- [ ] **Step 2: Enrich ready emissions**\n\nWhen emitting `AgentEvent::McpServerReady`, include the tool summaries for that server. Keep existing `server_name` and `tool_count`.\n\n- [ ] **Step 3: Add MCP tests**\n\nCover:\n\n- ready event includes only tools from the ready server\n- summaries are sorted by qualified name\n- `name` is the Fabro-qualified MCP tool name\n- `original_name` is the server-provided tool name\n- descriptions and input schemas are not included\n\n---\n\n### Task 6: Update Event Documentation\n\n**Files:**\n- Modify: `docs/internal/events.md`\n\n- [ ] **Step 1: Document new events**\n\nAdd sections for:\n\n- `agent.memory.loaded`\n- `agent.skills.discovered`\n- `agent.skill.activated`\n\nFor `agent.memory.loaded`, explicitly state that file contents are excluded.\n\n- [ ] **Step 2: Update MCP ready docs**\n\nUpdate `agent.mcp.ready` to show:\n\n```json\n{\n  \"server_name\": \"github\",\n  \"tool_count\": 2,\n  \"tools\": [\n    {\n      \"name\": \"mcp__github__create_issue\",\n      \"original_name\": \"create_issue\"\n    }\n  ],\n  \"visit\": 1\n}\n```\n\n- [ ] **Step 3: Record skill event replacement**\n\nIf `agent.skill.expanded` remains in internal code or docs, mark it internal-only or replaced by `agent.skill.activated`.\n\n---\n\n### Task 7: Verify\n\n**Files:**\n- No new files unless test placement requires it.\n\n- [ ] **Step 1: Run focused tests**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-agent -p fabro-workflow -p fabro-types -p fabro-mcp\n```\n\n- [ ] **Step 2: Run formatting**\n\nRun:\n\n```bash\ncargo +nightly-2026-04-14 fmt --all\n```\n\n- [ ] **Step 3: Run clippy for touched crates or workspace**\n\nPrefer the workspace command if time permits:\n\n```bash\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\n- [ ] **Step 4: Final sanity checks**\n\nConfirm:\n\n- memory events never contain file contents\n- skills discovered and memory loaded are emitted even for empty lists\n- skill activation is persisted rather than filtered as streaming noise\n- `agent.mcp.ready` remains backwards-compatible for old events without `tools`\n- docs match the serialized event names and payload shapes\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": [],
+          "controls": {
+            "reasoning_effort": null,
+            "speed": null
+          }
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt"
+        },
+        "checkpoint": {
+          "exclude_globs": []
+        },
+        "clone": {
+          "enabled": true
+        },
+        "run_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "meta_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "stop_on_terminal": true,
+          "devcontainer": false,
+          "env": {},
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {}
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "volumes": [],
+            "snapshot": {
+              "name": "fabro-v11",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \\\n        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \\\n        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install real Chromium (not the snap stub) via xtradeb PPA\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        software-properties-common curl gnupg \\\n    && add-apt-repository -y ppa:xtradeb/apps \\\n    && apt-get update \\\n    && apt-get install -y --no-install-recommends chromium \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Wrapper: Chromium needs --no-sandbox when running as root in a container,\n# and --disable-dev-shm-usage avoids crashes from small /dev/shm\nRUN printf '#!/bin/bash\\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage \"$@\"\\n' \\\n        > /usr/local/bin/chromium-wrapper \\\n    && chmod +x /usr/local/bin/chromium-wrapper\n\n# Make the wrapper the default in the system .desktop file and via alternatives\nRUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \\\n        /usr/share/applications/chromium.desktop \\\n    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \\\n        /usr/local/bin/chromium-wrapper 100\n\n# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)\nRUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \\\n    && printf 'WebBrowser=custom-WebBrowser\\n' > /etc/xdg/xfce4/helpers.rc \\\n    && printf '[Desktop Entry]\\n\\\nVersion=1.0\\n\\\nType=X-XFCE-Helper\\n\\\nName=Chromium\\n\\\nIcon=chromium\\n\\\nX-XFCE-Category=WebBrowser\\n\\\nX-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper \"%%s\"\\n\\\nX-XFCE-Commands=/usr/local/bin/chromium-wrapper\\n' \\\n        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\\n        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\\n    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" \\\n        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\\n    && apt-get update && apt-get install -y --no-install-recommends gh \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null
+        },
+        "agent": {
+          "fabro_tools": false,
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        },
+        "integrations": {
+          "github": {
+            "permissions": {}
+          }
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "model": {
+              "String": "gpt-5.5"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Verify"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "label": {
+              "String": "Exit"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "max_retries": {
+              "Integer": 0
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Format"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "label": {
+              "String": "Fixup"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "label": {
+              "String": "Implement"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "label": {
+              "String": "Start"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "goal": {
+          "String": "Plan file: /Users/bhelmkamp/p/fabro-sh/fabro/docs/superpowers/plans/2026-05-22-agent-context-observability-events.md\n\n# Agent Context Observability Events Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Add durable API/backend events that report loaded memory files, discovered and activated skills, and per-server MCP tool names for agent runs.\n\n**Architecture:** Keep this API-backend scoped. Emit typed `AgentEvent` variants from the existing `fabro-agent` initialization and skill activation paths, convert them through `fabro-workflow` into durable `fabro-types` run events, and document the event contracts. Do not add run projection fields in this pass; consumers can read the event stream/history.\n\n**Tech Stack:** Rust, Serde, Fabro agent/session events, Fabro workflow event conversion, Fabro MCP connection manager, `cargo nextest`.\n\n---\n\n## Scope\n\nImplement these event changes:\n\n- Add `agent.memory.loaded` with memory file paths, byte counts, loaded byte counts, truncation flags, provider profile, total loaded bytes, and budget bytes.\n- Add `agent.skills.discovered` with source directories, provider profile, and sorted skill summaries.\n- Add persisted `agent.skill.activated` for slash skill expansion and successful `use_skill` tool calls.\n- Enrich `agent.mcp.ready` with names-only tool summaries: qualified tool name and original server tool name.\n\nDo not implement ACP-native equivalents in this pass. Do not include memory file contents in any event payload. Do not include MCP tool descriptions or schemas.\n\n## Existing Patterns To Follow\n\n- Read `docs/internal/events-strategy.md` before changing event variants, names, conversion, or progress JSONL behavior.\n- Read `docs/internal/testing-strategy.md` before adding or reorganizing tests.\n- Follow the current `AgentEvent` flow:\n  - `lib/crates/fabro-agent/src/types.rs`\n  - `lib/crates/fabro-agent/src/session.rs`\n  - `lib/crates/fabro-workflow/src/handler/llm/api.rs`\n  - `lib/crates/fabro-workflow/src/event/convert.rs`\n  - `lib/crates/fabro-workflow/src/event/names.rs`\n  - `lib/crates/fabro-types/src/run_event/agent.rs`\n  - `lib/crates/fabro-types/src/run_event/mod.rs`\n- Follow Rust import style from `AGENTS.md`: import types by name, import functions through their parent module, and avoid glob imports in production code.\n\n## File Map\n\n- Modify `lib/crates/fabro-types/src/run_event/agent.rs`: add new prop structs and extend `AgentMcpReadyProps`.\n- Modify `lib/crates/fabro-types/src/run_event/mod.rs`: add `EventBody` variants for the new event names.\n- Modify `lib/crates/fabro-agent/src/types.rs`: add internal `AgentEvent` variants, trace output, and noise filtering decisions.\n- Modify `lib/crates/fabro-agent/src/memory.rs`: return memory content plus metadata instead of bare strings.\n- Modify `lib/crates/fabro-agent/src/session.rs`: emit memory, skills, skill activation, and enriched MCP events.\n- Modify `lib/crates/fabro-agent/src/skills.rs`: emit tool-sourced skill activation from `use_skill`.\n- Modify `lib/crates/fabro-mcp/src/connection_manager.rs`: expose or support deterministic names-only tool summaries per server.\n- Modify `lib/crates/fabro-workflow/src/event/convert.rs`: convert new agent events to durable event bodies.\n- Modify `lib/crates/fabro-workflow/src/event/names.rs`: add event names.\n- Modify `lib/crates/fabro-workflow/src/event/events.rs` only if the agent event name mapping also lives there for these variants.\n- Modify `lib/crates/fabro-workflow/src/event/stored_fields.rs` only if a new event needs non-standard stored fields; otherwise rely on existing `Event::Agent` handling.\n- Modify `docs/internal/events.md`: document new event shapes and the richer MCP payload.\n- Add or update tests in `lib/crates/fabro-agent`, `lib/crates/fabro-mcp`, `lib/crates/fabro-types`, and `lib/crates/fabro-workflow`.\n\n---\n\n### Task 1: Add Typed Durable Event Contracts\n\n**Files:**\n- Modify: `lib/crates/fabro-types/src/run_event/agent.rs`\n- Modify: `lib/crates/fabro-types/src/run_event/mod.rs`\n- Test: existing `fabro-types` run event serde tests, or add focused coverage near the existing run event tests.\n\n- [ ] **Step 1: Add agent memory props**\n\nAdd event prop structs with this shape:\n\n```rust\npub struct AgentMemoryLoadedProps {\n    pub provider_profile:  String,\n    pub files:             Vec<AgentMemoryFileProps>,\n    pub total_loaded_bytes: usize,\n    pub budget_bytes:      usize,\n    pub visit:             u32,\n}\n\npub struct AgentMemoryFileProps {\n    pub path:         String,\n    pub byte_count:   usize,\n    pub loaded_bytes: usize,\n    pub truncated:    bool,\n}\n```\n\n- [ ] **Step 2: Add skill props**\n\nAdd skill discovery and activation props:\n\n```rust\npub struct AgentSkillsDiscoveredProps {\n    pub provider_profile: String,\n    pub source_dirs:      Vec<String>,\n    pub skills:           Vec<AgentSkillSummary>,\n    pub visit:            u32,\n}\n\npub struct AgentSkillSummary {\n    pub name:        String,\n    pub description: String,\n}\n\npub enum AgentSkillActivationSource {\n    Slash,\n    Tool,\n}\n\npub struct AgentSkillActivatedProps {\n    pub skill_name: String,\n    pub source:     AgentSkillActivationSource,\n    pub visit:      u32,\n}\n```\n\nUse serde names `slash` and `tool` for `AgentSkillActivationSource`. If a local enum string pattern already exists, follow that pattern.\n\n- [ ] **Step 3: Extend MCP ready props**\n\nExtend `AgentMcpReadyProps` with a backwards-compatible field:\n\n```rust\n#[serde(default, skip_serializing_if = \"Vec::is_empty\")]\npub tools: Vec<AgentMcpToolSummary>,\n```\n\nAdd:\n\n```rust\npub struct AgentMcpToolSummary {\n    pub name:          String,\n    pub original_name: String,\n}\n```\n\n- [ ] **Step 4: Add EventBody variants**\n\nAdd `EventBody` variants using these serialized event names:\n\n- `agent.memory.loaded`\n- `agent.skills.discovered`\n- `agent.skill.activated`\n\nKeep existing `agent.mcp.ready` name unchanged and only enrich its props.\n\n- [ ] **Step 5: Add serde tests**\n\nCover:\n\n- New event names serialize to the expected dot names.\n- `AgentSkillActivationSource` serializes as `slash` and `tool`.\n- Old `agent.mcp.ready` JSON without `tools` still deserializes with `tools == []`.\n\n---\n\n### Task 2: Add Internal Agent Events And Conversion\n\n**Files:**\n- Modify: `lib/crates/fabro-agent/src/types.rs`\n- Modify: `lib/crates/fabro-workflow/src/event/convert.rs`\n- Modify: `lib/crates/fabro-workflow/src/event/names.rs`\n- Modify: `lib/crates/fabro-workflow/src/event/events.rs` if needed by the existing name mapping.\n- Test: `lib/crates/fabro-workflow` event conversion tests.\n\n- [ ] **Step 1: Add internal AgentEvent variants**\n\nAdd variants equivalent to:\n\n```rust\nMemoryLoaded {\n    provider_profile: String,\n    files: Vec<MemoryFileSummary>,\n    total_loaded_bytes: usize,\n    budget_bytes: usize,\n}\n\nSkillsDiscovered {\n    provider_profile: String,\n    source_dirs: Vec<String>,\n    skills: Vec<SkillSummary>,\n}\n\nSkillActivated {\n    skill_name: String,\n    source: SkillActivationSource,\n}\n\nMcpServerReady {\n    server_name: String,\n    tool_count: usize,\n    tools: Vec<McpToolSummary>,\n}\n```\n\nPrefer small shared internal structs near `AgentEvent` if that matches the existing file organization.\n\n- [ ] **Step 2: Persist skill activation**\n\nDo not classify `SkillActivated` as streaming noise. The existing `SkillExpanded` event is currently filtered before persistence; replace slash expansion emissions with `SkillActivated { source: Slash }` or keep `SkillExpanded` internal-only if removing it would create unnecessary churn.\n\n- [ ] **Step 3: Add trace behavior**\n\nUpdate `AgentEvent::trace` so the new events emit concise tracing summaries:\n\n- memory loaded: profile, file count, total loaded bytes, budget bytes\n- skills discovered: profile, skill count, source dir count\n- skill activated: name and source\n- MCP ready: server, count, and summary count\n\n- [ ] **Step 4: Convert to durable events**\n\nUpdate `fabro-workflow` event conversion so the new agent events map to the new `fabro-types` props and include `visit`.\n\n- [ ] **Step 5: Add conversion tests**\n\nCover each new event with a focused conversion assertion that checks:\n\n- durable event name\n- `visit`\n- core fields\n- no memory content in the converted payload\n\n---\n\n### Task 3: Emit Memory Loaded Metadata\n\n**Files:**\n- Modify: `lib/crates/fabro-agent/src/memory.rs`\n- Modify: `lib/crates/fabro-agent/src/session.rs`\n- Test: relevant `fabro-agent` memory/session tests.\n\n- [ ] **Step 1: Change memory discovery return type**\n\nChange memory discovery from bare `Vec<String>` to a document type carrying both prompt content and event metadata:\n\n```rust\npub struct MemoryDocument {\n    pub path:         String,\n    pub content:      String,\n    pub byte_count:   usize,\n    pub loaded_bytes: usize,\n    pub truncated:    bool,\n}\n```\n\nKeep existing behavior unchanged:\n\n- provider profile filename candidates stay the same\n- root-to-working-dir walk stays the same\n- content dedupe stays the same\n- empty files are skipped\n- total budget remains 32 KiB\n- truncated content keeps the existing truncation marker\n\n- [ ] **Step 2: Preserve prompt assembly behavior**\n\nAdjust session/profile prompt assembly to pass only memory contents where prompt assembly expects memory text. The system prompt should be byte-for-byte equivalent except where existing tests allow non-semantic ordering differences.\n\n- [ ] **Step 3: Emit agent.memory.loaded**\n\nIn `Session::initialize()`, emit `AgentEvent::MemoryLoaded` immediately after memory discovery, before skills and MCP initialization.\n\nEmit the event even when no memory files are loaded. That lets consumers distinguish \"no memory\" from \"not reported.\"\n\n- [ ] **Step 4: Add memory tests**\n\nCover:\n\n- loaded file path appears in event metadata\n- `byte_count` is the original file byte count\n- `loaded_bytes` reflects bytes actually loaded into the prompt budget\n- `truncated` is true only for truncated files\n- event payload never contains memory file contents\n- empty discovery still emits a memory-loaded event with `files == []`\n\n---\n\n### Task 4: Emit Skills Discovered And Skill Activated\n\n**Files:**\n- Modify: `lib/crates/fabro-agent/src/session.rs`\n- Modify: `lib/crates/fabro-agent/src/skills.rs`\n- Test: relevant `fabro-agent` skill/session tests.\n\n- [ ] **Step 1: Emit skills discovered**\n\nAfter `discover_skills(...)`, emit `AgentEvent::SkillsDiscovered` with:\n\n- `provider_profile`\n- `source_dirs`\n- sorted `skills: [{ name, description }]`\n\nEmit the event even when no skills are discovered.\n\n- [ ] **Step 2: Emit slash activation**\n\nWhere slash skill expansion currently emits or creates `SkillExpanded`, emit:\n\n```rust\nAgentEvent::SkillActivated {\n    skill_name,\n    source: SkillActivationSource::Slash,\n}\n```\n\n- [ ] **Step 3: Emit tool activation**\n\nIn `make_use_skill_tool`, use `ToolContext::emit_agent_event(...)` after a requested skill is found and before returning the skill template. Emit:\n\n```rust\nAgentEvent::SkillActivated {\n    skill_name: name.to_string(),\n    source: SkillActivationSource::Tool,\n}\n```\n\nDo not emit activation for failed `use_skill` lookups.\n\n- [ ] **Step 4: Add skill tests**\n\nCover:\n\n- discovery event includes all discovered skills sorted by name\n- discovery event includes configured source directories\n- empty discovery emits `skills == []`\n- slash expansion emits `source == slash`\n- successful `use_skill` emits `source == tool`\n- failed `use_skill` does not emit activation\n\n---\n\n### Task 5: Enrich agent.mcp.ready With Names-Only Tool Summaries\n\n**Files:**\n- Modify: `lib/crates/fabro-mcp/src/connection_manager.rs`\n- Modify: `lib/crates/fabro-agent/src/session.rs`\n- Test: relevant `fabro-mcp` or `fabro-agent` MCP tests.\n\n- [ ] **Step 1: Add deterministic tool summaries**\n\nExpose a helper on `McpConnectionManager` or compute in `Session` from `all_tools()`:\n\n- filter tools by `server_name`\n- return qualified tool name as `name`\n- return server-provided tool name as `original_name`\n- sort by qualified `name`\n\n- [ ] **Step 2: Enrich ready emissions**\n\nWhen emitting `AgentEvent::McpServerReady`, include the tool summaries for that server. Keep existing `server_name` and `tool_count`.\n\n- [ ] **Step 3: Add MCP tests**\n\nCover:\n\n- ready event includes only tools from the ready server\n- summaries are sorted by qualified name\n- `name` is the Fabro-qualified MCP tool name\n- `original_name` is the server-provided tool name\n- descriptions and input schemas are not included\n\n---\n\n### Task 6: Update Event Documentation\n\n**Files:**\n- Modify: `docs/internal/events.md`\n\n- [ ] **Step 1: Document new events**\n\nAdd sections for:\n\n- `agent.memory.loaded`\n- `agent.skills.discovered`\n- `agent.skill.activated`\n\nFor `agent.memory.loaded`, explicitly state that file contents are excluded.\n\n- [ ] **Step 2: Update MCP ready docs**\n\nUpdate `agent.mcp.ready` to show:\n\n```json\n{\n  \"server_name\": \"github\",\n  \"tool_count\": 2,\n  \"tools\": [\n    {\n      \"name\": \"mcp__github__create_issue\",\n      \"original_name\": \"create_issue\"\n    }\n  ],\n  \"visit\": 1\n}\n```\n\n- [ ] **Step 3: Record skill event replacement**\n\nIf `agent.skill.expanded` remains in internal code or docs, mark it internal-only or replaced by `agent.skill.activated`.\n\n---\n\n### Task 7: Verify\n\n**Files:**\n- No new files unless test placement requires it.\n\n- [ ] **Step 1: Run focused tests**\n\nRun:\n\n```bash\ncargo nextest run -p fabro-agent -p fabro-workflow -p fabro-types -p fabro-mcp\n```\n\n- [ ] **Step 2: Run formatting**\n\nRun:\n\n```bash\ncargo +nightly-2026-04-14 fmt --all\n```\n\n- [ ] **Step 3: Run clippy for touched crates or workspace**\n\nPrefer the workspace command if time permits:\n\n```bash\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\n- [ ] **Step 4: Final sanity checks**\n\nConfirm:\n\n- memory events never contain file contents\n- skills discovered and memory loaded are emitted even for empty lists\n- skill activation is persisted rather than filtered as streaming noise\n- `agent.mcp.ready` remains backwards-compatible for old events without `tools`\n- docs match the serialized event names and payload shapes\n"
+        }
+      }
+    },
+    "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.241.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.241.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.241.0-nightly.0"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "d8e208e15d19c540fd8152413b4e05fd54f230e8c6f8b043cee01ac5bf0598da",
+    "definition_blob": "3ba6b8c938e8ad1844c5485d0892698cca79b060a264ff6185036cc3a6ad862a",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "ask-fabro-welcome-prompts",
+      "sha": "c2d950da380d38818948dc55eb6362770b3dd91b",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "succeeded",
+        "remote": "origin",
+        "branch": "ask-fabro-welcome-prompts"
+      }
+    }
+  },
+  "web_url": "http://127.0.0.1:32276/runs/01KS8EFSRE0C0X4WKD56ZF0BGG",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-22T18:17:15.849459Z",
+  "last_event_at": "2026-05-22T18:17:35.357462Z",
+  "pending_control": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "sandbox": {
+    "provider": "daytona",
+    "image": "buildpack-deps:noble",
+    "snapshot": "fabro-v11",
+    "runtime": {
+      "id": "fabro-01KS8EFSRE0C0X4WKD56ZF0BGG",
+      "working_directory": "/home/daytona/workspace/fabro",
+      "repo_cloned": true,
+      "clone_origin_url": "https://github.com/fabro-sh/fabro",
+      "clone_branch": "ask-fabro-welcome-prompts",
+      "workspace_root": "/home/daytona/workspace",
+      "repos_root": "/home/daytona/repos",
+      "primary_repo_path": "/home/daytona/repos/fabro-sh/fabro",
+      "primary_repo_link": "/home/daytona/workspace/fabro"
+    }
+  },
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
