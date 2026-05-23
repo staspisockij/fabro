@@ -521,7 +521,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-23T10:02:04.125640Z",
-  "last_event_at": "2026-05-23T10:59:48.234377Z",
+  "last_event_at": "2026-05-23T11:03:04.911959Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -891,9 +891,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 1559,
       "checkpoint": {
-        "timestamp": "2026-05-23T10:59:48.752288Z",
+        "timestamp": "2026-05-23T10:59:54.464794Z",
         "current_node": "simplify_opus",
         "completed_nodes": [
           "start",
@@ -905,38 +905,42 @@
         ],
         "node_retries": {},
         "context_values": {
-          "internal.work_dir": "/home/daytona/workspace/fabro",
-          "internal.retry_count.start": 0,
-          "internal.retry_count.implement": 0,
-          "internal.run_id": "01KSA4H7JHBRPXZM3XTJ4SD9QA",
-          "internal.retry_count.simplify_opus": 0,
+          "thread.start.current_node": "toolchain",
           "internal.node_visit_count": 1,
-          "graph.goal": "---\ntitle: Add Manual Run Retry\ntype: feat\nstatus: active\ndate: 2026-05-23\n---\n\n# Add Manual Run Retry\n\n## Summary\n\nAdd a **Retry** action for failed Fabro runs that creates and immediately starts a new run from the failed run's captured run definition. The new run is independent runtime state, records `retried_from: <source_run_id>`, and leaves the source run unchanged.\n\nThis is a fresh run, not resume/fork/rewind. It should copy the source run's durable definition and settings, but not checkpoints, stage state, sandbox state, PR links, billing, questions, conclusions, or pending controls.\n\n## Key Changes\n\n- Add `retried_from` as a nullable public field on `Run`.\n  - Store it on the new run only.\n  - Do not add a reverse `retried_by` field in v1.\n  - Preserve backward compatibility with old events by defaulting to `null`.\n\n- Add `POST /api/v1/runs/{id}/retry`.\n  - Response: `201` with the newly created/queued `Run`.\n  - Eligible source states: `failed` except `reason=cancelled`, and `dead`.\n  - Reject active, succeeded, cancelled, archived, and missing runs with existing API error patterns.\n  - The new run should use the current authenticated actor as `created_by`.\n  - The new run should preserve the source run's current `parent_id`, title, labels, workflow graph/source, resolved settings, git context, manifest/definition blob refs, and `fork_source_ref` if present.\n\n- Implement retry using a workflow operation similar in shape to `fork`, but without replaying checkpoint/runtime events.\n  - Create a new run store.\n  - Append `run.created` with `retried_from`.\n  - Append `run.submitted`.\n  - Queue/start it through the same internal start path used by `POST /runs/{id}/start`.\n\n- Update OpenAPI and generated clients.\n  - Edit `docs/public/api-reference/fabro-api.yaml`.\n  - Regenerate Rust API types through `cargo build -p fabro-api`.\n  - Regenerate TypeScript client in `lib/packages/fabro-api-client`.\n\n- Update the web UI.\n  - Add `Retry` to the run action menu for eligible failed/dead runs.\n  - Disable the action while pending.\n  - On success, navigate to the new run page and refresh run/list caches.\n  - Add a compact \"Retried from\" link in the run summary panel when `retried_from` is present.\n  - Add demo-mode support or hide the action in demo mode so the button never navigates to a missing demo run.\n\n## Test Plan\n\n- Rust workflow/store tests:\n  - `run.created` serializes/deserializes `retried_from`.\n  - Old `run.created` events project with `retried_from = None`.\n  - Retry creates a new run with a different ID, copied durable definition, no runtime state, and `retried_from` set.\n  - Retry preserves current `parent_id`, title, labels, git context, settings, and `fork_source_ref`.\n  - Retry rejects succeeded, active, cancelled, and archived source runs.\n\n- Rust server/API tests:\n  - `POST /runs/{id}/retry` on a failed run returns `201`, a new run ID, `retried_from`, and queued/started lifecycle state.\n  - Source run remains unchanged.\n  - `404` for unknown run.\n  - `409` for non-retryable status.\n  - Generated Rust API compiles against the updated OpenAPI contract.\n\n- Web tests:\n  - `canRetry` returns true for failed/dead, false for cancelled/succeeded/active/archived.\n  - Action menu renders `Retry` only when eligible.\n  - Successful retry calls the generated client and navigates to `/runs/:newId`.\n  - Retry errors show a useful toast/message.\n  - Run summary panel renders the `Retried from` link when present.\n  - Typecheck passes with regenerated client types.\n\n## Assumptions\n\n- V1 does not add a CLI `fabro retry` command.\n- V1 does not add automatic retry attempts, retry counts, or idempotency keys.\n- Multiple manual clicks after the first request completes may create multiple retry runs.\n- \"Same settings\" means the source run's captured durable definition/settings, not latest local files from the user's machine.\n- Cancelled runs are excluded because cancellation is user intent, not execution failure.\n",
+          "outcome": "succeeded",
           "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
           "internal.retry_count.preflight_compile": 0,
-          "internal.fidelity": "compact",
-          "thread.start.current_node": "toolchain",
           "internal.retry_count.toolchain": 0,
-          "outcome": "succeeded",
-          "response.simplify_opus": "Net 32-line reduction. Here's the summary of fixes applied:\n\n## Summary\n\nThree review agents flagged duplication and clone churn in the retry feature. I applied these focused fixes:\n\n**Rust (`retry.rs`, `lifecycle.rs`):**\n- Removed dead writes (`spec.run_id = ...`, `spec.provenance = ...`) and double clones of every spec field. Destructured `source.spec` by move so each field flows directly into the `RunCreated` event without an intermediate `RunSpec` clone.\n- Changed `RetryRunInput::new_run_id` from `Option<RunId>` to required `RunId` — the handler always pre-generates one to compute `web_url`; the operation no longer carries a phantom default.\n\n**Frontend (`run-actions.ts`, `mutations.ts`, `run-detail.tsx`):**\n- Added `\"retry\"` to the `LifecycleAction` union and folded `retryErrorMessage` into `mapError` (both had identical 404 + detail + fallback shape).\n- Dropped `RetryMutationResult` — now uses the existing `LifecycleMutationResult` with `intent: \"retry\"`.\n- Folded `useRetryRun` into `useLifecycleMutation` via an `onSuccessExtra` callback. The retry path now skips invalidating the source run's `detail`/`billing` caches (which retry doesn't change).\n- Folded `handleRetryResult` + `lastRetryResultRef` into the existing `handleLifecycleToastResult` + `lifecycleToastStateRef` with an optional `navigate` parameter. The parallel toast-state machine is gone.\n- Updated the matching test to use the unified handler.\n\n**Verified:** `cargo check`, `cargo nextest run -p fabro-workflow operations::retry`, `cargo nextest run -p fabro-server retry` (4 + 9 tests pass), `cargo clippy --workspace --all-targets -D warnings`, `cargo fmt`, `bun run typecheck`. The 8 web test failures present when running all files together exist on the baseline (HEAD before my changes), so they're pre-existing and unrelated.\n\n**Findings I deliberately skipped** (out of scope or low ROI for a retry-focused review):\n- Extracting a shared `RunCreated`-from-`RunSpec` builder between `fork.rs` and `retry.rs` (broader refactor).\n- Fixing `fork.rs`/`rewind.rs` to use `map_open_run_error` (pre-existing bugs, not introduced here).\n- Moving retry test fixtures into a shared `test_support` module.\n- Auditing the `Box::pin(...)` additions in server tests.\n- The `pt-3` → `pt-3.5` test-only fix that snuck into this commit.\n- Normalizing the `canRetry` signature to match `canCancel`/`canArchive` — the divergence is justified (needs failure reason + archived flag).",
-          "internal.thread_id": "implement",
-          "thread.toolchain.current_node": "preflight_compile",
-          "thread.preflight_compile.current_node": "preflight_lint",
-          "failure_signature": "",
-          "last_stage": "simplify_opus",
-          "internal.retry_count.preflight_lint": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
           "response.implement": "Implemented manual run retry end-to-end.\n\nSummary:\n- Added `retried_from` to:\n  - `Run`\n  - `RunProjection`\n  - `run.created` event props\n  - OpenAPI `Run` / `RunProjection`\n  - generated TS API client models\n- Added workflow retry operation:\n  - Creates a fresh run store\n  - Copies durable definition/settings/source/git/labels/title/current parent/fork source/blob refs\n  - Sets new `created_by` via provenance\n  - Sets `retried_from`\n  - Does not copy checkpoints/runtime/sandbox runtime/PR/conclusion/questions/pending controls\n  - Rejects succeeded, active, cancelled, archived, and missing runs\n- Added `POST /api/v1/runs/{id}/retry`:\n  - Returns `201` with the new queued `Run`\n  - Queues via the same internal start path used by `POST /runs/{id}/start`\n  - Leaves source run unchanged\n- Updated web UI:\n  - Added `Retry` action for eligible failed/dead runs, hidden in demo mode\n  - Disables while pending\n  - Calls generated client, refreshes caches, and navigates to the new run on success\n  - Shows retry errors via toast\n  - Adds compact `Retried from` link in run summary panel\n- Regenerated Rust API and TypeScript Axios client.\n\nValidation run:\n- `cargo build -q -p fabro-api`\n- `cargo check -q --workspace`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`\n- `cargo test -q -p fabro-api`\n- `cargo test -q -p fabro-store legacy_run_created_projects_retried_from_none --lib`\n- `cargo test -q -p fabro-workflow retry_ --lib`\n- `cargo test -q -p fabro-server retry_ --lib`\n- `cd apps/fabro-web && bun run typecheck`\n- `cd apps/fabro-web && bun test app/lib/run-actions.test.ts app/components/run-summary-panel.test.tsx app/routes/run-detail.test.ts`\n\nNote: I also attempted the full `cd apps/fabro-web && bun test`; it still reports unrelated test-isolation failures around shared `generatedAxios.defaults.adapter` state plus an existing run-detail dock assertion, while the focused retry/UI tests above pass.",
-          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
-          "graph.rankdir": "LR",
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "internal.retry_count.simplify_opus": 0,
+          "thread.toolchain.current_node": "preflight_compile",
           "thread.implement.current_node": "simplify_opus",
-          "failure_class": "",
-          "current_node": "simplify_opus",
+          "internal.run_id": "01KSA4H7JHBRPXZM3XTJ4SD9QA",
+          "internal.thread_id": "implement",
+          "last_response": "Net 32-line reduction. Here's the summary of fixes applied:\n\n## Summary\n\nThree review agents flagged duplication and clone churn in the retry feature. I applied these focused fixes:\n\n**Rust (`retry.rs",
           "thread.preflight_lint.current_node": "implement",
-          "last_response": "Net 32-line reduction. Here's the summary of fixes applied:\n\n## Summary\n\nThree review agents flagged duplication and clone churn in the retry feature. I applied these focused fixes:\n\n**Rust (`retry.rs"
+          "internal.retry_count.start": 0,
+          "response.simplify_opus": "Net 32-line reduction. Here's the summary of fixes applied:\n\n## Summary\n\nThree review agents flagged duplication and clone churn in the retry feature. I applied these focused fixes:\n\n**Rust (`retry.rs`, `lifecycle.rs`):**\n- Removed dead writes (`spec.run_id = ...`, `spec.provenance = ...`) and double clones of every spec field. Destructured `source.spec` by move so each field flows directly into the `RunCreated` event without an intermediate `RunSpec` clone.\n- Changed `RetryRunInput::new_run_id` from `Option<RunId>` to required `RunId` — the handler always pre-generates one to compute `web_url`; the operation no longer carries a phantom default.\n\n**Frontend (`run-actions.ts`, `mutations.ts`, `run-detail.tsx`):**\n- Added `\"retry\"` to the `LifecycleAction` union and folded `retryErrorMessage` into `mapError` (both had identical 404 + detail + fallback shape).\n- Dropped `RetryMutationResult` — now uses the existing `LifecycleMutationResult` with `intent: \"retry\"`.\n- Folded `useRetryRun` into `useLifecycleMutation` via an `onSuccessExtra` callback. The retry path now skips invalidating the source run's `detail`/`billing` caches (which retry doesn't change).\n- Folded `handleRetryResult` + `lastRetryResultRef` into the existing `handleLifecycleToastResult` + `lifecycleToastStateRef` with an optional `navigate` parameter. The parallel toast-state machine is gone.\n- Updated the matching test to use the unified handler.\n\n**Verified:** `cargo check`, `cargo nextest run -p fabro-workflow operations::retry`, `cargo nextest run -p fabro-server retry` (4 + 9 tests pass), `cargo clippy --workspace --all-targets -D warnings`, `cargo fmt`, `bun run typecheck`. The 8 web test failures present when running all files together exist on the baseline (HEAD before my changes), so they're pre-existing and unrelated.\n\n**Findings I deliberately skipped** (out of scope or low ROI for a retry-focused review):\n- Extracting a shared `RunCreated`-from-`RunSpec` builder between `fork.rs` and `retry.rs` (broader refactor).\n- Fixing `fork.rs`/`rewind.rs` to use `map_open_run_error` (pre-existing bugs, not introduced here).\n- Moving retry test fixtures into a shared `test_support` module.\n- Auditing the `Box::pin(...)` additions in server tests.\n- The `pt-3` → `pt-3.5` test-only fix that snuck into this commit.\n- Normalizing the `canRetry` signature to match `canCancel`/`canArchive` — the divergence is justified (needs failure reason + archived flag).",
+          "failure_signature": "",
+          "graph.rankdir": "LR",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.fidelity": "compact",
+          "failure_class": "",
+          "internal.retry_count.implement": 0,
+          "current_node": "simplify_opus",
+          "last_stage": "simplify_opus",
+          "graph.goal": "---\ntitle: Add Manual Run Retry\ntype: feat\nstatus: active\ndate: 2026-05-23\n---\n\n# Add Manual Run Retry\n\n## Summary\n\nAdd a **Retry** action for failed Fabro runs that creates and immediately starts a new run from the failed run's captured run definition. The new run is independent runtime state, records `retried_from: <source_run_id>`, and leaves the source run unchanged.\n\nThis is a fresh run, not resume/fork/rewind. It should copy the source run's durable definition and settings, but not checkpoints, stage state, sandbox state, PR links, billing, questions, conclusions, or pending controls.\n\n## Key Changes\n\n- Add `retried_from` as a nullable public field on `Run`.\n  - Store it on the new run only.\n  - Do not add a reverse `retried_by` field in v1.\n  - Preserve backward compatibility with old events by defaulting to `null`.\n\n- Add `POST /api/v1/runs/{id}/retry`.\n  - Response: `201` with the newly created/queued `Run`.\n  - Eligible source states: `failed` except `reason=cancelled`, and `dead`.\n  - Reject active, succeeded, cancelled, archived, and missing runs with existing API error patterns.\n  - The new run should use the current authenticated actor as `created_by`.\n  - The new run should preserve the source run's current `parent_id`, title, labels, workflow graph/source, resolved settings, git context, manifest/definition blob refs, and `fork_source_ref` if present.\n\n- Implement retry using a workflow operation similar in shape to `fork`, but without replaying checkpoint/runtime events.\n  - Create a new run store.\n  - Append `run.created` with `retried_from`.\n  - Append `run.submitted`.\n  - Queue/start it through the same internal start path used by `POST /runs/{id}/start`.\n\n- Update OpenAPI and generated clients.\n  - Edit `docs/public/api-reference/fabro-api.yaml`.\n  - Regenerate Rust API types through `cargo build -p fabro-api`.\n  - Regenerate TypeScript client in `lib/packages/fabro-api-client`.\n\n- Update the web UI.\n  - Add `Retry` to the run action menu for eligible failed/dead runs.\n  - Disable the action while pending.\n  - On success, navigate to the new run page and refresh run/list caches.\n  - Add a compact \"Retried from\" link in the run summary panel when `retried_from` is present.\n  - Add demo-mode support or hide the action in demo mode so the button never navigates to a missing demo run.\n\n## Test Plan\n\n- Rust workflow/store tests:\n  - `run.created` serializes/deserializes `retried_from`.\n  - Old `run.created` events project with `retried_from = None`.\n  - Retry creates a new run with a different ID, copied durable definition, no runtime state, and `retried_from` set.\n  - Retry preserves current `parent_id`, title, labels, git context, settings, and `fork_source_ref`.\n  - Retry rejects succeeded, active, cancelled, and archived source runs.\n\n- Rust server/API tests:\n  - `POST /runs/{id}/retry` on a failed run returns `201`, a new run ID, `retried_from`, and queued/started lifecycle state.\n  - Source run remains unchanged.\n  - `404` for unknown run.\n  - `409` for non-retryable status.\n  - Generated Rust API compiles against the updated OpenAPI contract.\n\n- Web tests:\n  - `canRetry` returns true for failed/dead, false for cancelled/succeeded/active/archived.\n  - Action menu renders `Retry` only when eligible.\n  - Successful retry calls the generated client and navigates to `/runs/:newId`.\n  - Retry errors show a useful toast/message.\n  - Run summary panel renders the `Retried from` link when present.\n  - Typecheck passes with regenerated client types.\n\n## Assumptions\n\n- V1 does not add a CLI `fabro retry` command.\n- V1 does not add automatic retry attempts, retry counts, or idempotency keys.\n- Multiple manual clicks after the first request completes may create multiple retry runs.\n- \"Same settings\" means the source run's captured durable definition/settings, not latest local files from the user's machine.\n- Cancelled runs are excluded because cancellation is user intent, not execution failure.\n",
+          "internal.retry_count.preflight_lint": 0
         },
         "node_outcomes": {
-          "start": {
+          "preflight_compile": {
             "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
             "usage": null
           },
           "implement": {
@@ -972,20 +976,16 @@
               "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/operations/retry.rs"
             ]
           },
-          "preflight_compile": {
-            "status": "succeeded",
-            "context_updates": {
-              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
-            },
-            "notes": "Script completed: cargo check -q --workspace 2>&1",
-            "usage": null
-          },
           "preflight_lint": {
             "status": "succeeded",
             "context_updates": {
               "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
             },
             "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
             "usage": null
           },
           "toolchain": {
@@ -1038,13 +1038,215 @@
           }
         },
         "next_node_id": "simplify_gpt",
+        "git_commit_sha": "0c776ddf00c9fcc89d32a3795caba9a1646ed092",
+        "node_visits": {
+          "preflight_lint": 1,
+          "toolchain": 1,
+          "implement": 1,
+          "preflight_compile": 1,
+          "simplify_opus": 1,
+          "start": 1
+        }
+      },
+      "diff": {
+        "patch": "diff --git a/apps/fabro-web/app/lib/mutations.ts b/apps/fabro-web/app/lib/mutations.ts\nindex 1c7ad0ef5..743f869c1 100644\n--- a/apps/fabro-web/app/lib/mutations.ts\n+++ b/apps/fabro-web/app/lib/mutations.ts\n@@ -1,5 +1,5 @@\n import useSWRMutation from \"swr/mutation\";\n-import { useSWRConfig } from \"swr\";\n+import { useSWRConfig, type ScopedMutator } from \"swr\";\n import type {\n   PreviewUrlResponse,\n   Run,\n@@ -48,18 +48,6 @@ export type LifecycleMutationResult =\n       error: LifecycleActionError | null;\n     };\n \n-export type RetryMutationResult =\n-  | {\n-      intent: \"retry\";\n-      ok: true;\n-      run: Run;\n-    }\n-  | {\n-      intent: \"retry\";\n-      ok: false;\n-      error: LifecycleActionError | null;\n-    };\n-\n export function usePreviewRun(id: string | undefined) {\n   return useSWRMutation(\n     id ? queryKeys.runs.preview(id) : null,\n@@ -85,41 +73,19 @@ export function useUnarchiveRun(id: string | undefined) {\n }\n \n export function useRetryRun(id: string | undefined) {\n-  const { mutate } = useSWRConfig();\n-  return useSWRMutation(\n-    id ? queryKeys.runs.retry(id) : null,\n-    async (): Promise<RetryMutationResult> => {\n-      if (!id) {\n-        return { intent: \"retry\", ok: false, error: null };\n-      }\n-      try {\n-        return { intent: \"retry\", ok: true, run: await retryRun(id) };\n-      } catch (error) {\n-        return {\n-          intent: \"retry\",\n-          ok: false,\n-          error: isLifecycleActionError(error) ? error : null,\n-        };\n-      }\n-    },\n-    {\n-      onSuccess: (result) => {\n-        if (!id || !result.ok) return;\n-        void mutate(queryKeys.runs.detail(id));\n-        void mutate(queryKeys.runs.detail(result.run.id), result.run, { revalidate: false });\n-        if (result.run.parent_id) {\n-          void mutate(queryKeys.runs.children(result.run.parent_id));\n-        }\n-        mutateBoardRunCaches(mutate);\n-      },\n-    },\n-  );\n+  return useLifecycleMutation(id, \"retry\", retryRun, (run, mutate) => {\n+    void mutate(queryKeys.runs.detail(run.id), run, { revalidate: false });\n+    if (run.parent_id) {\n+      void mutate(queryKeys.runs.children(run.parent_id));\n+    }\n+  });\n }\n \n function useLifecycleMutation(\n   id: string | undefined,\n   intent: LifecycleAction,\n   action: (id: string) => Promise<Run>,\n+  onSuccessExtra?: (run: Run, mutate: ScopedMutator) => void,\n ) {\n   const { mutate } = useSWRConfig();\n   const key = id ? queryKeys.runs[intent](id) : null;\n@@ -142,9 +108,13 @@ function useLifecycleMutation(\n     {\n       onSuccess: (result) => {\n         if (!id || !result.ok) return;\n-        void mutate(queryKeys.runs.detail(id));\n+        if (intent !== \"retry\") {\n+          // Retry doesn't mutate the source run, so skip invalidating its detail/billing keys.\n+          void mutate(queryKeys.runs.detail(id));\n+          void mutate(queryKeys.runs.billing(id));\n+        }\n         mutateBoardRunCaches(mutate);\n-        void mutate(queryKeys.runs.billing(id));\n+        onSuccessExtra?.(result.run, mutate);\n       },\n     },\n   );\ndiff --git a/apps/fabro-web/app/lib/run-actions.ts b/apps/fabro-web/app/lib/run-actions.ts\nindex cf8468398..4433cde2f 100644\n--- a/apps/fabro-web/app/lib/run-actions.ts\n+++ b/apps/fabro-web/app/lib/run-actions.ts\n@@ -9,7 +9,7 @@ import {\n } from \"./api-client\";\n import type { RunStatus } from \"../data/runs\";\n \n-export type LifecycleAction = \"cancel\" | \"archive\" | \"unarchive\";\n+export type LifecycleAction = \"cancel\" | \"archive\" | \"unarchive\" | \"retry\";\n \n export interface LifecycleActionError {\n   status: number;\n@@ -99,20 +99,6 @@ export function deleteErrorMessage(error: unknown): string {\n   return \"Couldn't delete the run right now. Try again.\";\n }\n \n-export function retryErrorMessage(error: unknown): string {\n-  if (isLifecycleActionError(error)) {\n-    if (error.status === 404) {\n-      return \"This run no longer exists.\";\n-    }\n-    if (error.status === 409) {\n-      return \"This run can no longer be retried.\";\n-    }\n-    const detail = error.errors[0]?.detail?.trim();\n-    if (detail) return detail;\n-  }\n-  return \"Couldn't retry the run right now. Try again.\";\n-}\n-\n export function mapError(error: unknown, action: LifecycleAction): string {\n   if (isLifecycleActionError(error)) {\n     if (error.status === 404) {\n@@ -126,6 +112,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {\n           return \"Only terminal runs can be archived.\";\n         case \"unarchive\":\n           return \"Active runs can't be unarchived.\";\n+        case \"retry\":\n+          return \"This run can no longer be retried.\";\n       }\n     }\n \n@@ -142,6 +130,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {\n       return \"Couldn't archive the run right now. Try again.\";\n     case \"unarchive\":\n       return \"Couldn't unarchive the run right now. Try again.\";\n+    case \"retry\":\n+      return \"Couldn't retry the run right now. Try again.\";\n   }\n }\n \ndiff --git a/apps/fabro-web/app/routes/run-detail.test.ts b/apps/fabro-web/app/routes/run-detail.test.ts\nindex 3c55988ba..e41d017a8 100644\n--- a/apps/fabro-web/app/routes/run-detail.test.ts\n+++ b/apps/fabro-web/app/routes/run-detail.test.ts\n@@ -53,7 +53,6 @@ const {\n   default: RunDetail,\n   focusSteerAfterMenuClose,\n   handleLifecycleToastResult,\n-  handleRetryResult,\n   lifecycleActionVisibility,\n } = await import(\"./run-detail\");\n mock.restore();\n@@ -406,7 +405,7 @@ describe(\"RunDetail full-height child routes\", () => {\n   test(\"successful retry result navigates to the new run once\", () => {\n     const pushed: Array<{ message: string; tone?: string }> = [];\n     const navigated: string[] = [];\n-    const result: RetryMutationResult = {\n+    const result: RunDetailActionResult = {\n       intent: \"retry\",\n       ok:     true,\n       run:    {\n@@ -415,10 +414,15 @@ describe(\"RunDetail full-height child routes\", () => {\n         retried_from: \"run_1\",\n       },\n     };\n+    const initialState: LifecycleToastState = {\n+      activeArchiveToastId: null,\n+      lastProcessed:        { cancel: null, archive: null, unarchive: null, retry: null },\n+    };\n \n-    const next = handleRetryResult(\n+    const next = handleLifecycleToastResult(\n+      \"retry\",\n       result,\n-      null,\n+      initialState,\n       {\n         push:    (toast) => {\n           pushed.push(toast);\n@@ -428,7 +432,8 @@ describe(\"RunDetail full-height child routes\", () => {\n       },\n       (path) => navigated.push(path),\n     );\n-    const replay = handleRetryResult(\n+    const replay = handleLifecycleToastResult(\n+      \"retry\",\n       result,\n       next,\n       {\n@@ -441,8 +446,8 @@ describe(\"RunDetail full-height child routes\", () => {\n       (path) => navigated.push(path),\n     );\n \n-    expect(next).toBe(result);\n-    expect(replay).toBe(result);\n+    expect(next.lastProcessed.retry).toBe(result);\n+    expect(replay).toBe(next);\n     expect(pushed).toEqual([{ message: \"Retry started.\" }]);\n     expect(navigated).toEqual([\"/runs/run_retry\"]);\n   });\ndiff --git a/apps/fabro-web/app/routes/run-detail.tsx b/apps/fabro-web/app/routes/run-detail.tsx\nindex a9922a074..8d7ec09df 100644\n--- a/apps/fabro-web/app/routes/run-detail.tsx\n+++ b/apps/fabro-web/app/routes/run-detail.tsx\n@@ -63,7 +63,6 @@ import {\n   useUnarchiveRun,\n   type LifecycleMutationResult,\n   type PreviewMutationResult,\n-  type RetryMutationResult,\n } from \"../lib/mutations\";\n import { formatAbsoluteTs, formatRelativeTime } from \"../lib/format\";\n import { queryKeys } from \"../lib/query-keys\";\n@@ -80,7 +79,6 @@ import {\n   deleteRun,\n   isTerminalCancelledRun,\n   mapError,\n-  retryErrorMessage,\n   type LifecycleAction,\n   type LifecycleActionError,\n } from \"../lib/run-actions\";\n@@ -152,7 +150,7 @@ type ToastApi = Pick<ReturnType<typeof useToast>, \"push\" | \"dismiss\">;\n \n const INITIAL_LIFECYCLE_TOAST_STATE: LifecycleToastState = {\n   activeArchiveToastId: null,\n-  lastProcessed: { cancel: null, archive: null, unarchive: null },\n+  lastProcessed: { cancel: null, archive: null, unarchive: null, retry: null },\n };\n \n export function lifecycleActionVisibility(status: string | null | undefined) {\n@@ -404,7 +402,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {\n     })\n     .filter((t) => (!t.demoOnly || demoMode) && (!t.requiresSandbox || hasSandbox));\n   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);\n-  const lastRetryResultRef = useRef<RetryMutationResult | null>(null);\n   const steerBarRef = useRef<SteerBarHandle | null>(null);\n   const now = useTickingNow(30_000);\n   const fullHeight = matches.some(\n@@ -455,9 +452,10 @@ export default function RunDetail({ params }: { params: { id: string } }) {\n   }, [dismiss, push, unarchiveMutation.data]);\n \n   useEffect(() => {\n-    lastRetryResultRef.current = handleRetryResult(\n+    lifecycleToastStateRef.current = handleLifecycleToastResult(\n+      \"retry\",\n       retryMutation.data,\n-      lastRetryResultRef.current,\n+      lifecycleToastStateRef.current,\n       { push, dismiss },\n       navigate,\n     );\n@@ -816,6 +814,7 @@ export function handleLifecycleToastResult(\n   result: RunDetailActionResult | undefined,\n   state: LifecycleToastState,\n   toastApi: ToastApi,\n+  navigate?: (path: string) => void,\n ): LifecycleToastState {\n   if (!result || result.intent !== intent) return state;\n   if (state.lastProcessed[intent] === result) return state;\n@@ -837,6 +836,12 @@ export function handleLifecycleToastResult(\n     return nextState;\n   }\n \n+  if (intent === \"retry\") {\n+    toastApi.push({ message: \"Retry started.\" });\n+    navigate?.(`/runs/${result.run.id}`);\n+    return nextState;\n+  }\n+\n   if (state.activeArchiveToastId) {\n     toastApi.dismiss(state.activeArchiveToastId);\n   }\n@@ -852,22 +857,6 @@ export function handleLifecycleToastResult(\n   return { ...nextState, activeArchiveToastId: null };\n }\n \n-export function handleRetryResult(\n-  result: RetryMutationResult | undefined,\n-  lastProcessed: RetryMutationResult | null,\n-  toastApi: ToastApi,\n-  navigate: (path: string) => void,\n-): RetryMutationResult | null {\n-  if (!result || lastProcessed === result) return lastProcessed;\n-  if (result.ok === true) {\n-    toastApi.push({ message: \"Retry started.\" });\n-    navigate(`/runs/${result.run.id}`);\n-  } else {\n-    toastApi.push({ message: retryErrorMessage(result.error), tone: \"error\" });\n-  }\n-  return result;\n-}\n-\n function ConnectMenu() {\n   return (\n     <Menu as=\"div\" className=\"shrink-0\">\ndiff --git a/lib/crates/fabro-server/src/server/handler/lifecycle.rs b/lib/crates/fabro-server/src/server/handler/lifecycle.rs\nindex ee62c5736..2236bb135 100644\n--- a/lib/crates/fabro-server/src/server/handler/lifecycle.rs\n+++ b/lib/crates/fabro-server/src/server/handler/lifecycle.rs\n@@ -578,9 +578,9 @@ async fn retry_run(\n     let new_run_id = RunId::new();\n     let input = operations::RetryRunInput {\n         source_run_id: id,\n-        new_run_id:    Some(new_run_id),\n-        provenance:    Some(run_provenance(&headers, &actor)),\n-        web_url:       state.run_web_url(&new_run_id),\n+        new_run_id,\n+        provenance: Some(run_provenance(&headers, &actor)),\n+        web_url: state.run_web_url(&new_run_id),\n     };\n     match Box::pin(operations::retry_run(&state.store, &input)).await {\n         Ok(outcome) => {\ndiff --git a/lib/crates/fabro-workflow/src/operations/retry.rs b/lib/crates/fabro-workflow/src/operations/retry.rs\nindex b381e17a0..c82ebc526 100644\n--- a/lib/crates/fabro-workflow/src/operations/retry.rs\n+++ b/lib/crates/fabro-workflow/src/operations/retry.rs\n@@ -1,7 +1,7 @@\n use std::collections::BTreeMap;\n \n use fabro_store::Database;\n-use fabro_types::{FailureReason, RunId, RunProvenance, RunStatus};\n+use fabro_types::{FailureReason, RunId, RunProvenance, RunSpec, RunStatus};\n \n use super::archive::ensure_not_archived;\n use super::run_store::map_open_run_error;\n@@ -11,7 +11,7 @@ use crate::event::{self, Event};\n #[derive(Debug, Clone)]\n pub struct RetryRunInput {\n     pub source_run_id: RunId,\n-    pub new_run_id:    Option<RunId>,\n+    pub new_run_id:    RunId,\n     pub provenance:    Option<RunProvenance>,\n     pub web_url:       Option<String>,\n }\n@@ -27,6 +27,7 @@ pub async fn retry_run(\n     input: &RetryRunInput,\n ) -> std::result::Result<RetryOutcome, Error> {\n     let source_run_id = input.source_run_id;\n+    let new_run_id = input.new_run_id;\n     let source_store = store\n         .open_run(&source_run_id)\n         .await\n@@ -39,10 +40,25 @@ pub async fn retry_run(\n     ensure_not_archived(source.archived_at.is_some(), &source_run_id)?;\n     ensure_retryable(source.status, &source_run_id)?;\n \n-    let mut spec = source.spec.clone();\n-    let new_run_id = input.new_run_id.unwrap_or_default();\n-    spec.run_id = new_run_id;\n-    spec.provenance = input.provenance.clone();\n+    let title = source.title().into_owned();\n+    let parent_id = source.parent_id;\n+    let RunSpec {\n+        run_id: _,\n+        settings,\n+        graph,\n+        graph_source,\n+        workflow_slug,\n+        source_directory,\n+        labels,\n+        provenance: _,\n+        manifest_blob,\n+        definition_blob,\n+        git,\n+        fork_source_ref,\n+    } = source.spec;\n+\n+    let settings = serde_json::to_value(&settings).map_err(|err| Error::engine(err.to_string()))?;\n+    let graph = serde_json::to_value(&graph).map_err(|err| Error::engine(err.to_string()))?;\n \n     let retry_store = store\n         .create_run(&new_run_id)\n@@ -50,32 +66,30 @@ pub async fn retry_run(\n         .map_err(|err| Error::engine(err.to_string()))?;\n \n     event::append_event(&retry_store, &new_run_id, &Event::RunCreated {\n-        run_id:           new_run_id,\n-        title:            Some(source.title().into_owned()),\n-        settings:         serde_json::to_value(&spec.settings)\n-            .map_err(|err| Error::engine(err.to_string()))?,\n-        graph:            serde_json::to_value(&spec.graph)\n-            .map_err(|err| Error::engine(err.to_string()))?,\n-        workflow_source:  spec.graph_source.clone(),\n-        workflow_config:  None,\n-        labels:           spec.labels.clone().into_iter().collect::<BTreeMap<_, _>>(),\n-        run_dir:          String::new(),\n-        source_directory: spec.source_directory.clone(),\n-        workflow_slug:    spec.workflow_slug.clone(),\n-        db_prefix:        None,\n-        provenance:       spec.provenance.clone(),\n-        manifest_blob:    spec.manifest_blob,\n-        git:              spec.git.clone(),\n-        fork_source_ref:  spec.fork_source_ref.clone(),\n-        retried_from:     Some(source_run_id),\n-        parent_id:        source.parent_id,\n-        web_url:          input.web_url.clone(),\n+        run_id: new_run_id,\n+        title: Some(title),\n+        settings,\n+        graph,\n+        workflow_source: graph_source,\n+        workflow_config: None,\n+        labels: labels.into_iter().collect::<BTreeMap<_, _>>(),\n+        run_dir: String::new(),\n+        source_directory,\n+        workflow_slug,\n+        db_prefix: None,\n+        provenance: input.provenance.clone(),\n+        manifest_blob,\n+        git,\n+        fork_source_ref,\n+        retried_from: Some(source_run_id),\n+        parent_id,\n+        web_url: input.web_url.clone(),\n     })\n     .await\n     .map_err(|err| Error::engine(err.to_string()))?;\n \n     event::append_event(&retry_store, &new_run_id, &Event::RunSubmitted {\n-        definition_blob: spec.definition_blob,\n+        definition_blob,\n     })\n     .await\n     .map_err(|err| Error::engine(err.to_string()))?;\n@@ -321,7 +335,7 @@ mod tests {\n \n         let outcome = retry_run(&store, &RetryRunInput {\n             source_run_id,\n-            new_run_id: None,\n+            new_run_id: RunId::new(),\n             provenance: Some(provenance(\"retry-user\")),\n             web_url: Some(\"http://localhost:3000/runs/retry\".to_string()),\n         })\n@@ -452,7 +466,7 @@ mod tests {\n         for run_id in [succeeded, active, cancelled, archived] {\n             let err = retry_run(&store, &RetryRunInput {\n                 source_run_id: run_id,\n-                new_run_id:    None,\n+                new_run_id:    RunId::new(),\n                 provenance:    None,\n                 web_url:       None,\n             })\n@@ -470,7 +484,7 @@ mod tests {\n         let store = memory_store();\n         let err = retry_run(&store, &RetryRunInput {\n             source_run_id: fixtures::RUN_1,\n-            new_run_id:    None,\n+            new_run_id:    RunId::new(),\n             provenance:    None,\n             web_url:       None,\n         })\n",
+        "summary": {
+          "files_changed": 56,
+          "additions": 1150,
+          "deletions": 50
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-23T11:03:05.243148Z",
+        "current_node": "simplify_gpt",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint",
+          "implement",
+          "simplify_opus",
+          "simplify_gpt"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.retry_count.start": 0,
+          "internal.retry_count.implement": 0,
+          "internal.run_id": "01KSA4H7JHBRPXZM3XTJ4SD9QA",
+          "internal.retry_count.simplify_opus": 0,
+          "internal.node_visit_count": 1,
+          "graph.goal": "---\ntitle: Add Manual Run Retry\ntype: feat\nstatus: active\ndate: 2026-05-23\n---\n\n# Add Manual Run Retry\n\n## Summary\n\nAdd a **Retry** action for failed Fabro runs that creates and immediately starts a new run from the failed run's captured run definition. The new run is independent runtime state, records `retried_from: <source_run_id>`, and leaves the source run unchanged.\n\nThis is a fresh run, not resume/fork/rewind. It should copy the source run's durable definition and settings, but not checkpoints, stage state, sandbox state, PR links, billing, questions, conclusions, or pending controls.\n\n## Key Changes\n\n- Add `retried_from` as a nullable public field on `Run`.\n  - Store it on the new run only.\n  - Do not add a reverse `retried_by` field in v1.\n  - Preserve backward compatibility with old events by defaulting to `null`.\n\n- Add `POST /api/v1/runs/{id}/retry`.\n  - Response: `201` with the newly created/queued `Run`.\n  - Eligible source states: `failed` except `reason=cancelled`, and `dead`.\n  - Reject active, succeeded, cancelled, archived, and missing runs with existing API error patterns.\n  - The new run should use the current authenticated actor as `created_by`.\n  - The new run should preserve the source run's current `parent_id`, title, labels, workflow graph/source, resolved settings, git context, manifest/definition blob refs, and `fork_source_ref` if present.\n\n- Implement retry using a workflow operation similar in shape to `fork`, but without replaying checkpoint/runtime events.\n  - Create a new run store.\n  - Append `run.created` with `retried_from`.\n  - Append `run.submitted`.\n  - Queue/start it through the same internal start path used by `POST /runs/{id}/start`.\n\n- Update OpenAPI and generated clients.\n  - Edit `docs/public/api-reference/fabro-api.yaml`.\n  - Regenerate Rust API types through `cargo build -p fabro-api`.\n  - Regenerate TypeScript client in `lib/packages/fabro-api-client`.\n\n- Update the web UI.\n  - Add `Retry` to the run action menu for eligible failed/dead runs.\n  - Disable the action while pending.\n  - On success, navigate to the new run page and refresh run/list caches.\n  - Add a compact \"Retried from\" link in the run summary panel when `retried_from` is present.\n  - Add demo-mode support or hide the action in demo mode so the button never navigates to a missing demo run.\n\n## Test Plan\n\n- Rust workflow/store tests:\n  - `run.created` serializes/deserializes `retried_from`.\n  - Old `run.created` events project with `retried_from = None`.\n  - Retry creates a new run with a different ID, copied durable definition, no runtime state, and `retried_from` set.\n  - Retry preserves current `parent_id`, title, labels, git context, settings, and `fork_source_ref`.\n  - Retry rejects succeeded, active, cancelled, and archived source runs.\n\n- Rust server/API tests:\n  - `POST /runs/{id}/retry` on a failed run returns `201`, a new run ID, `retried_from`, and queued/started lifecycle state.\n  - Source run remains unchanged.\n  - `404` for unknown run.\n  - `409` for non-retryable status.\n  - Generated Rust API compiles against the updated OpenAPI contract.\n\n- Web tests:\n  - `canRetry` returns true for failed/dead, false for cancelled/succeeded/active/archived.\n  - Action menu renders `Retry` only when eligible.\n  - Successful retry calls the generated client and navigates to `/runs/:newId`.\n  - Retry errors show a useful toast/message.\n  - Run summary panel renders the `Retried from` link when present.\n  - Typecheck passes with regenerated client types.\n\n## Assumptions\n\n- V1 does not add a CLI `fabro retry` command.\n- V1 does not add automatic retry attempts, retry counts, or idempotency keys.\n- Multiple manual clicks after the first request completes may create multiple retry runs.\n- \"Same settings\" means the source run's captured durable definition/settings, not latest local files from the user's machine.\n- Cancelled runs are excluded because cancellation is user intent, not execution failure.\n",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.retry_count.preflight_compile": 0,
+          "internal.fidelity": "compact",
+          "thread.start.current_node": "toolchain",
+          "internal.retry_count.toolchain": 0,
+          "outcome": "succeeded",
+          "response.simplify_opus": "Net 32-line reduction. Here's the summary of fixes applied:\n\n## Summary\n\nThree review agents flagged duplication and clone churn in the retry feature. I applied these focused fixes:\n\n**Rust (`retry.rs`, `lifecycle.rs`):**\n- Removed dead writes (`spec.run_id = ...`, `spec.provenance = ...`) and double clones of every spec field. Destructured `source.spec` by move so each field flows directly into the `RunCreated` event without an intermediate `RunSpec` clone.\n- Changed `RetryRunInput::new_run_id` from `Option<RunId>` to required `RunId` — the handler always pre-generates one to compute `web_url`; the operation no longer carries a phantom default.\n\n**Frontend (`run-actions.ts`, `mutations.ts`, `run-detail.tsx`):**\n- Added `\"retry\"` to the `LifecycleAction` union and folded `retryErrorMessage` into `mapError` (both had identical 404 + detail + fallback shape).\n- Dropped `RetryMutationResult` — now uses the existing `LifecycleMutationResult` with `intent: \"retry\"`.\n- Folded `useRetryRun` into `useLifecycleMutation` via an `onSuccessExtra` callback. The retry path now skips invalidating the source run's `detail`/`billing` caches (which retry doesn't change).\n- Folded `handleRetryResult` + `lastRetryResultRef` into the existing `handleLifecycleToastResult` + `lifecycleToastStateRef` with an optional `navigate` parameter. The parallel toast-state machine is gone.\n- Updated the matching test to use the unified handler.\n\n**Verified:** `cargo check`, `cargo nextest run -p fabro-workflow operations::retry`, `cargo nextest run -p fabro-server retry` (4 + 9 tests pass), `cargo clippy --workspace --all-targets -D warnings`, `cargo fmt`, `bun run typecheck`. The 8 web test failures present when running all files together exist on the baseline (HEAD before my changes), so they're pre-existing and unrelated.\n\n**Findings I deliberately skipped** (out of scope or low ROI for a retry-focused review):\n- Extracting a shared `RunCreated`-from-`RunSpec` builder between `fork.rs` and `retry.rs` (broader refactor).\n- Fixing `fork.rs`/`rewind.rs` to use `map_open_run_error` (pre-existing bugs, not introduced here).\n- Moving retry test fixtures into a shared `test_support` module.\n- Auditing the `Box::pin(...)` additions in server tests.\n- The `pt-3` → `pt-3.5` test-only fix that snuck into this commit.\n- Normalizing the `canRetry` signature to match `canCancel`/`canArchive` — the divergence is justified (needs failure reason + archived flag).",
+          "internal.thread_id": "simplify_opus",
+          "thread.toolchain.current_node": "preflight_compile",
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "failure_signature": "",
+          "last_stage": "simplify_gpt",
+          "thread.simplify_opus.current_node": "simplify_gpt",
+          "internal.retry_count.simplify_gpt": 0,
+          "internal.retry_count.preflight_lint": 0,
+          "response.implement": "Implemented manual run retry end-to-end.\n\nSummary:\n- Added `retried_from` to:\n  - `Run`\n  - `RunProjection`\n  - `run.created` event props\n  - OpenAPI `Run` / `RunProjection`\n  - generated TS API client models\n- Added workflow retry operation:\n  - Creates a fresh run store\n  - Copies durable definition/settings/source/git/labels/title/current parent/fork source/blob refs\n  - Sets new `created_by` via provenance\n  - Sets `retried_from`\n  - Does not copy checkpoints/runtime/sandbox runtime/PR/conclusion/questions/pending controls\n  - Rejects succeeded, active, cancelled, archived, and missing runs\n- Added `POST /api/v1/runs/{id}/retry`:\n  - Returns `201` with the new queued `Run`\n  - Queues via the same internal start path used by `POST /runs/{id}/start`\n  - Leaves source run unchanged\n- Updated web UI:\n  - Added `Retry` action for eligible failed/dead runs, hidden in demo mode\n  - Disables while pending\n  - Calls generated client, refreshes caches, and navigates to the new run on success\n  - Shows retry errors via toast\n  - Adds compact `Retried from` link in run summary panel\n- Regenerated Rust API and TypeScript Axios client.\n\nValidation run:\n- `cargo build -q -p fabro-api`\n- `cargo check -q --workspace`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`\n- `cargo test -q -p fabro-api`\n- `cargo test -q -p fabro-store legacy_run_created_projects_retried_from_none --lib`\n- `cargo test -q -p fabro-workflow retry_ --lib`\n- `cargo test -q -p fabro-server retry_ --lib`\n- `cd apps/fabro-web && bun run typecheck`\n- `cd apps/fabro-web && bun test app/lib/run-actions.test.ts app/components/run-summary-panel.test.tsx app/routes/run-detail.test.ts`\n\nNote: I also attempted the full `cd apps/fabro-web && bun test`; it still reports unrelated test-isolation failures around shared `generatedAxios.defaults.adapter` state plus an existing run-detail dock assertion, while the focused retry/UI tests above pass.",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "graph.rankdir": "LR",
+          "thread.implement.current_node": "simplify_opus",
+          "failure_class": "",
+          "current_node": "simplify_gpt",
+          "thread.preflight_lint.current_node": "implement",
+          "last_response": "Implemented one cleanup from the review:\n\n- Reused the shared lifecycle action helper for `retryRun`.\n- Made `runLifecycleAction` exhaustive for the expanded `LifecycleAction` union by adding the `\"re",
+          "response.simplify_gpt": "Implemented one cleanup from the review:\n\n- Reused the shared lifecycle action helper for `retryRun`.\n- Made `runLifecycleAction` exhaustive for the expanded `LifecycleAction` union by adding the `\"retry\"` case.\n- This removes duplicated retry request/error-handling logic and keeps future lifecycle action handling centralized.\n\nValidation passed:\n\n- `cd apps/fabro-web && bun test app/lib/run-actions.test.ts app/routes/run-detail.test.ts app/components/run-summary-panel.test.tsx`\n- `cargo nextest run -p fabro-workflow operations::retry --no-fail-fast`\n- `cargo nextest run -p fabro-server retry --no-fail-fast`\n- `cd apps/fabro-web && bun run typecheck`\n\nOnly file changed in this cleanup pass:\n\n- `apps/fabro-web/app/lib/run-actions.ts`"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "simplify_gpt": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "simplify_gpt",
+              "last_response": "Implemented one cleanup from the review:\n\n- Reused the shared lifecycle action helper for `retryRun`.\n- Made `runLifecycleAction` exhaustive for the expanded `LifecycleAction` union by adding the `\"re",
+              "response.simplify_gpt": "Implemented one cleanup from the review:\n\n- Reused the shared lifecycle action helper for `retryRun`.\n- Made `runLifecycleAction` exhaustive for the expanded `LifecycleAction` union by adding the `\"retry\"` case.\n- This removes duplicated retry request/error-handling logic and keeps future lifecycle action handling centralized.\n\nValidation passed:\n\n- `cd apps/fabro-web && bun test app/lib/run-actions.test.ts app/routes/run-detail.test.ts app/components/run-summary-panel.test.tsx`\n- `cargo nextest run -p fabro-workflow operations::retry --no-fail-fast`\n- `cargo nextest run -p fabro-server retry --no-fail-fast`\n- `cd apps/fabro-web && bun run typecheck`\n\nOnly file changed in this cleanup pass:\n\n- `apps/fabro-web/app/lib/run-actions.ts`"
+            },
+            "notes": "Stage completed: simplify_gpt",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 68948,
+                    "output_tokens": 3558,
+                    "reasoning_tokens": 1591,
+                    "cache_read_tokens": 1367552,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 1182986
+            }
+          },
+          "simplify_opus": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "Net 32-line reduction. Here's the summary of fixes applied:\n\n## Summary\n\nThree review agents flagged duplication and clone churn in the retry feature. I applied these focused fixes:\n\n**Rust (`retry.rs",
+              "response.simplify_opus": "Net 32-line reduction. Here's the summary of fixes applied:\n\n## Summary\n\nThree review agents flagged duplication and clone churn in the retry feature. I applied these focused fixes:\n\n**Rust (`retry.rs`, `lifecycle.rs`):**\n- Removed dead writes (`spec.run_id = ...`, `spec.provenance = ...`) and double clones of every spec field. Destructured `source.spec` by move so each field flows directly into the `RunCreated` event without an intermediate `RunSpec` clone.\n- Changed `RetryRunInput::new_run_id` from `Option<RunId>` to required `RunId` — the handler always pre-generates one to compute `web_url`; the operation no longer carries a phantom default.\n\n**Frontend (`run-actions.ts`, `mutations.ts`, `run-detail.tsx`):**\n- Added `\"retry\"` to the `LifecycleAction` union and folded `retryErrorMessage` into `mapError` (both had identical 404 + detail + fallback shape).\n- Dropped `RetryMutationResult` — now uses the existing `LifecycleMutationResult` with `intent: \"retry\"`.\n- Folded `useRetryRun` into `useLifecycleMutation` via an `onSuccessExtra` callback. The retry path now skips invalidating the source run's `detail`/`billing` caches (which retry doesn't change).\n- Folded `handleRetryResult` + `lastRetryResultRef` into the existing `handleLifecycleToastResult` + `lifecycleToastStateRef` with an optional `navigate` parameter. The parallel toast-state machine is gone.\n- Updated the matching test to use the unified handler.\n\n**Verified:** `cargo check`, `cargo nextest run -p fabro-workflow operations::retry`, `cargo nextest run -p fabro-server retry` (4 + 9 tests pass), `cargo clippy --workspace --all-targets -D warnings`, `cargo fmt`, `bun run typecheck`. The 8 web test failures present when running all files together exist on the baseline (HEAD before my changes), so they're pre-existing and unrelated.\n\n**Findings I deliberately skipped** (out of scope or low ROI for a retry-focused review):\n- Extracting a shared `RunCreated`-from-`RunSpec` builder between `fork.rs` and `retry.rs` (broader refactor).\n- Fixing `fork.rs`/`rewind.rs` to use `map_open_run_error` (pre-existing bugs, not introduced here).\n- Moving retry test fixtures into a shared `test_support` module.\n- Auditing the `Box::pin(...)` additions in server tests.\n- The `pt-3` → `pt-3.5` test-only fix that snuck into this commit.\n- Normalizing the `canRetry` signature to match `canCancel`/`canArchive` — the divergence is justified (needs failure reason + archived flag).",
+              "last_stage": "simplify_opus"
+            },
+            "notes": "Stage completed: simplify_opus",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 194045,
+                    "output_tokens": 33010,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 12537182,
+                    "cache_write_tokens": 1023105
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 1023105,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 14458472
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/apps/fabro-web/app/lib/mutations.ts",
+              "/home/daytona/workspace/fabro/apps/fabro-web/app/lib/run-actions.ts",
+              "/home/daytona/workspace/fabro/apps/fabro-web/app/routes/run-detail.test.ts",
+              "/home/daytona/workspace/fabro/apps/fabro-web/app/routes/run-detail.tsx",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-server/src/server/handler/lifecycle.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/operations/retry.rs"
+            ]
+          },
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "implement",
+              "response.implement": "Implemented manual run retry end-to-end.\n\nSummary:\n- Added `retried_from` to:\n  - `Run`\n  - `RunProjection`\n  - `run.created` event props\n  - OpenAPI `Run` / `RunProjection`\n  - generated TS API client models\n- Added workflow retry operation:\n  - Creates a fresh run store\n  - Copies durable definition/settings/source/git/labels/title/current parent/fork source/blob refs\n  - Sets new `created_by` via provenance\n  - Sets `retried_from`\n  - Does not copy checkpoints/runtime/sandbox runtime/PR/conclusion/questions/pending controls\n  - Rejects succeeded, active, cancelled, archived, and missing runs\n- Added `POST /api/v1/runs/{id}/retry`:\n  - Returns `201` with the new queued `Run`\n  - Queues via the same internal start path used by `POST /runs/{id}/start`\n  - Leaves source run unchanged\n- Updated web UI:\n  - Added `Retry` action for eligible failed/dead runs, hidden in demo mode\n  - Disables while pending\n  - Calls generated client, refreshes caches, and navigates to the new run on success\n  - Shows retry errors via toast\n  - Adds compact `Retried from` link in run summary panel\n- Regenerated Rust API and TypeScript Axios client.\n\nValidation run:\n- `cargo build -q -p fabro-api`\n- `cargo check -q --workspace`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`\n- `cargo test -q -p fabro-api`\n- `cargo test -q -p fabro-store legacy_run_created_projects_retried_from_none --lib`\n- `cargo test -q -p fabro-workflow retry_ --lib`\n- `cargo test -q -p fabro-server retry_ --lib`\n- `cd apps/fabro-web && bun run typecheck`\n- `cd apps/fabro-web && bun test app/lib/run-actions.test.ts app/components/run-summary-panel.test.tsx app/routes/run-detail.test.ts`\n\nNote: I also attempted the full `cd apps/fabro-web && bun test`; it still reports unrelated test-isolation failures around shared `generatedAxios.defaults.adapter` state plus an existing run-detail dock assertion, while the focused retry/UI tests above pass.",
+              "last_response": "Implemented manual run retry end-to-end.\n\nSummary:\n- Added `retried_from` to:\n  - `Run`\n  - `RunProjection`\n  - `run.created` event props\n  - OpenAPI `Run` / `RunProjection`\n  - generated TS API clien"
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 463085,
+                    "output_tokens": 38427,
+                    "reasoning_tokens": 17656,
+                    "cache_read_tokens": 64124928,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 36060379
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/operations/retry.rs"
+            ]
+          }
+        },
+        "next_node_id": "verify",
         "node_visits": {
           "implement": 1,
           "start": 1,
           "toolchain": 1,
           "preflight_compile": 1,
           "preflight_lint": 1,
-          "simplify_opus": 1
+          "simplify_opus": 1,
+          "simplify_gpt": 1
         }
       },
       "diff": {}
@@ -1344,7 +1546,12 @@
       "first_event_seq": 987,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: simplify_opus",
+        "failure_reason": null,
+        "timestamp": "2026-05-23T10:59:48.751711Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
@@ -1357,6 +1564,12 @@
       "output": null,
       "started_at": "2026-05-23T10:43:26.147478Z",
       "handler": "agent",
+      "timing": {
+        "wall_time_ms": 982601,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
       "usage": {
         "input_tokens": 194045,
         "output_tokens": 33010,
@@ -1370,7 +1583,7 @@
         "provider": "anthropic",
         "model_id": "claude-opus-4-7"
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "start@1": {
       "first_event_seq": 16,
@@ -1405,6 +1618,38 @@
         "cache_write_tokens": 0
       },
       "state": "succeeded"
+    },
+    "simplify_gpt@1": {
+      "first_event_seq": 1562,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "openai",
+        "model": "gpt-5.5"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T10:59:54.465972Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 68948,
+        "output_tokens": 3558,
+        "total_tokens": 1441649,
+        "reasoning_tokens": 1591,
+        "cache_read_tokens": 1367552,
+        "cache_write_tokens": 0,
+        "total_usd_micros": 1182986
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "gpt-5.5"
+      },
+      "state": "running"
     }
   }
 }

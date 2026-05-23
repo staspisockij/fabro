@@ -1,0 +1,457 @@
+diff --git a/apps/fabro-web/app/lib/mutations.ts b/apps/fabro-web/app/lib/mutations.ts
+index 1c7ad0ef5..743f869c1 100644
+--- a/apps/fabro-web/app/lib/mutations.ts
++++ b/apps/fabro-web/app/lib/mutations.ts
+@@ -1,5 +1,5 @@
+ import useSWRMutation from "swr/mutation";
+-import { useSWRConfig } from "swr";
++import { useSWRConfig, type ScopedMutator } from "swr";
+ import type {
+   PreviewUrlResponse,
+   Run,
+@@ -48,18 +48,6 @@ export type LifecycleMutationResult =
+       error: LifecycleActionError | null;
+     };
+ 
+-export type RetryMutationResult =
+-  | {
+-      intent: "retry";
+-      ok: true;
+-      run: Run;
+-    }
+-  | {
+-      intent: "retry";
+-      ok: false;
+-      error: LifecycleActionError | null;
+-    };
+-
+ export function usePreviewRun(id: string | undefined) {
+   return useSWRMutation(
+     id ? queryKeys.runs.preview(id) : null,
+@@ -85,41 +73,19 @@ export function useUnarchiveRun(id: string | undefined) {
+ }
+ 
+ export function useRetryRun(id: string | undefined) {
+-  const { mutate } = useSWRConfig();
+-  return useSWRMutation(
+-    id ? queryKeys.runs.retry(id) : null,
+-    async (): Promise<RetryMutationResult> => {
+-      if (!id) {
+-        return { intent: "retry", ok: false, error: null };
+-      }
+-      try {
+-        return { intent: "retry", ok: true, run: await retryRun(id) };
+-      } catch (error) {
+-        return {
+-          intent: "retry",
+-          ok: false,
+-          error: isLifecycleActionError(error) ? error : null,
+-        };
+-      }
+-    },
+-    {
+-      onSuccess: (result) => {
+-        if (!id || !result.ok) return;
+-        void mutate(queryKeys.runs.detail(id));
+-        void mutate(queryKeys.runs.detail(result.run.id), result.run, { revalidate: false });
+-        if (result.run.parent_id) {
+-          void mutate(queryKeys.runs.children(result.run.parent_id));
+-        }
+-        mutateBoardRunCaches(mutate);
+-      },
+-    },
+-  );
++  return useLifecycleMutation(id, "retry", retryRun, (run, mutate) => {
++    void mutate(queryKeys.runs.detail(run.id), run, { revalidate: false });
++    if (run.parent_id) {
++      void mutate(queryKeys.runs.children(run.parent_id));
++    }
++  });
+ }
+ 
+ function useLifecycleMutation(
+   id: string | undefined,
+   intent: LifecycleAction,
+   action: (id: string) => Promise<Run>,
++  onSuccessExtra?: (run: Run, mutate: ScopedMutator) => void,
+ ) {
+   const { mutate } = useSWRConfig();
+   const key = id ? queryKeys.runs[intent](id) : null;
+@@ -142,9 +108,13 @@ function useLifecycleMutation(
+     {
+       onSuccess: (result) => {
+         if (!id || !result.ok) return;
+-        void mutate(queryKeys.runs.detail(id));
++        if (intent !== "retry") {
++          // Retry doesn't mutate the source run, so skip invalidating its detail/billing keys.
++          void mutate(queryKeys.runs.detail(id));
++          void mutate(queryKeys.runs.billing(id));
++        }
+         mutateBoardRunCaches(mutate);
+-        void mutate(queryKeys.runs.billing(id));
++        onSuccessExtra?.(result.run, mutate);
+       },
+     },
+   );
+diff --git a/apps/fabro-web/app/lib/run-actions.ts b/apps/fabro-web/app/lib/run-actions.ts
+index cf8468398..4433cde2f 100644
+--- a/apps/fabro-web/app/lib/run-actions.ts
++++ b/apps/fabro-web/app/lib/run-actions.ts
+@@ -9,7 +9,7 @@ import {
+ } from "./api-client";
+ import type { RunStatus } from "../data/runs";
+ 
+-export type LifecycleAction = "cancel" | "archive" | "unarchive";
++export type LifecycleAction = "cancel" | "archive" | "unarchive" | "retry";
+ 
+ export interface LifecycleActionError {
+   status: number;
+@@ -99,20 +99,6 @@ export function deleteErrorMessage(error: unknown): string {
+   return "Couldn't delete the run right now. Try again.";
+ }
+ 
+-export function retryErrorMessage(error: unknown): string {
+-  if (isLifecycleActionError(error)) {
+-    if (error.status === 404) {
+-      return "This run no longer exists.";
+-    }
+-    if (error.status === 409) {
+-      return "This run can no longer be retried.";
+-    }
+-    const detail = error.errors[0]?.detail?.trim();
+-    if (detail) return detail;
+-  }
+-  return "Couldn't retry the run right now. Try again.";
+-}
+-
+ export function mapError(error: unknown, action: LifecycleAction): string {
+   if (isLifecycleActionError(error)) {
+     if (error.status === 404) {
+@@ -126,6 +112,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {
+           return "Only terminal runs can be archived.";
+         case "unarchive":
+           return "Active runs can't be unarchived.";
++        case "retry":
++          return "This run can no longer be retried.";
+       }
+     }
+ 
+@@ -142,6 +130,8 @@ export function mapError(error: unknown, action: LifecycleAction): string {
+       return "Couldn't archive the run right now. Try again.";
+     case "unarchive":
+       return "Couldn't unarchive the run right now. Try again.";
++    case "retry":
++      return "Couldn't retry the run right now. Try again.";
+   }
+ }
+ 
+diff --git a/apps/fabro-web/app/routes/run-detail.test.ts b/apps/fabro-web/app/routes/run-detail.test.ts
+index 3c55988ba..e41d017a8 100644
+--- a/apps/fabro-web/app/routes/run-detail.test.ts
++++ b/apps/fabro-web/app/routes/run-detail.test.ts
+@@ -53,7 +53,6 @@ const {
+   default: RunDetail,
+   focusSteerAfterMenuClose,
+   handleLifecycleToastResult,
+-  handleRetryResult,
+   lifecycleActionVisibility,
+ } = await import("./run-detail");
+ mock.restore();
+@@ -406,7 +405,7 @@ describe("RunDetail full-height child routes", () => {
+   test("successful retry result navigates to the new run once", () => {
+     const pushed: Array<{ message: string; tone?: string }> = [];
+     const navigated: string[] = [];
+-    const result: RetryMutationResult = {
++    const result: RunDetailActionResult = {
+       intent: "retry",
+       ok:     true,
+       run:    {
+@@ -415,10 +414,15 @@ describe("RunDetail full-height child routes", () => {
+         retried_from: "run_1",
+       },
+     };
++    const initialState: LifecycleToastState = {
++      activeArchiveToastId: null,
++      lastProcessed:        { cancel: null, archive: null, unarchive: null, retry: null },
++    };
+ 
+-    const next = handleRetryResult(
++    const next = handleLifecycleToastResult(
++      "retry",
+       result,
+-      null,
++      initialState,
+       {
+         push:    (toast) => {
+           pushed.push(toast);
+@@ -428,7 +432,8 @@ describe("RunDetail full-height child routes", () => {
+       },
+       (path) => navigated.push(path),
+     );
+-    const replay = handleRetryResult(
++    const replay = handleLifecycleToastResult(
++      "retry",
+       result,
+       next,
+       {
+@@ -441,8 +446,8 @@ describe("RunDetail full-height child routes", () => {
+       (path) => navigated.push(path),
+     );
+ 
+-    expect(next).toBe(result);
+-    expect(replay).toBe(result);
++    expect(next.lastProcessed.retry).toBe(result);
++    expect(replay).toBe(next);
+     expect(pushed).toEqual([{ message: "Retry started." }]);
+     expect(navigated).toEqual(["/runs/run_retry"]);
+   });
+diff --git a/apps/fabro-web/app/routes/run-detail.tsx b/apps/fabro-web/app/routes/run-detail.tsx
+index a9922a074..8d7ec09df 100644
+--- a/apps/fabro-web/app/routes/run-detail.tsx
++++ b/apps/fabro-web/app/routes/run-detail.tsx
+@@ -63,7 +63,6 @@ import {
+   useUnarchiveRun,
+   type LifecycleMutationResult,
+   type PreviewMutationResult,
+-  type RetryMutationResult,
+ } from "../lib/mutations";
+ import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
+ import { queryKeys } from "../lib/query-keys";
+@@ -80,7 +79,6 @@ import {
+   deleteRun,
+   isTerminalCancelledRun,
+   mapError,
+-  retryErrorMessage,
+   type LifecycleAction,
+   type LifecycleActionError,
+ } from "../lib/run-actions";
+@@ -152,7 +150,7 @@ type ToastApi = Pick<ReturnType<typeof useToast>, "push" | "dismiss">;
+ 
+ const INITIAL_LIFECYCLE_TOAST_STATE: LifecycleToastState = {
+   activeArchiveToastId: null,
+-  lastProcessed: { cancel: null, archive: null, unarchive: null },
++  lastProcessed: { cancel: null, archive: null, unarchive: null, retry: null },
+ };
+ 
+ export function lifecycleActionVisibility(status: string | null | undefined) {
+@@ -404,7 +402,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
+     })
+     .filter((t) => (!t.demoOnly || demoMode) && (!t.requiresSandbox || hasSandbox));
+   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
+-  const lastRetryResultRef = useRef<RetryMutationResult | null>(null);
+   const steerBarRef = useRef<SteerBarHandle | null>(null);
+   const now = useTickingNow(30_000);
+   const fullHeight = matches.some(
+@@ -455,9 +452,10 @@ export default function RunDetail({ params }: { params: { id: string } }) {
+   }, [dismiss, push, unarchiveMutation.data]);
+ 
+   useEffect(() => {
+-    lastRetryResultRef.current = handleRetryResult(
++    lifecycleToastStateRef.current = handleLifecycleToastResult(
++      "retry",
+       retryMutation.data,
+-      lastRetryResultRef.current,
++      lifecycleToastStateRef.current,
+       { push, dismiss },
+       navigate,
+     );
+@@ -816,6 +814,7 @@ export function handleLifecycleToastResult(
+   result: RunDetailActionResult | undefined,
+   state: LifecycleToastState,
+   toastApi: ToastApi,
++  navigate?: (path: string) => void,
+ ): LifecycleToastState {
+   if (!result || result.intent !== intent) return state;
+   if (state.lastProcessed[intent] === result) return state;
+@@ -837,6 +836,12 @@ export function handleLifecycleToastResult(
+     return nextState;
+   }
+ 
++  if (intent === "retry") {
++    toastApi.push({ message: "Retry started." });
++    navigate?.(`/runs/${result.run.id}`);
++    return nextState;
++  }
++
+   if (state.activeArchiveToastId) {
+     toastApi.dismiss(state.activeArchiveToastId);
+   }
+@@ -852,22 +857,6 @@ export function handleLifecycleToastResult(
+   return { ...nextState, activeArchiveToastId: null };
+ }
+ 
+-export function handleRetryResult(
+-  result: RetryMutationResult | undefined,
+-  lastProcessed: RetryMutationResult | null,
+-  toastApi: ToastApi,
+-  navigate: (path: string) => void,
+-): RetryMutationResult | null {
+-  if (!result || lastProcessed === result) return lastProcessed;
+-  if (result.ok === true) {
+-    toastApi.push({ message: "Retry started." });
+-    navigate(`/runs/${result.run.id}`);
+-  } else {
+-    toastApi.push({ message: retryErrorMessage(result.error), tone: "error" });
+-  }
+-  return result;
+-}
+-
+ function ConnectMenu() {
+   return (
+     <Menu as="div" className="shrink-0">
+diff --git a/lib/crates/fabro-server/src/server/handler/lifecycle.rs b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+index ee62c5736..2236bb135 100644
+--- a/lib/crates/fabro-server/src/server/handler/lifecycle.rs
++++ b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+@@ -578,9 +578,9 @@ async fn retry_run(
+     let new_run_id = RunId::new();
+     let input = operations::RetryRunInput {
+         source_run_id: id,
+-        new_run_id:    Some(new_run_id),
+-        provenance:    Some(run_provenance(&headers, &actor)),
+-        web_url:       state.run_web_url(&new_run_id),
++        new_run_id,
++        provenance: Some(run_provenance(&headers, &actor)),
++        web_url: state.run_web_url(&new_run_id),
+     };
+     match Box::pin(operations::retry_run(&state.store, &input)).await {
+         Ok(outcome) => {
+diff --git a/lib/crates/fabro-workflow/src/operations/retry.rs b/lib/crates/fabro-workflow/src/operations/retry.rs
+index b381e17a0..c82ebc526 100644
+--- a/lib/crates/fabro-workflow/src/operations/retry.rs
++++ b/lib/crates/fabro-workflow/src/operations/retry.rs
+@@ -1,7 +1,7 @@
+ use std::collections::BTreeMap;
+ 
+ use fabro_store::Database;
+-use fabro_types::{FailureReason, RunId, RunProvenance, RunStatus};
++use fabro_types::{FailureReason, RunId, RunProvenance, RunSpec, RunStatus};
+ 
+ use super::archive::ensure_not_archived;
+ use super::run_store::map_open_run_error;
+@@ -11,7 +11,7 @@ use crate::event::{self, Event};
+ #[derive(Debug, Clone)]
+ pub struct RetryRunInput {
+     pub source_run_id: RunId,
+-    pub new_run_id:    Option<RunId>,
++    pub new_run_id:    RunId,
+     pub provenance:    Option<RunProvenance>,
+     pub web_url:       Option<String>,
+ }
+@@ -27,6 +27,7 @@ pub async fn retry_run(
+     input: &RetryRunInput,
+ ) -> std::result::Result<RetryOutcome, Error> {
+     let source_run_id = input.source_run_id;
++    let new_run_id = input.new_run_id;
+     let source_store = store
+         .open_run(&source_run_id)
+         .await
+@@ -39,10 +40,25 @@ pub async fn retry_run(
+     ensure_not_archived(source.archived_at.is_some(), &source_run_id)?;
+     ensure_retryable(source.status, &source_run_id)?;
+ 
+-    let mut spec = source.spec.clone();
+-    let new_run_id = input.new_run_id.unwrap_or_default();
+-    spec.run_id = new_run_id;
+-    spec.provenance = input.provenance.clone();
++    let title = source.title().into_owned();
++    let parent_id = source.parent_id;
++    let RunSpec {
++        run_id: _,
++        settings,
++        graph,
++        graph_source,
++        workflow_slug,
++        source_directory,
++        labels,
++        provenance: _,
++        manifest_blob,
++        definition_blob,
++        git,
++        fork_source_ref,
++    } = source.spec;
++
++    let settings = serde_json::to_value(&settings).map_err(|err| Error::engine(err.to_string()))?;
++    let graph = serde_json::to_value(&graph).map_err(|err| Error::engine(err.to_string()))?;
+ 
+     let retry_store = store
+         .create_run(&new_run_id)
+@@ -50,32 +66,30 @@ pub async fn retry_run(
+         .map_err(|err| Error::engine(err.to_string()))?;
+ 
+     event::append_event(&retry_store, &new_run_id, &Event::RunCreated {
+-        run_id:           new_run_id,
+-        title:            Some(source.title().into_owned()),
+-        settings:         serde_json::to_value(&spec.settings)
+-            .map_err(|err| Error::engine(err.to_string()))?,
+-        graph:            serde_json::to_value(&spec.graph)
+-            .map_err(|err| Error::engine(err.to_string()))?,
+-        workflow_source:  spec.graph_source.clone(),
+-        workflow_config:  None,
+-        labels:           spec.labels.clone().into_iter().collect::<BTreeMap<_, _>>(),
+-        run_dir:          String::new(),
+-        source_directory: spec.source_directory.clone(),
+-        workflow_slug:    spec.workflow_slug.clone(),
+-        db_prefix:        None,
+-        provenance:       spec.provenance.clone(),
+-        manifest_blob:    spec.manifest_blob,
+-        git:              spec.git.clone(),
+-        fork_source_ref:  spec.fork_source_ref.clone(),
+-        retried_from:     Some(source_run_id),
+-        parent_id:        source.parent_id,
+-        web_url:          input.web_url.clone(),
++        run_id: new_run_id,
++        title: Some(title),
++        settings,
++        graph,
++        workflow_source: graph_source,
++        workflow_config: None,
++        labels: labels.into_iter().collect::<BTreeMap<_, _>>(),
++        run_dir: String::new(),
++        source_directory,
++        workflow_slug,
++        db_prefix: None,
++        provenance: input.provenance.clone(),
++        manifest_blob,
++        git,
++        fork_source_ref,
++        retried_from: Some(source_run_id),
++        parent_id,
++        web_url: input.web_url.clone(),
+     })
+     .await
+     .map_err(|err| Error::engine(err.to_string()))?;
+ 
+     event::append_event(&retry_store, &new_run_id, &Event::RunSubmitted {
+-        definition_blob: spec.definition_blob,
++        definition_blob,
+     })
+     .await
+     .map_err(|err| Error::engine(err.to_string()))?;
+@@ -321,7 +335,7 @@ mod tests {
+ 
+         let outcome = retry_run(&store, &RetryRunInput {
+             source_run_id,
+-            new_run_id: None,
++            new_run_id: RunId::new(),
+             provenance: Some(provenance("retry-user")),
+             web_url: Some("http://localhost:3000/runs/retry".to_string()),
+         })
+@@ -452,7 +466,7 @@ mod tests {
+         for run_id in [succeeded, active, cancelled, archived] {
+             let err = retry_run(&store, &RetryRunInput {
+                 source_run_id: run_id,
+-                new_run_id:    None,
++                new_run_id:    RunId::new(),
+                 provenance:    None,
+                 web_url:       None,
+             })
+@@ -470,7 +484,7 @@ mod tests {
+         let store = memory_store();
+         let err = retry_run(&store, &RetryRunInput {
+             source_run_id: fixtures::RUN_1,
+-            new_run_id:    None,
++            new_run_id:    RunId::new(),
+             provenance:    None,
+             web_url:       None,
+         })
