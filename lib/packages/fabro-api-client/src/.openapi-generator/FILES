@@ -51,7 +51,6 @@ models/billing-model-ref.ts
 models/billing-speed.ts
 models/billing-stage-ref.ts
 models/blocked-reason.ts
-models/board-column-definition.ts
 models/board-column.ts
 models/check-run-status.ts
 models/check-run.ts
@@ -191,7 +190,6 @@ models/object-store-local-settings.ts
 models/object-store-s3-settings.ts
 models/object-store-settings.ts
 models/paginated-api-question-list.ts
-models/paginated-board-run-list.ts
 models/paginated-event-list.ts
 models/paginated-history-entry-list.ts
 models/paginated-model-list.ts
