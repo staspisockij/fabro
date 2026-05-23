@@ -1,0 +1,740 @@
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/attach.rs b/lib/crates/fabro-cli/tests/it/cmd/attach.rs
+index 3c948c7e6..60e4e0e4b 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/attach.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/attach.rs
+@@ -161,7 +161,7 @@ fn start_detached_human_run(
+         .args([
+             "run",
+             "--detach",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "--provider",
+             "openai",
+@@ -391,7 +391,7 @@ fn attach_advances_when_pending_question_is_answered_elsewhere() {
+         .args([
+             "run",
+             "--detach",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "--provider",
+             "openai",
+@@ -516,7 +516,7 @@ fn attach_before_completion_streams_to_finished_state() {
+         "--detach",
+         "--provider",
+         "openai",
+-        "--sandbox",
++        "--environment",
+         "local",
+         "slow.fabro",
+     ]);
+@@ -637,7 +637,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
+         .args([
+             "run",
+             "--detach",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "--provider",
+             "openai",
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/create.rs b/lib/crates/fabro-cli/tests/it/cmd/create.rs
+index 8fb604aa6..f3eb32f87 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/create.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/create.rs
+@@ -45,25 +45,25 @@ fn help() {
+       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
+ 
+     Options:
+-          --json                   Output as JSON [env: FABRO_JSON=]
+-          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+-          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+-      -I, --input <KEY=VALUE>      Override a workflow input value (repeatable, format: KEY=VALUE)
+-          --dry-run                Execute with simulated LLM backend
+-          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+-          --auto-approve           Auto-approve all human gates
+-          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
+-          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
+-          --goal-file <GOAL_FILE>  Read the workflow goal from a file
+-          --model <MODEL>          Override default LLM model
+-          --provider <PROVIDER>    Override default LLM provider
+-      -v, --verbose                Enable verbose output
+-          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
+-          --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
+-          --parent <RUN>           Link this run to an existing orchestration parent run
+-          --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
+-      -d, --detach                 Run the workflow in the background and print the run ID
+-      -h, --help                   Print help
++          --json                       Output as JSON [env: FABRO_JSON=]
++          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
++          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
++      -I, --input <KEY=VALUE>          Override a workflow input value (repeatable, format: KEY=VALUE)
++          --dry-run                    Execute with simulated LLM backend
++          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
++          --auto-approve               Auto-approve all human gates
++          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
++          --goal <GOAL>                Override the workflow goal (available as {{ goal }} in prompts)
++          --goal-file <GOAL_FILE>      Read the workflow goal from a file
++          --model <MODEL>              Override default LLM model
++          --provider <PROVIDER>        Override default LLM provider
++      -v, --verbose                    Enable verbose output
++          --environment <ENVIRONMENT>  Named environment for agent tools
++          --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)
++          --parent <RUN>               Link this run to an existing orchestration parent run
++          --preserve-sandbox           Keep the sandbox alive after the run finishes (for debugging)
++      -d, --detach                     Run the workflow in the background and print the run ID
++      -h, --help                       Print help
+     ----- stderr -----
+     ");
+ }
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/dump.rs b/lib/crates/fabro-cli/tests/it/cmd/dump.rs
+index d7c26eb51..acdd34da6 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/dump.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/dump.rs
+@@ -103,7 +103,7 @@ fn dump_exports_large_command_output_backed_by_blob_refs() {
+     let mut run_cmd = context.run_cmd();
+     run_cmd.current_dir(&context.temp_dir);
+     run_cmd.timeout(Duration::from_secs(30));
+-    run_cmd.args(["--run-id", run_id.as_str(), "--sandbox", "local"]);
++    run_cmd.args(["--run-id", run_id.as_str(), "--environment", "local"]);
+     run_cmd.arg(&workflow);
+     let run_output = run_cmd.output().expect("command should execute");
+     assert!(
+@@ -194,7 +194,7 @@ include = ["assets/**"]
+     run_cmd.args([
+         "--run-id",
+         run_id.as_str(),
+-        "--sandbox",
++        "--environment",
+         "local",
+         "run.toml",
+     ]);
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/preflight.rs b/lib/crates/fabro-cli/tests/it/cmd/preflight.rs
+index e90c1a9d6..8bb035f3a 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/preflight.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/preflight.rs
+@@ -20,19 +20,19 @@ fn help() {
+       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
+ 
+     Options:
+-          --json                   Output as JSON [env: FABRO_JSON=]
+-          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+-          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+-      -I, --input <KEY=VALUE>      Override a workflow input value (repeatable, format: KEY=VALUE)
+-          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
+-          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+-          --goal-file <GOAL_FILE>  Read the workflow goal from a file
+-          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
+-          --model <MODEL>          Override default LLM model
+-          --provider <PROVIDER>    Override default LLM provider
+-      -v, --verbose                Enable verbose output
+-          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
+-      -h, --help                   Print help
++          --json                       Output as JSON [env: FABRO_JSON=]
++          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
++          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
++      -I, --input <KEY=VALUE>          Override a workflow input value (repeatable, format: KEY=VALUE)
++          --goal <GOAL>                Override the workflow goal (available as {{ goal }} in prompts)
++          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
++          --goal-file <GOAL_FILE>      Read the workflow goal from a file
++          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
++          --model <MODEL>              Override default LLM model
++          --provider <PROVIDER>        Override default LLM provider
++      -v, --verbose                    Enable verbose output
++          --environment <ENVIRONMENT>  Named environment for agent tools
++      -h, --help                       Print help
+     ----- stderr -----
+     ");
+ }
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/run.rs b/lib/crates/fabro-cli/tests/it/cmd/run.rs
+index 464c7cb95..1b50a6673 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/run.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/run.rs
+@@ -123,25 +123,25 @@ fn help() {
+       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
+ 
+     Options:
+-          --json                   Output as JSON [env: FABRO_JSON=]
+-          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+-          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+-      -I, --input <KEY=VALUE>      Override a workflow input value (repeatable, format: KEY=VALUE)
+-          --dry-run                Execute with simulated LLM backend
+-          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+-          --auto-approve           Auto-approve all human gates
+-          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
+-          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
+-          --goal-file <GOAL_FILE>  Read the workflow goal from a file
+-          --model <MODEL>          Override default LLM model
+-          --provider <PROVIDER>    Override default LLM provider
+-      -v, --verbose                Enable verbose output
+-          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
+-          --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
+-          --parent <RUN>           Link this run to an existing orchestration parent run
+-          --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
+-      -d, --detach                 Run the workflow in the background and print the run ID
+-      -h, --help                   Print help
++          --json                       Output as JSON [env: FABRO_JSON=]
++          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
++          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
++      -I, --input <KEY=VALUE>          Override a workflow input value (repeatable, format: KEY=VALUE)
++          --dry-run                    Execute with simulated LLM backend
++          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
++          --auto-approve               Auto-approve all human gates
++          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
++          --goal <GOAL>                Override the workflow goal (available as {{ goal }} in prompts)
++          --goal-file <GOAL_FILE>      Read the workflow goal from a file
++          --model <MODEL>              Override default LLM model
++          --provider <PROVIDER>        Override default LLM provider
++      -v, --verbose                    Enable verbose output
++          --environment <ENVIRONMENT>  Named environment for agent tools
++          --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)
++          --parent <RUN>               Link this run to an existing orchestration parent run
++          --preserve-sandbox           Keep the sandbox alive after the run finishes (for debugging)
++      -d, --detach                     Run the workflow in the background and print the run ID
++      -h, --help                       Print help
+     ----- stderr -----
+     ");
+ }
+@@ -412,7 +412,7 @@ digraph VaultWorkerLlm {
+             "--run-id",
+             run_id.as_str(),
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "--provider",
+             "anthropic",
+@@ -770,7 +770,7 @@ include = ["assets/**"]
+             "--run-id",
+             run_id.as_str(),
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "--provider",
+             "openai",
+@@ -899,7 +899,7 @@ fn dry_run_persists_event_history_in_store() {
+             "run",
+             "--dry-run",
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "--run-id",
+             run_id.as_str(),
+@@ -1041,7 +1041,7 @@ fn json_run_requires_manual_input_for_human_gates_without_auto_approve() {
+         .args([
+             "--json",
+             "run",
+-            "--sandbox",
++            "--environment",
+             "local",
+             workflow.to_str().unwrap(),
+         ])
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/runner.rs b/lib/crates/fabro-cli/tests/it/cmd/runner.rs
+index f1d52274f..d7d87fb93 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/runner.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/runner.rs
+@@ -481,7 +481,7 @@ methods = ["dev-token"]
+             run_id.as_str(),
+             "--detach",
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             "local",
+             workflow_path
+                 .to_str()
+@@ -734,7 +734,7 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
+             "--detach",
+             "--run-id",
+             run_id.as_str(),
+-            "--sandbox",
++            "--environment",
+             "local",
+             workflow_path.to_str().unwrap(),
+         ])
+@@ -807,7 +807,7 @@ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
+         .args([
+             "create",
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "--run-id",
+             run_id.as_str(),
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/server_start.rs b/lib/crates/fabro-cli/tests/it/cmd/server_start.rs
+index 86c928f4b..11ef4e073 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/server_start.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/server_start.rs
+@@ -208,8 +208,8 @@ fn help() {
+               Override default LLM model
+           --provider <PROVIDER>
+               Override default LLM provider
+-          --sandbox <SANDBOX>
+-              Sandbox for agent tools
++          --environment <ENVIRONMENT>
++              Named environment for agent tools
+           --max-concurrent-runs <MAX_CONCURRENT_RUNS>
+               Maximum number of concurrent run executions
+           --config <CONFIG>
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/start.rs b/lib/crates/fabro-cli/tests/it/cmd/start.rs
+index d52014e48..950a708b9 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/start.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/start.rs
+@@ -143,7 +143,7 @@ fn start_rejects_already_active_or_completed_run() {
+         "create",
+         "--provider",
+         "openai",
+-        "--sandbox",
++        "--environment",
+         "local",
+         "slow.fabro",
+     ]);
+@@ -204,7 +204,7 @@ fn start_runs_under_server_ownership_without_launcher_record() {
+             "create",
+             "--provider",
+             "openai",
+-            "--sandbox",
++            "--environment",
+             "local",
+             "owned-by-server.fabro",
+         ])
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/support.rs b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+index e2ab6ef22..072c4bdba 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/support.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+@@ -245,14 +245,14 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
+         run_id.as_str(),
+         "--dry-run",
+         "--auto-approve",
+-        "--sandbox",
++        "--environment",
+         "local",
+     ]);
+     cmd.arg(workflow);
+     let output = cmd.output().expect("command should execute");
+     if !output.status.success() {
+         panic!(
+-            "command failed: fabro run --dry-run --auto-approve --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
++            "command failed: fabro run --dry-run --auto-approve --environment local {}\nstdout:\n{}\nstderr:\n{}",
+             workflow.display(),
+             stdout(&output),
+             stderr(&output)
+@@ -308,14 +308,14 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
+         "--detach",
+         "--dry-run",
+         "--auto-approve",
+-        "--sandbox",
++        "--environment",
+         "local",
+     ]);
+     cmd.arg(workflow);
+     let output = cmd.output().expect("command should execute");
+     if !output.status.success() {
+         panic!(
+-            "command failed: fabro run --detach --dry-run --auto-approve --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
++            "command failed: fabro run --detach --dry-run --auto-approve --environment local {}\nstdout:\n{}\nstderr:\n{}",
+             fixture("simple.fabro").display(),
+             stdout(&output),
+             stderr(&output)
+@@ -413,7 +413,7 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
+         "--run-id",
+         run_id.as_str(),
+         "--auto-approve",
+-        "--sandbox",
++        "--environment",
+         "local",
+         "--provider",
+         "openai",
+@@ -422,7 +422,7 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
+     let output = cmd.output().expect("command should execute");
+     if !output.status.success() {
+         panic!(
+-            "command failed: fabro run --auto-approve --sandbox local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
++            "command failed: fabro run --auto-approve --environment local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
+             stdout(&output),
+             stderr(&output)
+         );
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/worker_auth.rs b/lib/crates/fabro-cli/tests/it/cmd/worker_auth.rs
+index 0793153d5..9f9d43921 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/worker_auth.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/worker_auth.rs
+@@ -302,7 +302,7 @@ async fn github_only_server_dispatched_worker_succeeds_without_worker_auth_store
+             "--detach",
+             "--dry-run",
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             "local",
+             workflow.to_str().unwrap(),
+         ])
+@@ -358,7 +358,7 @@ fn runner_rejects_bogus_worker_token_against_github_only_server() {
+                 &run_id,
+                 "--dry-run",
+                 "--auto-approve",
+-                "--sandbox",
++                "--environment",
+                 "local",
+                 workflow.to_str().unwrap(),
+             ])
+diff --git a/lib/crates/fabro-cli/tests/it/scenario/lifecycle.rs b/lib/crates/fabro-cli/tests/it/scenario/lifecycle.rs
+index ee26e2fbf..846bcab2b 100644
+--- a/lib/crates/fabro-cli/tests/it/scenario/lifecycle.rs
++++ b/lib/crates/fabro-cli/tests/it/scenario/lifecycle.rs
+@@ -30,7 +30,7 @@ fn local_run_lifecycle() {
+         .run_cmd()
+         .args([
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             "local",
+             fixture("command_pipeline.fabro").to_str().unwrap(),
+         ])
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/acp.rs b/lib/crates/fabro-cli/tests/it/workflow/acp.rs
+index c24af9499..bf841a557 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/acp.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/acp.rs
+@@ -40,7 +40,7 @@ fn acp_backend_workflow() {
+ 
+     context
+         .run_cmd()
+-        .args(["--auto-approve", "--sandbox", "local"])
++        .args(["--auto-approve", "--environment", "local"])
+         .arg(&workflow)
+         .assert()
+         .success();
+@@ -119,7 +119,7 @@ fn acp_backend_does_not_inject_registered_provider_credentials() {
+         .env_remove("ANTHROPIC_API_KEY")
+         .env_remove("OPENAI_API_KEY")
+         .env_remove("GEMINI_API_KEY")
+-        .args(["--auto-approve", "--sandbox", "local"])
++        .args(["--auto-approve", "--environment", "local"])
+         .arg(&workflow)
+         .assert()
+         .success();
+@@ -193,7 +193,7 @@ include = ["verification-artifacts/**"]
+ 
+     context
+         .run_cmd()
+-        .args(["--auto-approve", "--sandbox", "local"])
++        .args(["--auto-approve", "--environment", "local"])
+         .arg(context.temp_dir.join("run.toml"))
+         .assert()
+         .success();
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/agent_linear.rs b/lib/crates/fabro-cli/tests/it/workflow/agent_linear.rs
+index 175445f91..031d437a7 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/agent_linear.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/agent_linear.rs
+@@ -13,7 +13,7 @@ fn scenario_agent_linear(sandbox: &str) {
+         .run_cmd()
+         .args([
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             sandbox,
+             "--model",
+             "claude-haiku-4-5",
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/artifacts.rs b/lib/crates/fabro-cli/tests/it/workflow/artifacts.rs
+index 45aabca92..71f57ade6 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/artifacts.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/artifacts.rs
+@@ -49,7 +49,7 @@ include = ["assets/**"]
+ 
+     context
+         .run_cmd()
+-        .args(["--auto-approve", "--sandbox", "local"])
++        .args(["--auto-approve", "--environment", "local"])
+         .arg(context.temp_dir.join("run.toml"))
+         .assert()
+         .success();
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/command_agent_mixed.rs b/lib/crates/fabro-cli/tests/it/workflow/command_agent_mixed.rs
+index 447ef05b4..b25b5b12d 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/command_agent_mixed.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/command_agent_mixed.rs
+@@ -19,7 +19,7 @@ fn scenario_command_agent_mixed(sandbox: &str) {
+         .run_cmd()
+         .args([
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             sandbox,
+             "--model",
+             "claude-haiku-4-5",
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/command_pipeline.rs b/lib/crates/fabro-cli/tests/it/workflow/command_pipeline.rs
+index 2f0d4c94e..21a7a7da2 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/command_pipeline.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/command_pipeline.rs
+@@ -23,7 +23,7 @@ fn scenario_command_pipeline(sandbox: &str) {
+ 
+     context
+         .run_cmd()
+-        .args(["--auto-approve", "--sandbox", sandbox])
++        .args(["--auto-approve", "--environment", sandbox])
+         .arg(fixture("command_pipeline.fabro"))
+         .timeout(timeout_for(sandbox))
+         .assert()
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/conditional_branching.rs b/lib/crates/fabro-cli/tests/it/workflow/conditional_branching.rs
+index 288c2ca6b..c8f703edf 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/conditional_branching.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/conditional_branching.rs
+@@ -9,7 +9,7 @@ fn scenario_conditional_branching(sandbox: &str) {
+ 
+     context
+         .run_cmd()
+-        .args(["--auto-approve", "--sandbox", sandbox])
++        .args(["--auto-approve", "--environment", sandbox])
+         .arg(fixture("conditional_branching.fabro"))
+         .timeout(timeout_for(sandbox))
+         .assert()
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/full_stack.rs b/lib/crates/fabro-cli/tests/it/workflow/full_stack.rs
+index e70dea83a..60a95f5f1 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/full_stack.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/full_stack.rs
+@@ -19,7 +19,7 @@ fn scenario_full_stack(sandbox: &str) {
+         .run_cmd()
+         .args([
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             sandbox,
+             "--model",
+             "claude-haiku-4-5",
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/hooks.rs b/lib/crates/fabro-cli/tests/it/workflow/hooks.rs
+index 3561b254c..03e71e29d 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/hooks.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/hooks.rs
+@@ -120,7 +120,7 @@ fn configure_hook_env(cmd: &mut assert_cmd::Command, hook_model: &str) {
+     if TestMode::from_env().is_twin() {
+         cmd.env_remove("ANTHROPIC_API_KEY");
+     }
+-    cmd.arg("--sandbox").arg("local");
++    cmd.arg("--environment").arg("local");
+     cmd.arg("--auto-approve");
+     cmd.arg("--provider").arg(stage_provider());
+     cmd.arg("--model").arg(hook_model);
+diff --git a/lib/crates/fabro-cli/tests/it/workflow/human_gate.rs b/lib/crates/fabro-cli/tests/it/workflow/human_gate.rs
+index 48f649cbf..0f83199e9 100644
+--- a/lib/crates/fabro-cli/tests/it/workflow/human_gate.rs
++++ b/lib/crates/fabro-cli/tests/it/workflow/human_gate.rs
+@@ -11,7 +11,7 @@ fn scenario_human_gate(sandbox: &str) {
+         .run_cmd()
+         .args([
+             "--auto-approve",
+-            "--sandbox",
++            "--environment",
+             sandbox,
+             "--model",
+             "claude-haiku-4-5",
+diff --git a/lib/crates/fabro-config/src/builders.rs b/lib/crates/fabro-config/src/builders.rs
+index d85a16bb1..80017af26 100644
+--- a/lib/crates/fabro-config/src/builders.rs
++++ b/lib/crates/fabro-config/src/builders.rs
+@@ -10,8 +10,7 @@ use fabro_util::error::SharedError;
+ use crate::defaults::DEFAULTS_LAYER;
+ use crate::load::load_settings_path;
+ use crate::resolve::{
+-    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server,
+-    resolve_workflow,
++    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server, resolve_workflow,
+ };
+ use crate::user::load_settings_config;
+ use crate::{
+diff --git a/lib/crates/fabro-config/src/resolve/environment.rs b/lib/crates/fabro-config/src/resolve/environment.rs
+index 250f4f3ff..7706254d8 100644
+--- a/lib/crates/fabro-config/src/resolve/environment.rs
++++ b/lib/crates/fabro-config/src/resolve/environment.rs
+@@ -33,7 +33,10 @@ pub(crate) fn resolve_run_environment(
+         return RunEnvironmentSettings::from_environment(id, EnvironmentSettings::default());
+     };
+ 
+-    let merged = layer.clone().into_environment_override().combine(base.clone());
++    let merged = layer
++        .clone()
++        .into_environment_override()
++        .combine(base.clone());
+     let environment = resolve_environment_layer(&merged, "run.environment", errors);
+     validate_provider_capabilities(&environment, "run.environment", errors);
+     RunEnvironmentSettings::from_environment(id, environment)
+diff --git a/lib/crates/fabro-sandbox/src/from_environment.rs b/lib/crates/fabro-sandbox/src/from_environment.rs
+index c59fb5044..811ff620c 100644
+--- a/lib/crates/fabro-sandbox/src/from_environment.rs
++++ b/lib/crates/fabro-sandbox/src/from_environment.rs
+@@ -3,8 +3,6 @@
+ //! These mappings are consumed by both the workflow run-start path and the
+ //! server preflight path, so they live here next to their destination types.
+ 
+-#[cfg(feature = "docker")]
+-use fabro_types::settings::interp::InterpString;
+ #[cfg(feature = "daytona")]
+ use fabro_types::settings::run::DockerfileSource as ResolvedDockerfileSource;
+ use fabro_types::settings::run::{EnvironmentNetworkMode, RunEnvironmentSettings};
+@@ -55,16 +53,18 @@ pub fn daytona_config_from_environment(
+                     .resources
+                     .disk
+                     .map(|size| size_to_gb_i32(size.as_bytes())),
+-                dockerfile: settings.image.dockerfile.as_ref().map(|dockerfile| {
+-                    match dockerfile {
++                dockerfile: settings
++                    .image
++                    .dockerfile
++                    .as_ref()
++                    .map(|dockerfile| match dockerfile {
+                         ResolvedDockerfileSource::Inline(text) => {
+                             SandboxDockerfileSource::Inline(text.clone())
+                         }
+                         ResolvedDockerfileSource::Path { path } => {
+                             SandboxDockerfileSource::Path { path: path.clone() }
+                         }
+-                    }
+-                }),
++                    }),
+             }),
+         network: Some(match settings.network.mode {
+             EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
+@@ -84,9 +84,9 @@ pub fn docker_config_from_environment(
+     skip_clone: bool,
+ ) -> DockerSandboxOptions {
+     let mut env_vars = settings
+-        .env
+-        .iter()
+-        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
++        .resolve_env(process_env_var)
++        .into_iter()
++        .map(|(key, value)| format!("{key}={value}"))
+         .collect::<Vec<_>>();
+     env_vars.sort();
+     let default_options = DockerSandboxOptions::default();
+@@ -117,13 +117,6 @@ pub fn docker_config_from_environment(
+     }
+ }
+ 
+-#[cfg(feature = "docker")]
+-fn resolve_interp(value: &InterpString) -> String {
+-    value
+-        .resolve(process_env_var)
+-        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
+-}
+-
+ #[cfg(feature = "docker")]
+ #[expect(
+     clippy::disallowed_methods,
+diff --git a/lib/crates/fabro-types/src/settings/run.rs b/lib/crates/fabro-types/src/settings/run.rs
+index 7b3c3450c..b9d0e8611 100644
+--- a/lib/crates/fabro-types/src/settings/run.rs
++++ b/lib/crates/fabro-types/src/settings/run.rs
+@@ -2,7 +2,7 @@
+ //!
+ //! `[run]` is the shared execution domain. It may appear in all three config
+ //! files and layer normally. Subdomains cover model selection, git author,
+-//! prepare steps, execution posture, checkpoint policy, sandbox selection,
++//! prepare steps, execution posture, checkpoint policy, environment selection,
+ //! notifications, interviews, agent knobs, hooks, SCM targeting, pull-request
+ //! behavior, and artifact collection.
+ 
+@@ -468,6 +468,24 @@ impl RunEnvironmentSettings {
+             env: environment.env,
+         }
+     }
++
++    /// Resolve every environment value's `{{ env.* }}` tokens via `lookup`,
++    /// falling back to the original source string when resolution fails.
++    #[must_use]
++    pub fn resolve_env<F>(&self, mut lookup: F) -> HashMap<String, String>
++    where
++        F: FnMut(&str) -> Option<String>,
++    {
++        self.env
++            .iter()
++            .map(|(name, value)| {
++                let resolved = value
++                    .resolve(&mut lookup)
++                    .map_or_else(|_| value.as_source(), |resolved| resolved.value);
++                (name.clone(), resolved)
++            })
++            .collect()
++    }
+ }
+ 
+ impl Default for RunEnvironmentSettings {
+@@ -476,6 +494,50 @@ impl Default for RunEnvironmentSettings {
+     }
+ }
+ 
++#[cfg(test)]
++mod run_environment_settings_tests {
++    use super::{HashMap, InterpString, RunEnvironmentSettings};
++
++    fn settings(env: &[(&str, &str)]) -> RunEnvironmentSettings {
++        RunEnvironmentSettings {
++            env: env
++                .iter()
++                .map(|(k, v)| ((*k).to_string(), InterpString::parse(v)))
++                .collect(),
++            ..RunEnvironmentSettings::default()
++        }
++    }
++
++    #[test]
++    fn resolve_env_substitutes_env_tokens_via_lookup() {
++        let s = settings(&[("NODE_ENV", "{{ env.NODE_ENV }}"), ("STATIC", "value")]);
++        let resolved = s.resolve_env(|name| match name {
++            "NODE_ENV" => Some("test".to_string()),
++            _ => None,
++        });
++
++        assert_eq!(resolved.get("NODE_ENV"), Some(&"test".to_string()));
++        assert_eq!(resolved.get("STATIC"), Some(&"value".to_string()));
++    }
++
++    #[test]
++    fn resolve_env_falls_back_to_source_when_lookup_fails() {
++        let s = settings(&[("NODE_ENV", "{{ env.MISSING_NODE_ENV }}")]);
++        let resolved = s.resolve_env(|_| None);
++
++        assert_eq!(
++            resolved.get("NODE_ENV"),
++            Some(&"{{ env.MISSING_NODE_ENV }}".to_string())
++        );
++    }
++
++    #[test]
++    fn resolve_env_is_empty_for_empty_settings() {
++        let s: HashMap<String, String> = settings(&[]).resolve_env(|_| None);
++        assert!(s.is_empty());
++    }
++}
++
+ #[derive(Debug, Clone, PartialEq)]
+ pub enum DockerfileSource {
+     Inline(String),
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index f99f317ec..f8d53e85f 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -363,12 +363,7 @@ impl RunSession {
+             }
+         };
+ 
+-        let toml_env: HashMap<String, String> = resolved
+-            .environment
+-            .env
+-            .iter()
+-            .map(|(k, v)| (k.clone(), resolve_interp(v)))
+-            .collect();
++        let toml_env = resolved.environment.resolve_env(process_env_var);
+         let github_permissions: Option<HashMap<String, String>> =
+             (!services.github_permissions.is_empty()).then(|| services.github_permissions.clone());
+         let sandbox_env = SandboxEnvSpec {
+@@ -459,12 +454,6 @@ async fn configured_providers_for_start(
+     }
+ }
+ 
+-fn resolve_interp(value: &InterpString) -> String {
+-    value
+-        .resolve(process_env_var)
+-        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
+-}
+-
+ fn git_checkpoint_options_from_start(
+     settings: &fabro_types::WorkflowSettings,
+     run_id: &RunId,
