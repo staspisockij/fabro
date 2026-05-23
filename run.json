@@ -1,0 +1,516 @@
+{
+  "title": "Expose Agent Permission Level on StageProjection",
+  "spec": {
+    "run_id": "01KSB6X4YBFK3TZ7TA1GXGEFZR",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Expose Agent Permission Level on StageProjection\n\n## Context\n\nThe agent stage detail page (e.g. `/runs/{id}/stages/implement@1`) will gain a new left sidebar showing live agent runtime data (todos, subagents, skills, MCPs, permissions, context window). Of those six items, **permissions** is the only one not currently flowing to the API. `PermissionLevel` (`ReadOnly | ReadWrite | Full`) is known inside `fabro-agent` at session start but never reaches `StageProjection`. Add it by extending an existing event (`agent.session.activated`) — no new event — and folding it into the stage projection like `provider_used` already is.\n\n## Approach\n\nSingle field: `permission_level: Option<PermissionLevel>` on `StageProjection`, populated by extending the already-projected `agent.session.activated` event.\n\n### Changes\n\n1. **`lib/crates/fabro-agent/src/config.rs`** — Add `permission_level: Option<PermissionLevel>` to `SessionOptions` (~line 121) so the level survives next to `tool_access_policy`. CLI already has the raw level at `cli.rs:130-179` (`build_tool_approval`); thread it into `SessionOptions` at the construction site (~`cli.rs:575`).\n\n2. **`lib/crates/fabro-types/src/run_event/agent.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `AgentSessionActivatedProps` (lines 31-44). Import `PermissionLevel` from `crate::session`. `#[serde(skip_serializing_if = \"Option::is_none\")]` to keep payloads compact on older runs.\n\n3. **`lib/crates/fabro-workflow/src/handler/llm/api.rs`** — At the `agent.session.activated` emission site, read `permission_level` from the session config and set the new prop. Mirror how existing fields (`provider`, `model`, `reasoning_effort`) are populated.\n\n4. **`lib/crates/fabro-types/src/run_projection.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `StageProjection` (near line 158, alongside `skills`/`mcp_servers`). `#[serde(skip_serializing_if = \"Option::is_none\")]`. `PermissionLevel` already lives in this crate (`session.rs:28`) and is serde-derived, so reuse it directly — no new type.\n\n5. **`lib/crates/fabro-store/src/run_state.rs`** — In `apply_event` for `EventBody::AgentSessionActivated` (lines 403-409, where `provider_used` is already set), also write `stage.permission_level = props.permission_level`.\n\n6. **`docs/public/api-reference/fabro-api.yaml`** —\n   - Add a `PermissionLevel` schema (string enum: `read-only`, `read-write`, `full`) under `components/schemas`. Match the serde rename used by the Rust enum at `fabro-types/src/session.rs:28`.\n   - Add `permission_level` (nullable, `$ref: PermissionLevel`) to `StageProjection` (lines 7869-7960).\n   - Add `permission_level` to `AgentSessionActivatedProps` schema.\n\n7. **`lib/crates/fabro-api/build.rs`** — Add `with_replacement(\"PermissionLevel\", \"fabro_types::PermissionLevel\", …)` to the progenitor type replacements (around line 355, next to `SkillsProjection`). `cargo build -p fabro-api` regenerates.\n\n8. **`lib/packages/fabro-api-client`** — Regenerate the TS client: `cd lib/packages/fabro-api-client && bun run generate`. No hand edits.\n\n### Files to reuse, not duplicate\n\n- `PermissionLevel` enum at `lib/crates/fabro-types/src/session.rs:28` — use as-is, do not create a parallel API DTO. Per `CLAUDE.md` \"API type ownership\", search-then-reuse: this is the canonical type.\n- Projection-folding pattern at `lib/crates/fabro-store/src/run_state.rs:545-587` (skills/mcp_servers) — same shape of edit.\n\n### Frontend (out of scope for this change, but unblocked by it)\n\nThe agent stage sidebar component (`apps/fabro-web/app/components/stage-sidebar.tsx`) currently does not render skills/MCPs either. The follow-up UI work reads `stage.permission_level` from `useRunStages(id)` and shows a single badge. No new client query needed.\n\n## Verification\n\n1. **Unit test** — Add to `lib/crates/fabro-store/src/run_state.rs` next to `skill_events_update_stage_projection` (lines 3966-4028). Pattern:\n   - Build `initialized_projection()`.\n   - Apply an `AgentSessionActivated` envelope with `permission_level: Some(PermissionLevel::ReadOnly)` and a `visit`.\n   - Assert `state.stage(&stage_id).unwrap().permission_level == Some(PermissionLevel::ReadOnly)`.\n   - Repeat with `None` (legacy event) and assert field stays `None`.\n\n2. **Round-trip test** — Add to `lib/crates/fabro-api/tests/stage_projection_round_trip.rs` to confirm JSON parity between `fabro_types::StageProjection` and the OpenAPI schema (`CLAUDE.md` API type ownership rule).\n\n3. **Conformance** — `cargo nextest run -p fabro-server` catches OpenAPI/router drift.\n\n4. **Format/lint** —\n   - `cargo +nightly-2026-04-14 fmt --check --all`\n   - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n5. **Manual end-to-end** —\n   - `fabro server start` and run a workflow with `--permissions read-only`.\n   - `curl http://127.0.0.1:32276/api/v1/runs/{id}/stages | jq '.stages[].permission_level'` — expect `\"read-only\"` on agent stages, `null` on non-agent stages.\n   - `bun run typecheck` in `apps/fabro-web` after TS client regen — confirms the new field is typed.\n\n## Notes\n\n- Older events without `permission_level` (in-flight runs, persisted history) deserialize to `None`; projection field stays `Option`. No migration needed.\n- Per the user's six-item sidebar plan, this is the only item requiring backend changes. Todos/subagents/skills/MCPs are already on `StageProjection`; context-window breakdown is deferred.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": [],
+          "controls": {
+            "reasoning_effort": null,
+            "speed": null
+          }
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt"
+        },
+        "checkpoint": {
+          "exclude_globs": [],
+          "skip_git_hooks": false
+        },
+        "clone": {
+          "enabled": true
+        },
+        "run_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "meta_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "environment": {
+          "id": "fabro-dev",
+          "provider": "daytona",
+          "image": {
+            "ref": "fabro-v11",
+            "dockerfile": {
+              "type": "inline",
+              "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \\\n        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \\\n        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install real Chromium (not the snap stub) via xtradeb PPA\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        software-properties-common curl gnupg \\\n    && add-apt-repository -y ppa:xtradeb/apps \\\n    && apt-get update \\\n    && apt-get install -y --no-install-recommends chromium \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Wrapper: Chromium needs --no-sandbox when running as root in a container,\n# and --disable-dev-shm-usage avoids crashes from small /dev/shm\nRUN printf '#!/bin/bash\\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage \"$@\"\\n' \\\n        > /usr/local/bin/chromium-wrapper \\\n    && chmod +x /usr/local/bin/chromium-wrapper\n\n# Make the wrapper the default in the system .desktop file and via alternatives\nRUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \\\n        /usr/share/applications/chromium.desktop \\\n    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \\\n        /usr/local/bin/chromium-wrapper 100\n\n# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)\nRUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \\\n    && printf 'WebBrowser=custom-WebBrowser\\n' > /etc/xdg/xfce4/helpers.rc \\\n    && printf '[Desktop Entry]\\n\\\nVersion=1.0\\n\\\nType=X-XFCE-Helper\\n\\\nName=Chromium\\n\\\nIcon=chromium\\n\\\nX-XFCE-Category=WebBrowser\\n\\\nX-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper \"%%s\"\\n\\\nX-XFCE-Commands=/usr/local/bin/chromium-wrapper\\n' \\\n        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\\n        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\\n    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" \\\n        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\\n    && apt-get update && apt-get install -y --no-install-recommends gh \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+            }
+          },
+          "resources": {
+            "cpu": 8,
+            "memory": "16GB",
+            "disk": "20GB"
+          },
+          "network": {
+            "mode": "allow_all",
+            "allow": []
+          },
+          "lifecycle": {
+            "preserve": false,
+            "stop_on_terminal": true,
+            "auto_stop": "30m"
+          },
+          "labels": {
+            "repo": "fabro-sh/fabro"
+          },
+          "volumes": [],
+          "env": {}
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null
+        },
+        "agent": {
+          "fabro_tools": false,
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        },
+        "integrations": {
+          "github": {
+            "permissions": {}
+          }
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "max_visits": {
+              "Integer": 3
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "script": {
+              "String": "git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1"
+            },
+            "retry_target": {
+              "String": "fixup"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "reasoning_effort": {
+              "String": "xhigh"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "provider": {
+              "String": "openai"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Toolchain"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures."
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "max_visits": {
+              "Integer": 3
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Start"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "shape": {
+              "String": "Msquare"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "exit",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "goal": {
+          "String": "# Expose Agent Permission Level on StageProjection\n\n## Context\n\nThe agent stage detail page (e.g. `/runs/{id}/stages/implement@1`) will gain a new left sidebar showing live agent runtime data (todos, subagents, skills, MCPs, permissions, context window). Of those six items, **permissions** is the only one not currently flowing to the API. `PermissionLevel` (`ReadOnly | ReadWrite | Full`) is known inside `fabro-agent` at session start but never reaches `StageProjection`. Add it by extending an existing event (`agent.session.activated`) — no new event — and folding it into the stage projection like `provider_used` already is.\n\n## Approach\n\nSingle field: `permission_level: Option<PermissionLevel>` on `StageProjection`, populated by extending the already-projected `agent.session.activated` event.\n\n### Changes\n\n1. **`lib/crates/fabro-agent/src/config.rs`** — Add `permission_level: Option<PermissionLevel>` to `SessionOptions` (~line 121) so the level survives next to `tool_access_policy`. CLI already has the raw level at `cli.rs:130-179` (`build_tool_approval`); thread it into `SessionOptions` at the construction site (~`cli.rs:575`).\n\n2. **`lib/crates/fabro-types/src/run_event/agent.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `AgentSessionActivatedProps` (lines 31-44). Import `PermissionLevel` from `crate::session`. `#[serde(skip_serializing_if = \"Option::is_none\")]` to keep payloads compact on older runs.\n\n3. **`lib/crates/fabro-workflow/src/handler/llm/api.rs`** — At the `agent.session.activated` emission site, read `permission_level` from the session config and set the new prop. Mirror how existing fields (`provider`, `model`, `reasoning_effort`) are populated.\n\n4. **`lib/crates/fabro-types/src/run_projection.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `StageProjection` (near line 158, alongside `skills`/`mcp_servers`). `#[serde(skip_serializing_if = \"Option::is_none\")]`. `PermissionLevel` already lives in this crate (`session.rs:28`) and is serde-derived, so reuse it directly — no new type.\n\n5. **`lib/crates/fabro-store/src/run_state.rs`** — In `apply_event` for `EventBody::AgentSessionActivated` (lines 403-409, where `provider_used` is already set), also write `stage.permission_level = props.permission_level`.\n\n6. **`docs/public/api-reference/fabro-api.yaml`** —\n   - Add a `PermissionLevel` schema (string enum: `read-only`, `read-write`, `full`) under `components/schemas`. Match the serde rename used by the Rust enum at `fabro-types/src/session.rs:28`.\n   - Add `permission_level` (nullable, `$ref: PermissionLevel`) to `StageProjection` (lines 7869-7960).\n   - Add `permission_level` to `AgentSessionActivatedProps` schema.\n\n7. **`lib/crates/fabro-api/build.rs`** — Add `with_replacement(\"PermissionLevel\", \"fabro_types::PermissionLevel\", …)` to the progenitor type replacements (around line 355, next to `SkillsProjection`). `cargo build -p fabro-api` regenerates.\n\n8. **`lib/packages/fabro-api-client`** — Regenerate the TS client: `cd lib/packages/fabro-api-client && bun run generate`. No hand edits.\n\n### Files to reuse, not duplicate\n\n- `PermissionLevel` enum at `lib/crates/fabro-types/src/session.rs:28` — use as-is, do not create a parallel API DTO. Per `CLAUDE.md` \"API type ownership\", search-then-reuse: this is the canonical type.\n- Projection-folding pattern at `lib/crates/fabro-store/src/run_state.rs:545-587` (skills/mcp_servers) — same shape of edit.\n\n### Frontend (out of scope for this change, but unblocked by it)\n\nThe agent stage sidebar component (`apps/fabro-web/app/components/stage-sidebar.tsx`) currently does not render skills/MCPs either. The follow-up UI work reads `stage.permission_level` from `useRunStages(id)` and shows a single badge. No new client query needed.\n\n## Verification\n\n1. **Unit test** — Add to `lib/crates/fabro-store/src/run_state.rs` next to `skill_events_update_stage_projection` (lines 3966-4028). Pattern:\n   - Build `initialized_projection()`.\n   - Apply an `AgentSessionActivated` envelope with `permission_level: Some(PermissionLevel::ReadOnly)` and a `visit`.\n   - Assert `state.stage(&stage_id).unwrap().permission_level == Some(PermissionLevel::ReadOnly)`.\n   - Repeat with `None` (legacy event) and assert field stays `None`.\n\n2. **Round-trip test** — Add to `lib/crates/fabro-api/tests/stage_projection_round_trip.rs` to confirm JSON parity between `fabro_types::StageProjection` and the OpenAPI schema (`CLAUDE.md` API type ownership rule).\n\n3. **Conformance** — `cargo nextest run -p fabro-server` catches OpenAPI/router drift.\n\n4. **Format/lint** —\n   - `cargo +nightly-2026-04-14 fmt --check --all`\n   - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n5. **Manual end-to-end** —\n   - `fabro server start` and run a workflow with `--permissions read-only`.\n   - `curl http://127.0.0.1:32276/api/v1/runs/{id}/stages | jq '.stages[].permission_level'` — expect `\"read-only\"` on agent stages, `null` on non-agent stages.\n   - `bun run typecheck` in `apps/fabro-web` after TS client regen — confirms the new field is typed.\n\n## Notes\n\n- Older events without `permission_level` (in-flight runs, persisted history) deserialize to `None`; projection field stays `Option`. No migration needed.\n- Per the user's six-item sidebar plan, this is the only item requiring backend changes. Todos/subagents/skills/MCPs are already on `StageProjection`; context-window breakdown is deferred.\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        }
+      }
+    },
+    "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\", model=\"gpt-55\", reasoning_effort=\"xhigh\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\\\"disabled\\\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures.\", max_visits=3]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> exit  [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n}\n",
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.242.0-nightly.1"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.242.0-nightly.1",
+        "name": "fabro-cli",
+        "version": "0.242.0-nightly.1"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19?v=4"
+      }
+    },
+    "manifest_blob": "10a4704a0e13c717ec196020c0b4268b66fb7b7b1d6dacd80a6fa452dfb0c74b",
+    "definition_blob": "711b915974205afca3ebd150f2630ecfba098945c51a5753152deaa7db2083e9",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "0f583f8e8b0eedc90e62eaeb0656f6cd366dd103",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "succeeded",
+        "remote": "origin",
+        "branch": "main"
+      }
+    }
+  },
+  "web_url": "http://127.0.0.1:32276/runs/01KSB6X4YBFK3TZ7TA1GXGEFZR",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-23T20:02:27.965532Z",
+  "last_event_at": "2026-05-23T20:02:44.583674Z",
+  "pending_control": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "sandbox": {
+    "provider": "daytona",
+    "snapshot": "fabro-v11",
+    "runtime": {
+      "id": "fabro-01KSB6X4YBFK3TZ7TA1GXGEFZR",
+      "working_directory": "/home/daytona/workspace/fabro",
+      "repo_cloned": true,
+      "clone_origin_url": "https://github.com/fabro-sh/fabro",
+      "clone_branch": "main",
+      "workspace_root": "/home/daytona/workspace",
+      "repos_root": "/home/daytona/repos",
+      "primary_repo_path": "/home/daytona/repos/fabro-sh/fabro",
+      "primary_repo_link": "/home/daytona/workspace/fabro"
+    }
+  },
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
