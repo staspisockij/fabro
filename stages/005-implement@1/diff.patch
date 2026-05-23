@@ -1,0 +1,630 @@
+diff --git a/lib/crates/fabro-agent/src/compaction.rs b/lib/crates/fabro-agent/src/compaction.rs
+index 01c756dc5..7c2434fa7 100644
+--- a/lib/crates/fabro-agent/src/compaction.rs
++++ b/lib/crates/fabro-agent/src/compaction.rs
+@@ -11,6 +11,29 @@ use crate::file_tracker::FileTracker;
+ use crate::history::History;
+ use crate::types::{AgentEvent, Message};
+ 
++const APPROX_CHARS_PER_TOKEN: usize = 4;
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum ContextEstimateMethod {
++    ApiUsagePlusLocalDelta,
++    LocalEstimate,
++}
++
++impl ContextEstimateMethod {
++    const fn as_str(self) -> &'static str {
++        match self {
++            Self::ApiUsagePlusLocalDelta => "api_usage_plus_local_delta",
++            Self::LocalEstimate => "local_estimate",
++        }
++    }
++}
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++struct ContextEstimate {
++    tokens: usize,
++    method: ContextEstimateMethod,
++}
++
+ /// Check whether the context window usage exceeds the configured threshold.
+ /// Emits a `Warning` event with kind `"context_window"` when over the
+ /// threshold. Returns `true` if the threshold is exceeded.
+@@ -22,21 +45,21 @@ pub fn check_context_usage(
+     emitter: &Emitter,
+     session_id: &str,
+ ) -> bool {
+-    let estimated_tokens = estimate_token_count(system_prompt, history);
++    let estimate = estimate_active_context_usage(system_prompt, history);
++    let estimated_tokens = estimate.tokens;
+     let context_window = provider_profile.context_window_size();
+     let threshold = context_window * threshold_percent / 100;
+ 
+     if estimated_tokens > threshold {
++        let usage_percent = estimated_tokens.saturating_mul(100) / context_window;
+         emitter.emit(session_id.to_owned(), AgentEvent::Warning {
+             kind:    "context_window".into(),
+-            message: format!(
+-                "Context window usage: {}%",
+-                estimated_tokens * 100 / context_window
+-            ),
++            message: format!("Context window usage: {usage_percent}%"),
+             details: serde_json::json!({
+                 "estimated_tokens": estimated_tokens,
+                 "context_window_size": context_window,
+-                "usage_percent": estimated_tokens * 100 / context_window,
++                "usage_percent": usage_percent,
++                "estimate_method": estimate.method.as_str(),
+             }),
+         });
+         true
+@@ -61,19 +84,21 @@ pub async fn compact_context(
+     emitter: &Emitter,
+     session_id: &str,
+ ) -> Result<(), Error> {
+-    let estimated_tokens = estimate_token_count(system_prompt, history);
+-    let context_window = provider_profile.context_window_size();
+     let original_turn_count = history.turns().len();
+ 
++    // Determine turns to summarize. If there are not enough turns to compact,
++    // do not emit a started event without a matching completion.
++    if original_turn_count <= preserve_count {
++        return Ok(());
++    }
++
++    let estimate = estimate_active_context_usage(system_prompt, history);
++    let context_window = provider_profile.context_window_size();
+     emitter.emit(session_id.to_owned(), AgentEvent::CompactionStarted {
+-        estimated_tokens,
++        estimated_tokens:    estimate.tokens,
+         context_window_size: context_window,
+     });
+ 
+-    // Determine turns to summarize
+-    if original_turn_count <= preserve_count {
+-        return Ok(());
+-    }
+     let turns_to_summarize = &history.turns()[..original_turn_count - preserve_count];
+     let rendered = render_turns_for_summary(turns_to_summarize);
+ 
+@@ -156,37 +181,63 @@ Build on their progress — do not repeat completed steps.\n\n{summary_text}"
+ /// Estimate the total token count of the system prompt and conversation
+ /// history. Uses a rough heuristic of ~4 characters per token.
+ pub fn estimate_token_count(system_prompt: &str, history: &History) -> usize {
+-    let mut total_chars = system_prompt.len();
++    estimate_local_token_count(system_prompt, history.turns())
++}
+ 
+-    for turn in history.turns() {
+-        match turn {
+-            Message::User { content, .. } => total_chars += content.len(),
+-            Message::Assistant {
+-                content,
+-                tool_calls,
+-                ..
+-            } => {
+-                total_chars += content.len();
+-                if let Some(r) = turn.reasoning_text() {
+-                    total_chars += r.len();
+-                }
+-                for tc in tool_calls {
+-                    total_chars += tc.name.len();
+-                    total_chars += tc.arguments.to_string().len();
+-                }
+-            }
+-            Message::ToolResults { results, .. } => {
+-                for r in results {
+-                    total_chars += r.content.to_string().len();
+-                }
+-            }
+-            Message::System { content, .. } | Message::Steering { content, .. } => {
+-                total_chars += content.len();
++fn estimate_active_context_usage(system_prompt: &str, history: &History) -> ContextEstimate {
++    let turns = history.turns();
++    if let Some((baseline_index, baseline_tokens)) = latest_assistant_usage_baseline(turns) {
++        let local_delta = estimate_local_token_count("", &turns[baseline_index + 1..]);
++        return ContextEstimate {
++            tokens: baseline_tokens.saturating_add(local_delta),
++            method: ContextEstimateMethod::ApiUsagePlusLocalDelta,
++        };
++    }
++
++    ContextEstimate {
++        tokens: estimate_local_token_count(system_prompt, turns),
++        method: ContextEstimateMethod::LocalEstimate,
++    }
++}
++
++fn latest_assistant_usage_baseline(turns: &[Message]) -> Option<(usize, usize)> {
++    turns.iter().enumerate().rev().find_map(|(index, turn)| {
++        if let Message::Assistant { usage, .. } = turn {
++            let total_tokens = usage.total_tokens();
++            if total_tokens > 0 {
++                return Some((index, usize::try_from(total_tokens).unwrap_or(usize::MAX)));
+             }
+         }
+-    }
++        None
++    })
++}
++
++fn estimate_local_token_count(system_prompt: &str, turns: &[Message]) -> usize {
++    let turn_chars: usize = turns.iter().map(estimate_turn_chars).sum();
++    (system_prompt.len() + turn_chars) / APPROX_CHARS_PER_TOKEN
++}
+ 
+-    total_chars / 4 // rough estimate: ~4 chars per token
++fn estimate_turn_chars(turn: &Message) -> usize {
++    match turn {
++        Message::User { content, .. }
++        | Message::System { content, .. }
++        | Message::Steering { content, .. } => content.len(),
++        Message::Assistant {
++            content,
++            tool_calls,
++            ..
++        } => {
++            let reasoning_chars = turn.reasoning_text().map_or(0, str::len);
++            let tool_call_chars: usize = tool_calls
++                .iter()
++                .map(|tc| tc.name.len() + tc.arguments.to_string().len())
++                .sum();
++            content.len() + reasoning_chars + tool_call_chars
++        }
++        Message::ToolResults { results, .. } => {
++            results.iter().map(|r| r.content.to_string().len()).sum()
++        }
++    }
+ }
+ 
+ /// Render conversation turns into a human-readable summary format for the
+@@ -323,6 +374,149 @@ mod tests {
+         assert_eq!(estimate_token_count("test", &history), 3);
+     }
+ 
++    #[test]
++    fn active_context_estimate_without_assistant_usage_matches_local_history_estimate() {
++        let mut history = History::default();
++        history.push(Message::User {
++            content:   "Hello world".into(),
++            timestamp: SystemTime::now(),
++        });
++        history.push(Message::Assistant {
++            content:        "No usage available".into(),
++            tool_calls:     vec![ToolCall::new(
++                "call_1",
++                "read_file",
++                serde_json::json!({"path": "foo.rs"}),
++            )],
++            provider_parts: vec![],
++            usage:          Box::new(TokenCounts::default()),
++            response_id:    "resp_1".into(),
++            timestamp:      SystemTime::now(),
++        });
++        history.push(Message::ToolResults {
++            results:   vec![ToolResult::success("call_1", serde_json::json!(1234))],
++            timestamp: SystemTime::now(),
++        });
++
++        let estimate = estimate_active_context_usage("test", &history);
++
++        assert_eq!(estimate.tokens, estimate_token_count("test", &history));
++        assert_eq!(estimate.method, ContextEstimateMethod::LocalEstimate);
++    }
++
++    #[test]
++    fn active_context_estimate_uses_latest_assistant_usage_plus_later_turns() {
++        let mut history = History::default();
++        history.push(Message::User {
++            content:   "ignored before baseline".repeat(100),
++            timestamp: SystemTime::now(),
++        });
++        history.push(Message::Assistant {
++            content:        "baseline response".into(),
++            tool_calls:     vec![],
++            provider_parts: vec![],
++            usage:          Box::new(TokenCounts {
++                input_tokens: 50,
++                ..TokenCounts::default()
++            }),
++            response_id:    "resp_1".into(),
++            timestamp:      SystemTime::now(),
++        });
++        history.push(Message::ToolResults {
++            // JSON number renders as 4 chars => 1 local token.
++            results:   vec![ToolResult::success("call_1", serde_json::json!(1234))],
++            timestamp: SystemTime::now(),
++        });
++        history.push(Message::User {
++            // 16 chars => 4 local tokens.
++            content:   "u".repeat(16),
++            timestamp: SystemTime::now(),
++        });
++        history.push(Message::Steering {
++            // 8 chars => 2 local tokens.
++            content:   "s".repeat(8),
++            timestamp: SystemTime::now(),
++        });
++
++        let estimate = estimate_active_context_usage("ignored system prompt", &history);
++
++        assert_eq!(estimate.tokens, 57);
++        assert_eq!(
++            estimate.method,
++            ContextEstimateMethod::ApiUsagePlusLocalDelta
++        );
++    }
++
++    #[test]
++    fn active_context_estimate_uses_total_tokens_including_cache_and_reasoning() {
++        let mut history = History::default();
++        history.push(Message::Assistant {
++            content:        "short".into(),
++            tool_calls:     vec![],
++            provider_parts: vec![],
++            usage:          Box::new(TokenCounts {
++                input_tokens:       10,
++                output_tokens:      20,
++                reasoning_tokens:   30,
++                cache_read_tokens:  40,
++                cache_write_tokens: 50,
++            }),
++            response_id:    "resp_1".into(),
++            timestamp:      SystemTime::now(),
++        });
++
++        let estimate = estimate_active_context_usage("", &history);
++
++        assert_eq!(estimate.tokens, 150);
++        assert_eq!(
++            estimate.method,
++            ContextEstimateMethod::ApiUsagePlusLocalDelta
++        );
++    }
++
++    #[test]
++    fn active_context_estimate_ignores_earlier_usage_when_later_usage_exists() {
++        let mut history = History::default();
++        history.push(Message::Assistant {
++            content:        "older response".into(),
++            tool_calls:     vec![],
++            provider_parts: vec![],
++            usage:          Box::new(TokenCounts {
++                input_tokens: 1_000,
++                ..TokenCounts::default()
++            }),
++            response_id:    "resp_old".into(),
++            timestamp:      SystemTime::now(),
++        });
++        history.push(Message::User {
++            content:   "ignored before latest baseline".repeat(100),
++            timestamp: SystemTime::now(),
++        });
++        history.push(Message::Assistant {
++            content:        "latest response".into(),
++            tool_calls:     vec![],
++            provider_parts: vec![],
++            usage:          Box::new(TokenCounts {
++                input_tokens: 20,
++                ..TokenCounts::default()
++            }),
++            response_id:    "resp_new".into(),
++            timestamp:      SystemTime::now(),
++        });
++        history.push(Message::User {
++            content:   "u".repeat(8),
++            timestamp: SystemTime::now(),
++        });
++
++        let estimate = estimate_active_context_usage("", &history);
++
++        assert_eq!(estimate.tokens, 22);
++        assert_eq!(
++            estimate.method,
++            ContextEstimateMethod::ApiUsagePlusLocalDelta
++        );
++    }
++
+     #[test]
+     fn check_context_usage_below_threshold() {
+         let history = History::default();
+@@ -350,6 +544,7 @@ mod tests {
+ 
+         // Should have emitted a Warning
+         let event = rx.try_recv().unwrap();
+-        assert!(matches!(event.event, AgentEvent::Warning { .. }));
++        assert!(matches!(event.event, AgentEvent::Warning { details, .. }
++                if details["estimate_method"] == "local_estimate"));
+     }
+ }
+diff --git a/lib/crates/fabro-agent/src/history.rs b/lib/crates/fabro-agent/src/history.rs
+index 497900eae..33182ae73 100644
+--- a/lib/crates/fabro-agent/src/history.rs
++++ b/lib/crates/fabro-agent/src/history.rs
+@@ -1,4 +1,4 @@
+-use fabro_llm::types::{ContentPart, Message as LlmMessage, Role};
++use fabro_llm::types::{ContentPart, Message as LlmMessage, Role, TokenCounts};
+ use fabro_types::SessionMessage;
+ 
+ use crate::types::Message;
+@@ -36,7 +36,8 @@ impl History {
+         if self.turns.len() <= preserve_count {
+             return;
+         }
+-        let preserved = self.turns.split_off(self.turns.len() - preserve_count);
++        let mut preserved = self.turns.split_off(self.turns.len() - preserve_count);
++        invalidate_assistant_usage(&mut preserved);
+         let discarded = std::mem::take(&mut self.turns);
+         let extracted_user_messages =
+             extract_recent_user_messages(discarded, COMPACTION_USER_MESSAGE_TOKEN_BUDGET);
+@@ -119,6 +120,14 @@ impl History {
+     }
+ }
+ 
++fn invalidate_assistant_usage(turns: &mut [Message]) {
++    for turn in turns {
++        if let Message::Assistant { usage, .. } = turn {
++            **usage = TokenCounts::default();
++        }
++    }
++}
++
+ /// Maximum token budget for user messages extracted from discarded turns during
+ /// compaction.
+ const COMPACTION_USER_MESSAGE_TOKEN_BUDGET: usize = 20_000;
+@@ -599,6 +608,60 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn compact_preserves_assistant_data_but_resets_usage() {
++        let mut history = History::default();
++        history.push(Message::User {
++            content:   "old msg".into(),
++            timestamp: SystemTime::now(),
++        });
++        let tool_call = ToolCall::new("call_1", "search", serde_json::json!({"query": "fabro"}));
++        let thinking = ContentPart::Thinking(ThinkingData {
++            text:      "deep thought".into(),
++            signature: Some("sig_xyz".into()),
++            redacted:  false,
++        });
++        history.push(Message::Assistant {
++            content:        "answer".into(),
++            tool_calls:     vec![tool_call.clone()],
++            provider_parts: vec![thinking.clone()],
++            usage:          Box::new(TokenCounts {
++                input_tokens:       10,
++                output_tokens:      20,
++                reasoning_tokens:   30,
++                cache_read_tokens:  40,
++                cache_write_tokens: 50,
++            }),
++            response_id:    "resp_1".into(),
++            timestamp:      SystemTime::now(),
++        });
++
++        history.compact(1, "Summary".into());
++
++        let assistant_turn = history
++            .turns()
++            .iter()
++            .find(|turn| matches!(turn, Message::Assistant { .. }))
++            .expect("preserved assistant turn");
++        if let Message::Assistant {
++            content,
++            tool_calls,
++            provider_parts,
++            usage,
++            response_id,
++            ..
++        } = assistant_turn
++        {
++            assert_eq!(content, "answer");
++            assert_eq!(tool_calls, &[tool_call]);
++            assert_eq!(provider_parts, &[thinking]);
++            assert_eq!(response_id, "resp_1");
++            assert_eq!(**usage, TokenCounts::default());
++        } else {
++            panic!("expected Assistant turn");
++        }
++    }
++
+     #[test]
+     fn compact_strips_reasoning_from_all_preserved_assistant_turns() {
+         let mut history = History::default();
+diff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs
+index 2d0d0b4e8..de9c58093 100644
+--- a/lib/crates/fabro-agent/src/session.rs
++++ b/lib/crates/fabro-agent/src/session.rs
+@@ -1853,7 +1853,7 @@ mod tests {
+     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
+     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
+     use fabro_llm::types::{
+-        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolCall,
++        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, TokenCounts, ToolCall,
+         ToolDefinition,
+     };
+     use futures::stream;
+@@ -3653,13 +3653,25 @@ mod tests {
+         assert!(found_auth_error_event, "expected auth error event");
+     }
+ 
++    fn response_with_usage(mut response: Response, usage: TokenCounts) -> Response {
++        response.usage = usage;
++        response
++    }
++
++    fn response_with_total_usage(response: Response, total_tokens: i64) -> Response {
++        response_with_usage(response, TokenCounts {
++            input_tokens: total_tokens,
++            ..TokenCounts::default()
++        })
++    }
++
+     #[tokio::test]
+     async fn compaction_triggered_when_over_threshold() {
+         // Tiny context window to trigger compaction
+         // Responses: [0] conversation response (stream), [1] summarization (complete),
+         // [2] unused fallback
+         let responses = vec![
+-            text_response("OK"),
++            response_with_usage(text_response("OK"), TokenCounts::default()),
+             text_response("Here is the summary of the conversation so far."),
+             text_response("fallback"),
+         ];
+@@ -3704,6 +3716,90 @@ mod tests {
+         );
+     }
+ 
++    #[tokio::test]
++    async fn compaction_uses_assistant_usage_baseline_for_short_response() {
++        let responses = vec![
++            response_with_total_usage(text_response("OK"), 90),
++            text_response("Here is the summary of the conversation so far."),
++            text_response("fallback"),
++        ];
++
++        let provider = Arc::new(MockLlmProvider::new(responses));
++        let client = make_client(provider).await;
++        let registry = ToolRegistry::new();
++        let profile = Arc::new(TestProfile::with_context_window(registry, 100));
++        let env = Arc::new(MockSandbox::default());
++        let config = SessionOptions {
++            enable_context_compaction: true,
++            compaction_preserve_turns: 1,
++            ..Default::default()
++        };
++        let mut session = Session::new(client, profile, env, config, None);
++        let mut rx = session.subscribe();
++
++        session.process_input("hi").await.unwrap();
++
++        let mut started = None;
++        let mut found_completed = false;
++        while let Ok(event) = rx.try_recv() {
++            match event.event {
++                AgentEvent::CompactionStarted {
++                    estimated_tokens,
++                    context_window_size,
++                } => started = Some((estimated_tokens, context_window_size)),
++                AgentEvent::CompactionCompleted { .. } => found_completed = true,
++                _ => {}
++            }
++        }
++
++        assert_eq!(started, Some((90, 100)));
++        assert!(
++            found_completed,
++            "CompactionCompleted event should be emitted"
++        );
++    }
++
++    #[tokio::test]
++    async fn compaction_noop_does_not_emit_started() {
++        let large_input = "x".repeat(400);
++        let responses = vec![text_response("OK")];
++
++        let provider = Arc::new(MockLlmProvider::new(responses));
++        let client = make_client(provider).await;
++        let registry = ToolRegistry::new();
++        let profile = Arc::new(TestProfile::with_context_window(registry, 100));
++        let env = Arc::new(MockSandbox::default());
++        let config = SessionOptions {
++            enable_context_compaction: true,
++            compaction_preserve_turns: 10,
++            ..Default::default()
++        };
++        let mut session = Session::new(client, profile, env, config, None);
++        let mut rx = session.subscribe();
++
++        session.process_input(&large_input).await.unwrap();
++
++        let mut found_warning = false;
++        let mut found_compaction = false;
++        while let Ok(event) = rx.try_recv() {
++            match event.event {
++                AgentEvent::Warning { kind, .. } if kind == "context_window" => {
++                    found_warning = true;
++                }
++                AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. } => {
++                    found_compaction = true;
++                }
++                _ => {}
++            }
++        }
++
++        assert!(found_warning, "threshold should have been exceeded");
++        assert!(
++            !found_compaction,
++            "no-op compaction should not emit started or completed events"
++        );
++    }
++
+     #[tokio::test]
+     async fn compaction_not_triggered_when_disabled() {
+         let large_input = "x".repeat(400);
+@@ -3735,6 +3831,49 @@ mod tests {
+         assert!(!found_compaction, "No compaction events when disabled");
+     }
+ 
++    #[tokio::test]
++    async fn compaction_disabled_blocks_api_usage_baseline_compaction() {
++        let responses = vec![response_with_total_usage(text_response("OK"), 90)];
++
++        let provider = Arc::new(MockLlmProvider::new(responses));
++        let client = make_client(provider).await;
++        let registry = ToolRegistry::new();
++        let profile = Arc::new(TestProfile::with_context_window(registry, 100));
++        let env = Arc::new(MockSandbox::default());
++        let config = SessionOptions {
++            enable_context_compaction: false,
++            compaction_preserve_turns: 1,
++            ..Default::default()
++        };
++        let mut session = Session::new(client, profile, env, config, None);
++        let mut rx = session.subscribe();
++
++        session.process_input("hi").await.unwrap();
++
++        let mut found_api_usage_warning = false;
++        let mut found_compaction = false;
++        while let Ok(event) = rx.try_recv() {
++            match event.event {
++                AgentEvent::Warning { details, .. }
++                    if details["estimated_tokens"] == 90
++                        && details["estimate_method"] == "api_usage_plus_local_delta" =>
++                {
++                    found_api_usage_warning = true;
++                }
++                AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. } => {
++                    found_compaction = true;
++                }
++                _ => {}
++            }
++        }
++
++        assert!(
++            found_api_usage_warning,
++            "API usage baseline should still drive context warning"
++        );
++        assert!(!found_compaction, "compaction must remain disabled");
++    }
++
+     #[tokio::test]
+     async fn compaction_failure_is_non_fatal() {
+         // Response [0] = conversation response (stream), [1] will be used for
+@@ -3789,7 +3928,10 @@ mod tests {
+         }
+ 
+         let large_input = "x".repeat(400);
+-        let responses = vec![text_response("OK")];
++        let responses = vec![response_with_usage(
++            text_response("OK"),
++            TokenCounts::default(),
++        )];
+ 
+         let provider = Arc::new(StreamOnlyProvider {
+             responses,

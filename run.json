@@ -524,7 +524,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-23T15:20:09.659052Z",
-  "last_event_at": "2026-05-23T15:32:41.358054Z",
+  "last_event_at": "2026-05-23T15:43:53.270332Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -772,9 +772,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 253,
       "checkpoint": {
-        "timestamp": "2026-05-23T15:32:41.444884Z",
+        "timestamp": "2026-05-23T15:32:46.590640Z",
         "current_node": "implement",
         "completed_nodes": [
           "start",
@@ -785,31 +785,154 @@
         ],
         "node_retries": {},
         "context_values": {
-          "response.implement": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.total_tokens() > 0` as baseline.\n  - Adds local estimates only for turns after that assistant response.\n  - Falls back to existing whole-history `chars / 4` local estimate when no usable assistant usage exists.\n  - Adds `estimate_method` to context-window warning details.\n  - Uses the improved estimate for `CompactionStarted`.\n  - Prevents no-op compaction from emitting `CompactionStarted`.\n- Updated `lib/crates/fabro-agent/src/history.rs`\n  - `History::compact()` now resets preserved assistant `usage` to `TokenCounts::default()`.\n  - Assistant content, tool calls, response IDs, and non-stripped provider parts remain preserved.\n- Added/updated tests in:\n  - `compaction.rs`\n  - `history.rs`\n  - `session.rs`\n- Confirmed no `llm_client.count_input_tokens()` / provider token-count API calls were added.\n\nVerification:\n- Red phase confirmed initially with failing new compaction tests.\n- Passed:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - `cargo nextest run -p fabro-agent session`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`",
-          "last_stage": "implement",
-          "thread.preflight_compile.current_node": "preflight_lint",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
           "internal.work_dir": "/home/daytona/workspace/fabro",
-          "thread.toolchain.current_node": "preflight_compile",
-          "internal.retry_count.implement": 0,
+          "failure_class": "",
+          "response.implement": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.total_tokens() > 0` as baseline.\n  - Adds local estimates only for turns after that assistant response.\n  - Falls back to existing whole-history `chars / 4` local estimate when no usable assistant usage exists.\n  - Adds `estimate_method` to context-window warning details.\n  - Uses the improved estimate for `CompactionStarted`.\n  - Prevents no-op compaction from emitting `CompactionStarted`.\n- Updated `lib/crates/fabro-agent/src/history.rs`\n  - `History::compact()` now resets preserved assistant `usage` to `TokenCounts::default()`.\n  - Assistant content, tool calls, response IDs, and non-stripped provider parts remain preserved.\n- Added/updated tests in:\n  - `compaction.rs`\n  - `history.rs`\n  - `session.rs`\n- Confirmed no `llm_client.count_input_tokens()` / provider token-count API calls were added.\n\nVerification:\n- Red phase confirmed initially with failing new compaction tests.\n- Passed:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - `cargo nextest run -p fabro-agent session`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`",
           "current_node": "implement",
-          "graph.rankdir": "LR",
-          "internal.run_id": "01KSAPQQSVK4FY3CWHYVZYD7T6",
+          "thread.preflight_compile.current_node": "preflight_lint",
           "outcome": "succeeded",
           "internal.thread_id": "preflight_lint",
+          "failure_signature": "",
+          "internal.retry_count.implement": 0,
+          "internal.retry_count.preflight_lint": 0,
+          "internal.fidelity": "compact",
+          "internal.retry_count.preflight_compile": 0,
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KSAPQQSVK4FY3CWHYVZYD7T6",
+          "thread.preflight_lint.current_node": "implement",
+          "thread.toolchain.current_node": "preflight_compile",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "last_stage": "implement",
           "thread.start.current_node": "toolchain",
-          "internal.retry_count.toolchain": 0,
-          "internal.node_visit_count": 1,
           "last_response": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.tota",
+          "graph.rankdir": "LR",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.toolchain": 0,
+          "graph.goal": "# Agent Compaction API Usage Baseline Plan\n\nDate: 2026-05-23\n\n## Summary\n\nChange Fabro's agent compaction trigger from a whole-history `chars / 4`\nestimate to a Claude Code-style hot-path estimate: use the latest real\nassistant response's stored `usage.total_tokens()` as the baseline, then add\nlocal estimates for turns appended after that response. This avoids token-count\nprovider API calls while making compaction sensitive to actual\nprovider-reported context usage, including cache and reasoning tokens.\n\nNo provider token-count API calls should be added in this change.\n\n## Key Changes\n\n- Replace the current compaction estimate in `fabro-agent` with a new\n  active-context estimator.\n- Find the newest assistant turn whose `usage.total_tokens() > 0`.\n- Use that `usage.total_tokens()` as the baseline.\n- Add local estimates only for turns after that assistant turn.\n- If no usable assistant usage exists, fall back to the existing local\n  whole-history estimate.\n- Reuse a shared per-turn local estimate helper so fallback and post-baseline\n  delta counting stay consistent.\n- Keep the estimator local and in-process. Do not call\n  `llm_client.count_input_tokens()` from `compact_if_needed()`.\n\n## Implementation Details\n\n- Update `lib/crates/fabro-agent/src/compaction.rs`:\n  - Add an estimator that returns both token count and method, for example\n    `ApiUsagePlusLocalDelta` or `LocalEstimate`.\n  - Make `check_context_usage()` use the new estimator and include the method\n    in warning `details`.\n  - Make `compact_context()` report the same improved estimate in\n    `CompactionStarted`.\n  - Move `CompactionStarted` emission after the\n    `original_turn_count <= preserve_count` no-op check, so a no-op compact\n    cannot emit started without completed.\n- Update `lib/crates/fabro-agent/src/history.rs`:\n  - In `History::compact()`, invalidate preserved assistant usage by replacing\n    preserved assistant `usage` with `TokenCounts::default()`.\n  - Keep provider parts, response IDs, text, and tool calls unchanged.\n  - Rationale: preserved assistant usage reflects the pre-compaction context and\n    must not become the next baseline. Billing remains available from emitted\n    run events, so mutable runtime history should prefer compaction correctness.\n- Leave public run event names and schemas unchanged:\n  - `agent.compaction.started`\n  - `agent.compaction.completed`\n  - Existing warning event remains a warning with richer `details`.\n\n## Test Plan\n\n- Add unit coverage in `lib/crates/fabro-agent/src/compaction.rs`:\n  - No assistant usage: estimator matches current local whole-history behavior.\n  - Latest assistant usage present: estimator uses `usage.total_tokens()` plus\n    only later tool/user/steering turns.\n  - Usage fields include cache and reasoning through `TokenCounts::total_tokens()`.\n  - Earlier assistant usage is ignored when a later assistant usage exists.\n- Add unit coverage in `lib/crates/fabro-agent/src/history.rs`:\n  - `History::compact()` preserves assistant content, tool calls, and provider\n    parts, but resets preserved assistant usage to default.\n  - Existing OpenAI opaque stripping and Anthropic thinking preservation tests\n    still pass.\n- Add session coverage in `lib/crates/fabro-agent/src/session.rs`:\n  - A short assistant response with high `usage.total_tokens()` triggers\n    compaction even when text length is small.\n  - A compact no-op due to `turns.len() <= preserve_count` does not emit\n    `CompactionStarted`.\n  - Compaction disabled still prevents compaction even if the API usage\n    baseline exceeds threshold.\n- Run targeted verification:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - If those pass, run `cargo nextest run -p fabro-agent`.\n\n## Assumptions\n\n- Runtime/session `Message::Assistant.usage` is safe to invalidate after\n  compaction because authoritative billing comes from emitted workflow/run\n  events, not preserved mutable agent history.\n- A zero-token `TokenCounts::default()` should be treated as no usable API\n  baseline.\n- Provider token-count APIs remain available for future near-threshold\n  confirmation, but are intentionally out of scope for this change.\n"
+        },
+        "node_outcomes": {
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.tota",
+              "last_stage": "implement",
+              "response.implement": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.total_tokens() > 0` as baseline.\n  - Adds local estimates only for turns after that assistant response.\n  - Falls back to existing whole-history `chars / 4` local estimate when no usable assistant usage exists.\n  - Adds `estimate_method` to context-window warning details.\n  - Uses the improved estimate for `CompactionStarted`.\n  - Prevents no-op compaction from emitting `CompactionStarted`.\n- Updated `lib/crates/fabro-agent/src/history.rs`\n  - `History::compact()` now resets preserved assistant `usage` to `TokenCounts::default()`.\n  - Assistant content, tool calls, response IDs, and non-stripped provider parts remain preserved.\n- Added/updated tests in:\n  - `compaction.rs`\n  - `history.rs`\n  - `session.rs`\n- Confirmed no `llm_client.count_input_tokens()` / provider token-count API calls were added.\n\nVerification:\n- Red phase confirmed initially with failing new compaction tests.\n- Passed:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - `cargo nextest run -p fabro-agent session`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`"
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 168644,
+                    "output_tokens": 9772,
+                    "reasoning_tokens": 11720,
+                    "cache_read_tokens": 3959296,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 3467628
+            }
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "simplify_opus",
+        "git_commit_sha": "f606520812886a86025654bf4b9b7ef78c316b88",
+        "node_visits": {
+          "implement": 1,
+          "toolchain": 1,
+          "start": 1,
+          "preflight_compile": 1,
+          "preflight_lint": 1
+        }
+      },
+      "diff": {
+        "patch": "diff --git a/lib/crates/fabro-agent/src/compaction.rs b/lib/crates/fabro-agent/src/compaction.rs\nindex 01c756dc5..7c2434fa7 100644\n--- a/lib/crates/fabro-agent/src/compaction.rs\n+++ b/lib/crates/fabro-agent/src/compaction.rs\n@@ -11,6 +11,29 @@ use crate::file_tracker::FileTracker;\n use crate::history::History;\n use crate::types::{AgentEvent, Message};\n \n+const APPROX_CHARS_PER_TOKEN: usize = 4;\n+\n+#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n+enum ContextEstimateMethod {\n+    ApiUsagePlusLocalDelta,\n+    LocalEstimate,\n+}\n+\n+impl ContextEstimateMethod {\n+    const fn as_str(self) -> &'static str {\n+        match self {\n+            Self::ApiUsagePlusLocalDelta => \"api_usage_plus_local_delta\",\n+            Self::LocalEstimate => \"local_estimate\",\n+        }\n+    }\n+}\n+\n+#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n+struct ContextEstimate {\n+    tokens: usize,\n+    method: ContextEstimateMethod,\n+}\n+\n /// Check whether the context window usage exceeds the configured threshold.\n /// Emits a `Warning` event with kind `\"context_window\"` when over the\n /// threshold. Returns `true` if the threshold is exceeded.\n@@ -22,21 +45,21 @@ pub fn check_context_usage(\n     emitter: &Emitter,\n     session_id: &str,\n ) -> bool {\n-    let estimated_tokens = estimate_token_count(system_prompt, history);\n+    let estimate = estimate_active_context_usage(system_prompt, history);\n+    let estimated_tokens = estimate.tokens;\n     let context_window = provider_profile.context_window_size();\n     let threshold = context_window * threshold_percent / 100;\n \n     if estimated_tokens > threshold {\n+        let usage_percent = estimated_tokens.saturating_mul(100) / context_window;\n         emitter.emit(session_id.to_owned(), AgentEvent::Warning {\n             kind:    \"context_window\".into(),\n-            message: format!(\n-                \"Context window usage: {}%\",\n-                estimated_tokens * 100 / context_window\n-            ),\n+            message: format!(\"Context window usage: {usage_percent}%\"),\n             details: serde_json::json!({\n                 \"estimated_tokens\": estimated_tokens,\n                 \"context_window_size\": context_window,\n-                \"usage_percent\": estimated_tokens * 100 / context_window,\n+                \"usage_percent\": usage_percent,\n+                \"estimate_method\": estimate.method.as_str(),\n             }),\n         });\n         true\n@@ -61,19 +84,21 @@ pub async fn compact_context(\n     emitter: &Emitter,\n     session_id: &str,\n ) -> Result<(), Error> {\n-    let estimated_tokens = estimate_token_count(system_prompt, history);\n-    let context_window = provider_profile.context_window_size();\n     let original_turn_count = history.turns().len();\n \n+    // Determine turns to summarize. If there are not enough turns to compact,\n+    // do not emit a started event without a matching completion.\n+    if original_turn_count <= preserve_count {\n+        return Ok(());\n+    }\n+\n+    let estimate = estimate_active_context_usage(system_prompt, history);\n+    let context_window = provider_profile.context_window_size();\n     emitter.emit(session_id.to_owned(), AgentEvent::CompactionStarted {\n-        estimated_tokens,\n+        estimated_tokens:    estimate.tokens,\n         context_window_size: context_window,\n     });\n \n-    // Determine turns to summarize\n-    if original_turn_count <= preserve_count {\n-        return Ok(());\n-    }\n     let turns_to_summarize = &history.turns()[..original_turn_count - preserve_count];\n     let rendered = render_turns_for_summary(turns_to_summarize);\n \n@@ -156,37 +181,63 @@ Build on their progress — do not repeat completed steps.\\n\\n{summary_text}\"\n /// Estimate the total token count of the system prompt and conversation\n /// history. Uses a rough heuristic of ~4 characters per token.\n pub fn estimate_token_count(system_prompt: &str, history: &History) -> usize {\n-    let mut total_chars = system_prompt.len();\n+    estimate_local_token_count(system_prompt, history.turns())\n+}\n \n-    for turn in history.turns() {\n-        match turn {\n-            Message::User { content, .. } => total_chars += content.len(),\n-            Message::Assistant {\n-                content,\n-                tool_calls,\n-                ..\n-            } => {\n-                total_chars += content.len();\n-                if let Some(r) = turn.reasoning_text() {\n-                    total_chars += r.len();\n-                }\n-                for tc in tool_calls {\n-                    total_chars += tc.name.len();\n-                    total_chars += tc.arguments.to_string().len();\n-                }\n-            }\n-            Message::ToolResults { results, .. } => {\n-                for r in results {\n-                    total_chars += r.content.to_string().len();\n-                }\n-            }\n-            Message::System { content, .. } | Message::Steering { content, .. } => {\n-                total_chars += content.len();\n+fn estimate_active_context_usage(system_prompt: &str, history: &History) -> ContextEstimate {\n+    let turns = history.turns();\n+    if let Some((baseline_index, baseline_tokens)) = latest_assistant_usage_baseline(turns) {\n+        let local_delta = estimate_local_token_count(\"\", &turns[baseline_index + 1..]);\n+        return ContextEstimate {\n+            tokens: baseline_tokens.saturating_add(local_delta),\n+            method: ContextEstimateMethod::ApiUsagePlusLocalDelta,\n+        };\n+    }\n+\n+    ContextEstimate {\n+        tokens: estimate_local_token_count(system_prompt, turns),\n+        method: ContextEstimateMethod::LocalEstimate,\n+    }\n+}\n+\n+fn latest_assistant_usage_baseline(turns: &[Message]) -> Option<(usize, usize)> {\n+    turns.iter().enumerate().rev().find_map(|(index, turn)| {\n+        if let Message::Assistant { usage, .. } = turn {\n+            let total_tokens = usage.total_tokens();\n+            if total_tokens > 0 {\n+                return Some((index, usize::try_from(total_tokens).unwrap_or(usize::MAX)));\n             }\n         }\n-    }\n+        None\n+    })\n+}\n+\n+fn estimate_local_token_count(system_prompt: &str, turns: &[Message]) -> usize {\n+    let turn_chars: usize = turns.iter().map(estimate_turn_chars).sum();\n+    (system_prompt.len() + turn_chars) / APPROX_CHARS_PER_TOKEN\n+}\n \n-    total_chars / 4 // rough estimate: ~4 chars per token\n+fn estimate_turn_chars(turn: &Message) -> usize {\n+    match turn {\n+        Message::User { content, .. }\n+        | Message::System { content, .. }\n+        | Message::Steering { content, .. } => content.len(),\n+        Message::Assistant {\n+            content,\n+            tool_calls,\n+            ..\n+        } => {\n+            let reasoning_chars = turn.reasoning_text().map_or(0, str::len);\n+            let tool_call_chars: usize = tool_calls\n+                .iter()\n+                .map(|tc| tc.name.len() + tc.arguments.to_string().len())\n+                .sum();\n+            content.len() + reasoning_chars + tool_call_chars\n+        }\n+        Message::ToolResults { results, .. } => {\n+            results.iter().map(|r| r.content.to_string().len()).sum()\n+        }\n+    }\n }\n \n /// Render conversation turns into a human-readable summary format for the\n@@ -323,6 +374,149 @@ mod tests {\n         assert_eq!(estimate_token_count(\"test\", &history), 3);\n     }\n \n+    #[test]\n+    fn active_context_estimate_without_assistant_usage_matches_local_history_estimate() {\n+        let mut history = History::default();\n+        history.push(Message::User {\n+            content:   \"Hello world\".into(),\n+            timestamp: SystemTime::now(),\n+        });\n+        history.push(Message::Assistant {\n+            content:        \"No usage available\".into(),\n+            tool_calls:     vec![ToolCall::new(\n+                \"call_1\",\n+                \"read_file\",\n+                serde_json::json!({\"path\": \"foo.rs\"}),\n+            )],\n+            provider_parts: vec![],\n+            usage:          Box::new(TokenCounts::default()),\n+            response_id:    \"resp_1\".into(),\n+            timestamp:      SystemTime::now(),\n+        });\n+        history.push(Message::ToolResults {\n+            results:   vec![ToolResult::success(\"call_1\", serde_json::json!(1234))],\n+            timestamp: SystemTime::now(),\n+        });\n+\n+        let estimate = estimate_active_context_usage(\"test\", &history);\n+\n+        assert_eq!(estimate.tokens, estimate_token_count(\"test\", &history));\n+        assert_eq!(estimate.method, ContextEstimateMethod::LocalEstimate);\n+    }\n+\n+    #[test]\n+    fn active_context_estimate_uses_latest_assistant_usage_plus_later_turns() {\n+        let mut history = History::default();\n+        history.push(Message::User {\n+            content:   \"ignored before baseline\".repeat(100),\n+            timestamp: SystemTime::now(),\n+        });\n+        history.push(Message::Assistant {\n+            content:        \"baseline response\".into(),\n+            tool_calls:     vec![],\n+            provider_parts: vec![],\n+            usage:          Box::new(TokenCounts {\n+                input_tokens: 50,\n+                ..TokenCounts::default()\n+            }),\n+            response_id:    \"resp_1\".into(),\n+            timestamp:      SystemTime::now(),\n+        });\n+        history.push(Message::ToolResults {\n+            // JSON number renders as 4 chars => 1 local token.\n+            results:   vec![ToolResult::success(\"call_1\", serde_json::json!(1234))],\n+            timestamp: SystemTime::now(),\n+        });\n+        history.push(Message::User {\n+            // 16 chars => 4 local tokens.\n+            content:   \"u\".repeat(16),\n+            timestamp: SystemTime::now(),\n+        });\n+        history.push(Message::Steering {\n+            // 8 chars => 2 local tokens.\n+            content:   \"s\".repeat(8),\n+            timestamp: SystemTime::now(),\n+        });\n+\n+        let estimate = estimate_active_context_usage(\"ignored system prompt\", &history);\n+\n+        assert_eq!(estimate.tokens, 57);\n+        assert_eq!(\n+            estimate.method,\n+            ContextEstimateMethod::ApiUsagePlusLocalDelta\n+        );\n+    }\n+\n+    #[test]\n+    fn active_context_estimate_uses_total_tokens_including_cache_and_reasoning() {\n+        let mut history = History::default();\n+        history.push(Message::Assistant {\n+            content:        \"short\".into(),\n+            tool_calls:     vec![],\n+            provider_parts: vec![],\n+            usage:          Box::new(TokenCounts {\n+                input_tokens:       10,\n+                output_tokens:      20,\n+                reasoning_tokens:   30,\n+                cache_read_tokens:  40,\n+                cache_write_tokens: 50,\n+            }),\n+            response_id:    \"resp_1\".into(),\n+            timestamp:      SystemTime::now(),\n+        });\n+\n+        let estimate = estimate_active_context_usage(\"\", &history);\n+\n+        assert_eq!(estimate.tokens, 150);\n+        assert_eq!(\n+            estimate.method,\n+            ContextEstimateMethod::ApiUsagePlusLocalDelta\n+        );\n+    }\n+\n+    #[test]\n+    fn active_context_estimate_ignores_earlier_usage_when_later_usage_exists() {\n+        let mut history = History::default();\n+        history.push(Message::Assistant {\n+            content:        \"older response\".into(),\n+            tool_calls:     vec![],\n+            provider_parts: vec![],\n+            usage:          Box::new(TokenCounts {\n+                input_tokens: 1_000,\n+                ..TokenCounts::default()\n+            }),\n+            response_id:    \"resp_old\".into(),\n+            timestamp:      SystemTime::now(),\n+        });\n+        history.push(Message::User {\n+            content:   \"ignored before latest baseline\".repeat(100),\n+            timestamp: SystemTime::now(),\n+        });\n+        history.push(Message::Assistant {\n+            content:        \"latest response\".into(),\n+            tool_calls:     vec![],\n+            provider_parts: vec![],\n+            usage:          Box::new(TokenCounts {\n+                input_tokens: 20,\n+                ..TokenCounts::default()\n+            }),\n+            response_id:    \"resp_new\".into(),\n+            timestamp:      SystemTime::now(),\n+        });\n+        history.push(Message::User {\n+            content:   \"u\".repeat(8),\n+            timestamp: SystemTime::now(),\n+        });\n+\n+        let estimate = estimate_active_context_usage(\"\", &history);\n+\n+        assert_eq!(estimate.tokens, 22);\n+        assert_eq!(\n+            estimate.method,\n+            ContextEstimateMethod::ApiUsagePlusLocalDelta\n+        );\n+    }\n+\n     #[test]\n     fn check_context_usage_below_threshold() {\n         let history = History::default();\n@@ -350,6 +544,7 @@ mod tests {\n \n         // Should have emitted a Warning\n         let event = rx.try_recv().unwrap();\n-        assert!(matches!(event.event, AgentEvent::Warning { .. }));\n+        assert!(matches!(event.event, AgentEvent::Warning { details, .. }\n+                if details[\"estimate_method\"] == \"local_estimate\"));\n     }\n }\ndiff --git a/lib/crates/fabro-agent/src/history.rs b/lib/crates/fabro-agent/src/history.rs\nindex 497900eae..33182ae73 100644\n--- a/lib/crates/fabro-agent/src/history.rs\n+++ b/lib/crates/fabro-agent/src/history.rs\n@@ -1,4 +1,4 @@\n-use fabro_llm::types::{ContentPart, Message as LlmMessage, Role};\n+use fabro_llm::types::{ContentPart, Message as LlmMessage, Role, TokenCounts};\n use fabro_types::SessionMessage;\n \n use crate::types::Message;\n@@ -36,7 +36,8 @@ impl History {\n         if self.turns.len() <= preserve_count {\n             return;\n         }\n-        let preserved = self.turns.split_off(self.turns.len() - preserve_count);\n+        let mut preserved = self.turns.split_off(self.turns.len() - preserve_count);\n+        invalidate_assistant_usage(&mut preserved);\n         let discarded = std::mem::take(&mut self.turns);\n         let extracted_user_messages =\n             extract_recent_user_messages(discarded, COMPACTION_USER_MESSAGE_TOKEN_BUDGET);\n@@ -119,6 +120,14 @@ impl History {\n     }\n }\n \n+fn invalidate_assistant_usage(turns: &mut [Message]) {\n+    for turn in turns {\n+        if let Message::Assistant { usage, .. } = turn {\n+            **usage = TokenCounts::default();\n+        }\n+    }\n+}\n+\n /// Maximum token budget for user messages extracted from discarded turns during\n /// compaction.\n const COMPACTION_USER_MESSAGE_TOKEN_BUDGET: usize = 20_000;\n@@ -599,6 +608,60 @@ mod tests {\n         }\n     }\n \n+    #[test]\n+    fn compact_preserves_assistant_data_but_resets_usage() {\n+        let mut history = History::default();\n+        history.push(Message::User {\n+            content:   \"old msg\".into(),\n+            timestamp: SystemTime::now(),\n+        });\n+        let tool_call = ToolCall::new(\"call_1\", \"search\", serde_json::json!({\"query\": \"fabro\"}));\n+        let thinking = ContentPart::Thinking(ThinkingData {\n+            text:      \"deep thought\".into(),\n+            signature: Some(\"sig_xyz\".into()),\n+            redacted:  false,\n+        });\n+        history.push(Message::Assistant {\n+            content:        \"answer\".into(),\n+            tool_calls:     vec![tool_call.clone()],\n+            provider_parts: vec![thinking.clone()],\n+            usage:          Box::new(TokenCounts {\n+                input_tokens:       10,\n+                output_tokens:      20,\n+                reasoning_tokens:   30,\n+                cache_read_tokens:  40,\n+                cache_write_tokens: 50,\n+            }),\n+            response_id:    \"resp_1\".into(),\n+            timestamp:      SystemTime::now(),\n+        });\n+\n+        history.compact(1, \"Summary\".into());\n+\n+        let assistant_turn = history\n+            .turns()\n+            .iter()\n+            .find(|turn| matches!(turn, Message::Assistant { .. }))\n+            .expect(\"preserved assistant turn\");\n+        if let Message::Assistant {\n+            content,\n+            tool_calls,\n+            provider_parts,\n+            usage,\n+            response_id,\n+            ..\n+        } = assistant_turn\n+        {\n+            assert_eq!(content, \"answer\");\n+            assert_eq!(tool_calls, &[tool_call]);\n+            assert_eq!(provider_parts, &[thinking]);\n+            assert_eq!(response_id, \"resp_1\");\n+            assert_eq!(**usage, TokenCounts::default());\n+        } else {\n+            panic!(\"expected Assistant turn\");\n+        }\n+    }\n+\n     #[test]\n     fn compact_strips_reasoning_from_all_preserved_assistant_turns() {\n         let mut history = History::default();\ndiff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs\nindex 2d0d0b4e8..de9c58093 100644\n--- a/lib/crates/fabro-agent/src/session.rs\n+++ b/lib/crates/fabro-agent/src/session.rs\n@@ -1853,7 +1853,7 @@ mod tests {\n     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};\n     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};\n     use fabro_llm::types::{\n-        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, ToolCall,\n+        ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, TokenCounts, ToolCall,\n         ToolDefinition,\n     };\n     use futures::stream;\n@@ -3653,13 +3653,25 @@ mod tests {\n         assert!(found_auth_error_event, \"expected auth error event\");\n     }\n \n+    fn response_with_usage(mut response: Response, usage: TokenCounts) -> Response {\n+        response.usage = usage;\n+        response\n+    }\n+\n+    fn response_with_total_usage(response: Response, total_tokens: i64) -> Response {\n+        response_with_usage(response, TokenCounts {\n+            input_tokens: total_tokens,\n+            ..TokenCounts::default()\n+        })\n+    }\n+\n     #[tokio::test]\n     async fn compaction_triggered_when_over_threshold() {\n         // Tiny context window to trigger compaction\n         // Responses: [0] conversation response (stream), [1] summarization (complete),\n         // [2] unused fallback\n         let responses = vec![\n-            text_response(\"OK\"),\n+            response_with_usage(text_response(\"OK\"), TokenCounts::default()),\n             text_response(\"Here is the summary of the conversation so far.\"),\n             text_response(\"fallback\"),\n         ];\n@@ -3704,6 +3716,90 @@ mod tests {\n         );\n     }\n \n+    #[tokio::test]\n+    async fn compaction_uses_assistant_usage_baseline_for_short_response() {\n+        let responses = vec![\n+            response_with_total_usage(text_response(\"OK\"), 90),\n+            text_response(\"Here is the summary of the conversation so far.\"),\n+            text_response(\"fallback\"),\n+        ];\n+\n+        let provider = Arc::new(MockLlmProvider::new(responses));\n+        let client = make_client(provider).await;\n+        let registry = ToolRegistry::new();\n+        let profile = Arc::new(TestProfile::with_context_window(registry, 100));\n+        let env = Arc::new(MockSandbox::default());\n+        let config = SessionOptions {\n+            enable_context_compaction: true,\n+            compaction_preserve_turns: 1,\n+            ..Default::default()\n+        };\n+        let mut session = Session::new(client, profile, env, config, None);\n+        let mut rx = session.subscribe();\n+\n+        session.process_input(\"hi\").await.unwrap();\n+\n+        let mut started = None;\n+        let mut found_completed = false;\n+        while let Ok(event) = rx.try_recv() {\n+            match event.event {\n+                AgentEvent::CompactionStarted {\n+                    estimated_tokens,\n+                    context_window_size,\n+                } => started = Some((estimated_tokens, context_window_size)),\n+                AgentEvent::CompactionCompleted { .. } => found_completed = true,\n+                _ => {}\n+            }\n+        }\n+\n+        assert_eq!(started, Some((90, 100)));\n+        assert!(\n+            found_completed,\n+            \"CompactionCompleted event should be emitted\"\n+        );\n+    }\n+\n+    #[tokio::test]\n+    async fn compaction_noop_does_not_emit_started() {\n+        let large_input = \"x\".repeat(400);\n+        let responses = vec![text_response(\"OK\")];\n+\n+        let provider = Arc::new(MockLlmProvider::new(responses));\n+        let client = make_client(provider).await;\n+        let registry = ToolRegistry::new();\n+        let profile = Arc::new(TestProfile::with_context_window(registry, 100));\n+        let env = Arc::new(MockSandbox::default());\n+        let config = SessionOptions {\n+            enable_context_compaction: true,\n+            compaction_preserve_turns: 10,\n+            ..Default::default()\n+        };\n+        let mut session = Session::new(client, profile, env, config, None);\n+        let mut rx = session.subscribe();\n+\n+        session.process_input(&large_input).await.unwrap();\n+\n+        let mut found_warning = false;\n+        let mut found_compaction = false;\n+        while let Ok(event) = rx.try_recv() {\n+            match event.event {\n+                AgentEvent::Warning { kind, .. } if kind == \"context_window\" => {\n+                    found_warning = true;\n+                }\n+                AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. } => {\n+                    found_compaction = true;\n+                }\n+                _ => {}\n+            }\n+        }\n+\n+        assert!(found_warning, \"threshold should have been exceeded\");\n+        assert!(\n+            !found_compaction,\n+            \"no-op compaction should not emit started or completed events\"\n+        );\n+    }\n+\n     #[tokio::test]\n     async fn compaction_not_triggered_when_disabled() {\n         let large_input = \"x\".repeat(400);\n@@ -3735,6 +3831,49 @@ mod tests {\n         assert!(!found_compaction, \"No compaction events when disabled\");\n     }\n \n+    #[tokio::test]\n+    async fn compaction_disabled_blocks_api_usage_baseline_compaction() {\n+        let responses = vec![response_with_total_usage(text_response(\"OK\"), 90)];\n+\n+        let provider = Arc::new(MockLlmProvider::new(responses));\n+        let client = make_client(provider).await;\n+        let registry = ToolRegistry::new();\n+        let profile = Arc::new(TestProfile::with_context_window(registry, 100));\n+        let env = Arc::new(MockSandbox::default());\n+        let config = SessionOptions {\n+            enable_context_compaction: false,\n+            compaction_preserve_turns: 1,\n+            ..Default::default()\n+        };\n+        let mut session = Session::new(client, profile, env, config, None);\n+        let mut rx = session.subscribe();\n+\n+        session.process_input(\"hi\").await.unwrap();\n+\n+        let mut found_api_usage_warning = false;\n+        let mut found_compaction = false;\n+        while let Ok(event) = rx.try_recv() {\n+            match event.event {\n+                AgentEvent::Warning { details, .. }\n+                    if details[\"estimated_tokens\"] == 90\n+                        && details[\"estimate_method\"] == \"api_usage_plus_local_delta\" =>\n+                {\n+                    found_api_usage_warning = true;\n+                }\n+                AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. } => {\n+                    found_compaction = true;\n+                }\n+                _ => {}\n+            }\n+        }\n+\n+        assert!(\n+            found_api_usage_warning,\n+            \"API usage baseline should still drive context warning\"\n+        );\n+        assert!(!found_compaction, \"compaction must remain disabled\");\n+    }\n+\n     #[tokio::test]\n     async fn compaction_failure_is_non_fatal() {\n         // Response [0] = conversation response (stream), [1] will be used for\n@@ -3789,7 +3928,10 @@ mod tests {\n         }\n \n         let large_input = \"x\".repeat(400);\n-        let responses = vec![text_response(\"OK\")];\n+        let responses = vec![response_with_usage(\n+            text_response(\"OK\"),\n+            TokenCounts::default(),\n+        )];\n \n         let provider = Arc::new(StreamOnlyProvider {\n             responses,\n",
+        "summary": {
+          "files_changed": 3,
+          "additions": 446,
+          "deletions": 46
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-23T15:43:53.788748Z",
+        "current_node": "simplify_opus",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint",
+          "implement",
+          "simplify_opus"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "response.implement": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.total_tokens() > 0` as baseline.\n  - Adds local estimates only for turns after that assistant response.\n  - Falls back to existing whole-history `chars / 4` local estimate when no usable assistant usage exists.\n  - Adds `estimate_method` to context-window warning details.\n  - Uses the improved estimate for `CompactionStarted`.\n  - Prevents no-op compaction from emitting `CompactionStarted`.\n- Updated `lib/crates/fabro-agent/src/history.rs`\n  - `History::compact()` now resets preserved assistant `usage` to `TokenCounts::default()`.\n  - Assistant content, tool calls, response IDs, and non-stripped provider parts remain preserved.\n- Added/updated tests in:\n  - `compaction.rs`\n  - `history.rs`\n  - `session.rs`\n- Confirmed no `llm_client.count_input_tokens()` / provider token-count API calls were added.\n\nVerification:\n- Red phase confirmed initially with failing new compaction tests.\n- Passed:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - `cargo nextest run -p fabro-agent session`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.retry_count.implement": 0,
+          "current_node": "simplify_opus",
+          "internal.retry_count.simplify_opus": 0,
+          "internal.run_id": "01KSAPQQSVK4FY3CWHYVZYD7T6",
+          "thread.implement.current_node": "simplify_opus",
           "thread.preflight_lint.current_node": "implement",
           "failure_class": "",
           "internal.retry_count.preflight_lint": 0,
-          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "response.simplify_opus": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate_token_count` (no external callers); tests updated to call `estimate_active_context_usage` directly.\n- Replaced the hand-rolled `ContextEstimateMethod::as_str()` with `#[derive(strum::IntoStaticStr)] #[strum(serialize_all = \"snake_case\")]` per repo convention in CLAUDE.md.\n- Split `estimate_local_token_count(system_prompt, turns)` into two single-purpose helpers (`estimate_turns_local_tokens`, `estimate_system_prompt_local_tokens`) to remove the `\"\"` sentinel call from the baseline+delta path.\n- Replaced the literal `4` in `summary_token_estimate = summary_content.len() / 4` with `APPROX_CHARS_PER_TOKEN`.\n- Made `check_context_usage` return `Option<ContextEstimate>` and `compact_context` accept the pre-computed estimate, eliminating a duplicate full estimate scan per actual compaction. Both fns are now `pub(crate)` since they have no external callers. Dropped the redundant `system_prompt` parameter from `compact_context`.\n- Tightened visibility on `ContextEstimate` and `ContextEstimateMethod` to `pub(crate)`.\n\n**`lib/crates/fabro-agent/src/history.rs`**\n- Moved the free `invalidate_assistant_usage` function into `impl History` as a private `invalidate_preserved_usage` method.\n- Added a doc comment on `History::compact` explaining the usage-invalidation invariant.\n\n**`lib/crates/fabro-agent/src/session.rs`**\n- Rewired `compact_if_needed` to consume the `Option<ContextEstimate>` from `check_context_usage` and pass it through.\n- Renamed misleading test helper `response_with_total_usage` → `response_with_input_tokens` (it only set `input_tokens`, never the other usage fields).\n\n**`lib/crates/fabro-agent/Cargo.toml`**\n- Added `strum.workspace = true` (workspace dep) to support the derive.\n\n## Findings skipped\n\n- **Test builder for `Message::Assistant`** (Quality #3): broader scope than just the diff and only marginal cleanup.\n- **Counting-writer for JSON length** (Efficiency #3): the hot-path concern is real but speculative without profiling; the prevailing pattern in fabro-agent uses `Value::to_string()`. Out of scope.\n- **Extract `\"context_window\"` / `\"estimate_method\"` JSON-key constants** (Quality #5): pre-existing pattern beyond this diff.\n- **Reshape `latest_assistant_usage_baseline` to return `(tokens, &[Message])`** (Quality #4): cosmetic; current `+ 1` indexing is local and clear.\n- **`APPROX_CHARS_PER_TOKEN` in `history.rs` `extract_recent_user_messages`** (Reuse #1): out of scope — that code is not part of the change.\n\nVerification: `cargo nextest run -p fabro-agent` → 447/447 pass; `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` → clean; `cargo +nightly-2026-04-14 fmt --check --all` → clean.",
           "internal.retry_count.start": 0,
           "internal.fidelity": "compact",
           "internal.retry_count.preflight_compile": 0,
           "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-          "graph.goal": "# Agent Compaction API Usage Baseline Plan\n\nDate: 2026-05-23\n\n## Summary\n\nChange Fabro's agent compaction trigger from a whole-history `chars / 4`\nestimate to a Claude Code-style hot-path estimate: use the latest real\nassistant response's stored `usage.total_tokens()` as the baseline, then add\nlocal estimates for turns appended after that response. This avoids token-count\nprovider API calls while making compaction sensitive to actual\nprovider-reported context usage, including cache and reasoning tokens.\n\nNo provider token-count API calls should be added in this change.\n\n## Key Changes\n\n- Replace the current compaction estimate in `fabro-agent` with a new\n  active-context estimator.\n- Find the newest assistant turn whose `usage.total_tokens() > 0`.\n- Use that `usage.total_tokens()` as the baseline.\n- Add local estimates only for turns after that assistant turn.\n- If no usable assistant usage exists, fall back to the existing local\n  whole-history estimate.\n- Reuse a shared per-turn local estimate helper so fallback and post-baseline\n  delta counting stay consistent.\n- Keep the estimator local and in-process. Do not call\n  `llm_client.count_input_tokens()` from `compact_if_needed()`.\n\n## Implementation Details\n\n- Update `lib/crates/fabro-agent/src/compaction.rs`:\n  - Add an estimator that returns both token count and method, for example\n    `ApiUsagePlusLocalDelta` or `LocalEstimate`.\n  - Make `check_context_usage()` use the new estimator and include the method\n    in warning `details`.\n  - Make `compact_context()` report the same improved estimate in\n    `CompactionStarted`.\n  - Move `CompactionStarted` emission after the\n    `original_turn_count <= preserve_count` no-op check, so a no-op compact\n    cannot emit started without completed.\n- Update `lib/crates/fabro-agent/src/history.rs`:\n  - In `History::compact()`, invalidate preserved assistant usage by replacing\n    preserved assistant `usage` with `TokenCounts::default()`.\n  - Keep provider parts, response IDs, text, and tool calls unchanged.\n  - Rationale: preserved assistant usage reflects the pre-compaction context and\n    must not become the next baseline. Billing remains available from emitted\n    run events, so mutable runtime history should prefer compaction correctness.\n- Leave public run event names and schemas unchanged:\n  - `agent.compaction.started`\n  - `agent.compaction.completed`\n  - Existing warning event remains a warning with richer `details`.\n\n## Test Plan\n\n- Add unit coverage in `lib/crates/fabro-agent/src/compaction.rs`:\n  - No assistant usage: estimator matches current local whole-history behavior.\n  - Latest assistant usage present: estimator uses `usage.total_tokens()` plus\n    only later tool/user/steering turns.\n  - Usage fields include cache and reasoning through `TokenCounts::total_tokens()`.\n  - Earlier assistant usage is ignored when a later assistant usage exists.\n- Add unit coverage in `lib/crates/fabro-agent/src/history.rs`:\n  - `History::compact()` preserves assistant content, tool calls, and provider\n    parts, but resets preserved assistant usage to default.\n  - Existing OpenAI opaque stripping and Anthropic thinking preservation tests\n    still pass.\n- Add session coverage in `lib/crates/fabro-agent/src/session.rs`:\n  - A short assistant response with high `usage.total_tokens()` triggers\n    compaction even when text length is small.\n  - A compact no-op due to `turns.len() <= preserve_count` does not emit\n    `CompactionStarted`.\n  - Compaction disabled still prevents compaction even if the API usage\n    baseline exceeds threshold.\n- Run targeted verification:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - If those pass, run `cargo nextest run -p fabro-agent`.\n\n## Assumptions\n\n- Runtime/session `Message::Assistant.usage` is safe to invalidate after\n  compaction because authoritative billing comes from emitted workflow/run\n  events, not preserved mutable agent history.\n- A zero-token `TokenCounts::default()` should be treated as no usable API\n  baseline.\n- Provider token-count APIs remain available for future near-threshold\n  confirmation, but are intentionally out of scope for this change.\n",
-          "failure_signature": ""
+          "failure_signature": "",
+          "last_stage": "simplify_opus",
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "thread.toolchain.current_node": "preflight_compile",
+          "graph.rankdir": "LR",
+          "internal.thread_id": "implement",
+          "outcome": "succeeded",
+          "thread.start.current_node": "toolchain",
+          "internal.retry_count.toolchain": 0,
+          "internal.node_visit_count": 1,
+          "last_response": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "graph.goal": "# Agent Compaction API Usage Baseline Plan\n\nDate: 2026-05-23\n\n## Summary\n\nChange Fabro's agent compaction trigger from a whole-history `chars / 4`\nestimate to a Claude Code-style hot-path estimate: use the latest real\nassistant response's stored `usage.total_tokens()` as the baseline, then add\nlocal estimates for turns appended after that response. This avoids token-count\nprovider API calls while making compaction sensitive to actual\nprovider-reported context usage, including cache and reasoning tokens.\n\nNo provider token-count API calls should be added in this change.\n\n## Key Changes\n\n- Replace the current compaction estimate in `fabro-agent` with a new\n  active-context estimator.\n- Find the newest assistant turn whose `usage.total_tokens() > 0`.\n- Use that `usage.total_tokens()` as the baseline.\n- Add local estimates only for turns after that assistant turn.\n- If no usable assistant usage exists, fall back to the existing local\n  whole-history estimate.\n- Reuse a shared per-turn local estimate helper so fallback and post-baseline\n  delta counting stay consistent.\n- Keep the estimator local and in-process. Do not call\n  `llm_client.count_input_tokens()` from `compact_if_needed()`.\n\n## Implementation Details\n\n- Update `lib/crates/fabro-agent/src/compaction.rs`:\n  - Add an estimator that returns both token count and method, for example\n    `ApiUsagePlusLocalDelta` or `LocalEstimate`.\n  - Make `check_context_usage()` use the new estimator and include the method\n    in warning `details`.\n  - Make `compact_context()` report the same improved estimate in\n    `CompactionStarted`.\n  - Move `CompactionStarted` emission after the\n    `original_turn_count <= preserve_count` no-op check, so a no-op compact\n    cannot emit started without completed.\n- Update `lib/crates/fabro-agent/src/history.rs`:\n  - In `History::compact()`, invalidate preserved assistant usage by replacing\n    preserved assistant `usage` with `TokenCounts::default()`.\n  - Keep provider parts, response IDs, text, and tool calls unchanged.\n  - Rationale: preserved assistant usage reflects the pre-compaction context and\n    must not become the next baseline. Billing remains available from emitted\n    run events, so mutable runtime history should prefer compaction correctness.\n- Leave public run event names and schemas unchanged:\n  - `agent.compaction.started`\n  - `agent.compaction.completed`\n  - Existing warning event remains a warning with richer `details`.\n\n## Test Plan\n\n- Add unit coverage in `lib/crates/fabro-agent/src/compaction.rs`:\n  - No assistant usage: estimator matches current local whole-history behavior.\n  - Latest assistant usage present: estimator uses `usage.total_tokens()` plus\n    only later tool/user/steering turns.\n  - Usage fields include cache and reasoning through `TokenCounts::total_tokens()`.\n  - Earlier assistant usage is ignored when a later assistant usage exists.\n- Add unit coverage in `lib/crates/fabro-agent/src/history.rs`:\n  - `History::compact()` preserves assistant content, tool calls, and provider\n    parts, but resets preserved assistant usage to default.\n  - Existing OpenAI opaque stripping and Anthropic thinking preservation tests\n    still pass.\n- Add session coverage in `lib/crates/fabro-agent/src/session.rs`:\n  - A short assistant response with high `usage.total_tokens()` triggers\n    compaction even when text length is small.\n  - A compact no-op due to `turns.len() <= preserve_count` does not emit\n    `CompactionStarted`.\n  - Compaction disabled still prevents compaction even if the API usage\n    baseline exceeds threshold.\n- Run targeted verification:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - If those pass, run `cargo nextest run -p fabro-agent`.\n\n## Assumptions\n\n- Runtime/session `Message::Assistant.usage` is safe to invalidate after\n  compaction because authoritative billing comes from emitted workflow/run\n  events, not preserved mutable agent history.\n- A zero-token `TokenCounts::default()` should be treated as no usable API\n  baseline.\n- Provider token-count APIs remain available for future near-threshold\n  confirmation, but are intentionally out of scope for this change.\n"
         },
         "node_outcomes": {
           "toolchain": {
@@ -827,6 +950,44 @@
             },
             "notes": "Script completed: cargo check -q --workspace 2>&1",
             "usage": null
+          },
+          "simplify_opus": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "simplify_opus",
+              "last_response": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate",
+              "response.simplify_opus": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate_token_count` (no external callers); tests updated to call `estimate_active_context_usage` directly.\n- Replaced the hand-rolled `ContextEstimateMethod::as_str()` with `#[derive(strum::IntoStaticStr)] #[strum(serialize_all = \"snake_case\")]` per repo convention in CLAUDE.md.\n- Split `estimate_local_token_count(system_prompt, turns)` into two single-purpose helpers (`estimate_turns_local_tokens`, `estimate_system_prompt_local_tokens`) to remove the `\"\"` sentinel call from the baseline+delta path.\n- Replaced the literal `4` in `summary_token_estimate = summary_content.len() / 4` with `APPROX_CHARS_PER_TOKEN`.\n- Made `check_context_usage` return `Option<ContextEstimate>` and `compact_context` accept the pre-computed estimate, eliminating a duplicate full estimate scan per actual compaction. Both fns are now `pub(crate)` since they have no external callers. Dropped the redundant `system_prompt` parameter from `compact_context`.\n- Tightened visibility on `ContextEstimate` and `ContextEstimateMethod` to `pub(crate)`.\n\n**`lib/crates/fabro-agent/src/history.rs`**\n- Moved the free `invalidate_assistant_usage` function into `impl History` as a private `invalidate_preserved_usage` method.\n- Added a doc comment on `History::compact` explaining the usage-invalidation invariant.\n\n**`lib/crates/fabro-agent/src/session.rs`**\n- Rewired `compact_if_needed` to consume the `Option<ContextEstimate>` from `check_context_usage` and pass it through.\n- Renamed misleading test helper `response_with_total_usage` → `response_with_input_tokens` (it only set `input_tokens`, never the other usage fields).\n\n**`lib/crates/fabro-agent/Cargo.toml`**\n- Added `strum.workspace = true` (workspace dep) to support the derive.\n\n## Findings skipped\n\n- **Test builder for `Message::Assistant`** (Quality #3): broader scope than just the diff and only marginal cleanup.\n- **Counting-writer for JSON length** (Efficiency #3): the hot-path concern is real but speculative without profiling; the prevailing pattern in fabro-agent uses `Value::to_string()`. Out of scope.\n- **Extract `\"context_window\"` / `\"estimate_method\"` JSON-key constants** (Quality #5): pre-existing pattern beyond this diff.\n- **Reshape `latest_assistant_usage_baseline` to return `(tokens, &[Message])`** (Quality #4): cosmetic; current `+ 1` indexing is local and clear.\n- **`APPROX_CHARS_PER_TOKEN` in `history.rs` `extract_recent_user_messages`** (Reuse #1): out of scope — that code is not part of the change.\n\nVerification: `cargo nextest run -p fabro-agent` → 447/447 pass; `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` → clean; `cargo +nightly-2026-04-14 fmt --check --all` → clean."
+            },
+            "notes": "Stage completed: simplify_opus",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 66736,
+                    "output_tokens": 21289,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 1971515,
+                    "cache_write_tokens": 267947
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 267947,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 3526330
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/Cargo.toml",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/compaction.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/history.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/session.rs"
+            ]
           },
           "start": {
             "status": "succeeded",
@@ -871,12 +1032,13 @@
             "usage": null
           }
         },
-        "next_node_id": "simplify_opus",
+        "next_node_id": "simplify_gpt",
         "node_visits": {
           "toolchain": 1,
           "preflight_compile": 1,
           "start": 1,
           "preflight_lint": 1,
+          "simplify_opus": 1,
           "implement": 1
         }
       },
@@ -904,6 +1066,20 @@
   "superseded_by": null,
   "pending_interviews": {},
   "todos_by_list": {
+    "anthropic_tasks:70a99891-4c04-4824-8ca5-d9fe373a7111": {
+      "kind": "anthropic_tasks",
+      "list_id": "anthropic_tasks:70a99891-4c04-4824-8ca5-d9fe373a7111",
+      "items": [
+        {
+          "id": "1",
+          "status": "completed",
+          "order": 0,
+          "subject": "Apply cleanup fixes from code review",
+          "description": "1. Use APPROX_CHARS_PER_TOKEN at compaction.rs:167\n2. Delete pub fn estimate_token_count (no external callers)\n3. Adopt strum::IntoStaticStr for ContextEstimateMethod\n4. Rename response_with_total_usage -> response_with_input_tokens\n5. Split estimate_local_token_count to remove sentinel \"\" parameter\n6. Make invalidate_assistant_usage a private method on History\n7. Pass pre-computed ContextEstimate from check_context_usage into compact_context",
+          "active_form": "Applying cleanup fixes"
+        }
+      ]
+    },
     "openai_plan:bd5288b5-cb6c-4da6-a303-70346a50495c": {
       "kind": "openai_plan",
       "list_id": "openai_plan:bd5288b5-cb6c-4da6-a303-70346a50495c",
@@ -988,7 +1164,12 @@
       "first_event_seq": 50,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: implement",
+        "failure_reason": null,
+        "timestamp": "2026-05-23T15:32:41.443688Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "openai",
@@ -1001,6 +1182,12 @@
       "output": null,
       "started_at": "2026-05-23T15:24:29.561071Z",
       "handler": "agent",
+      "timing": {
+        "wall_time_ms": 491879,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
       "usage": {
         "input_tokens": 168644,
         "output_tokens": 9772,
@@ -1013,6 +1200,38 @@
       "model": {
         "provider": "openai",
         "model_id": "gpt-5.5"
+      },
+      "state": "succeeded"
+    },
+    "simplify_opus@1": {
+      "first_event_seq": 256,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-opus-4-7"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T15:32:46.594117Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 66736,
+        "output_tokens": 21289,
+        "total_tokens": 2327487,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 1971515,
+        "cache_write_tokens": 267947,
+        "total_usd_micros": 3526330
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-opus-4-7"
       },
       "state": "running"
     },
