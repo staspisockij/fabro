@@ -127,6 +127,7 @@ function makeRunSummary(
     },
     timing:           null,
     billing:          null,
+    size:             "XS",
     diff:             diffSummary,
     pull_request:     pullRequest,
     current_question: null,

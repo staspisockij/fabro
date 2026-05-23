@@ -301,6 +301,7 @@ export * from './run-sandbox';
 export * from './run-sandbox-runtime';
 export * from './run-scm-settings';
 export * from './run-server-provenance';
+export * from './run-size';
 export * from './run-spec';
 export * from './run-stage';
 export * from './run-status';
