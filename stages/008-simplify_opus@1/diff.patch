@@ -1,0 +1,1037 @@
+diff --git a/lib/crates/fabro-cli/src/commands/run/runner.rs b/lib/crates/fabro-cli/src/commands/run/runner.rs
+index e130eba70..fb3b31d43 100644
+--- a/lib/crates/fabro-cli/src/commands/run/runner.rs
++++ b/lib/crates/fabro-cli/src/commands/run/runner.rs
+@@ -707,12 +707,7 @@ fn requires_github_credentials(run: &RunNamespace) -> bool {
+     if run.integrations.github.is_token_requested() {
+         return true;
+     }
+-    run.execution.mode != RunMode::DryRun
+-        && clone_sandbox_requires_github_credentials(&run.environment.provider.to_string())
+-}
+-
+-fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
+-    matches!(provider, "docker" | "daytona")
++    run.execution.mode != RunMode::DryRun && run.environment.provider.is_clone_based()
+ }
+ 
+ fn install_signal_handlers(
+@@ -793,9 +788,10 @@ mod tests {
+ 
+     #[test]
+     fn clone_sandbox_credentials_are_required_for_clone_based_providers() {
+-        assert!(super::clone_sandbox_requires_github_credentials("docker"));
+-        assert!(super::clone_sandbox_requires_github_credentials("daytona"));
+-        assert!(!super::clone_sandbox_requires_github_credentials("local"));
++        use fabro_types::settings::run::EnvironmentProvider;
++        assert!(EnvironmentProvider::Docker.is_clone_based());
++        assert!(EnvironmentProvider::Daytona.is_clone_based());
++        assert!(!EnvironmentProvider::Local.is_clone_based());
+     }
+ 
+     #[test]
+diff --git a/lib/crates/fabro-config/src/builders.rs b/lib/crates/fabro-config/src/builders.rs
+index b3abc01e0..d85a16bb1 100644
+--- a/lib/crates/fabro-config/src/builders.rs
++++ b/lib/crates/fabro-config/src/builders.rs
+@@ -10,7 +10,7 @@ use fabro_util::error::SharedError;
+ use crate::defaults::DEFAULTS_LAYER;
+ use crate::load::load_settings_path;
+ use crate::resolve::{
+-    ResolveError, resolve_cli, resolve_environments, resolve_project, resolve_run, resolve_server,
++    ResolveError, resolve_cli, resolve_project, resolve_run, resolve_server,
+     resolve_workflow,
+ };
+ use crate::user::load_settings_config;
+@@ -191,10 +191,9 @@ impl RunSettingsBuilder {
+     pub(crate) fn from_layer(layer: &SettingsLayer) -> Result<RunNamespace> {
+         let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
+         let mut errors = Vec::new();
+-        let environments = resolve_environments(&layer.environments, &mut errors);
+         let run = resolve_run(
+             &layer.run.clone().unwrap_or_default(),
+-            &environments,
++            &layer.environments,
+             &mut errors,
+         );
+         finish_result(run, "failed to resolve run settings", errors)
+@@ -590,17 +589,15 @@ impl WorkflowSettingsBuilder {
+         let mut errors = Vec::new();
+         let project = resolve_project(&layer.project.clone().unwrap_or_default(), &mut errors);
+         let workflow = resolve_workflow(&layer.workflow.clone().unwrap_or_default(), &mut errors);
+-        let environments = resolve_environments(&layer.environments, &mut errors);
+         let run = resolve_run(
+             &layer.run.clone().unwrap_or_default(),
+-            &environments,
++            &layer.environments,
+             &mut errors,
+         );
+         finish_dense_result(
+             WorkflowSettings {
+                 project,
+                 workflow,
+-                environments,
+                 run,
+             },
+             errors,
+diff --git a/lib/crates/fabro-config/src/resolve/environment.rs b/lib/crates/fabro-config/src/resolve/environment.rs
+index 3ec87cccc..250f4f3ff 100644
+--- a/lib/crates/fabro-config/src/resolve/environment.rs
++++ b/lib/crates/fabro-config/src/resolve/environment.rs
+@@ -1,5 +1,3 @@
+-use std::collections::HashMap;
+-
+ use fabro_types::settings::run::{
+     DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
+     EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentProvider,
+@@ -9,30 +7,14 @@ use fabro_types::settings::run::{
+ 
+ use super::ResolveError;
+ use crate::{
+-    EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer, EnvironmentLifecycleLayer,
+-    EnvironmentNetworkLayer, EnvironmentResourcesLayer, EnvironmentVolumeLayer, MergeMap,
+-    RunEnvironmentLayer,
++    Combine, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
++    EnvironmentLifecycleLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer,
++    EnvironmentVolumeLayer, MergeMap, RunEnvironmentLayer,
+ };
+ 
+-pub(crate) fn resolve_environments(
+-    layers: &MergeMap<EnvironmentLayer>,
+-    errors: &mut Vec<ResolveError>,
+-) -> HashMap<String, EnvironmentSettings> {
+-    layers
+-        .iter()
+-        .map(|(slug, layer)| {
+-            let path = format!("environments.{slug}");
+-            (
+-                slug.clone(),
+-                resolve_environment_layer(layer, &path, errors),
+-            )
+-        })
+-        .collect()
+-}
+-
+ pub(crate) fn resolve_run_environment(
+     layer: Option<&RunEnvironmentLayer>,
+-    environments: &HashMap<String, EnvironmentSettings>,
++    catalog: &MergeMap<EnvironmentLayer>,
+     errors: &mut Vec<ResolveError>,
+ ) -> RunEnvironmentSettings {
+     let layer = layer.expect("defaults.toml should provide run.environment defaults");
+@@ -43,7 +25,7 @@ pub(crate) fn resolve_run_environment(
+         "default".to_string()
+     });
+ 
+-    let Some(base) = environments.get(&id) else {
++    let Some(base) = catalog.get(&id) else {
+         errors.push(ResolveError::Invalid {
+             path:   "run.environment.id".to_string(),
+             reason: format!("unknown environment: {id}"),
+@@ -51,8 +33,8 @@ pub(crate) fn resolve_run_environment(
+         return RunEnvironmentSettings::from_environment(id, EnvironmentSettings::default());
+     };
+ 
+-    let mut environment = base.clone();
+-    apply_run_environment_overrides(&mut environment, layer, errors);
++    let merged = layer.clone().into_environment_override().combine(base.clone());
++    let environment = resolve_environment_layer(&merged, "run.environment", errors);
+     validate_provider_capabilities(&environment, "run.environment", errors);
+     RunEnvironmentSettings::from_environment(id, environment)
+ }
+@@ -187,81 +169,6 @@ fn resolve_volumes(layers: Option<&[EnvironmentVolumeLayer]>) -> Vec<Environment
+         .collect()
+ }
+ 
+-fn apply_run_environment_overrides(
+-    environment: &mut EnvironmentSettings,
+-    layer: &RunEnvironmentLayer,
+-    errors: &mut Vec<ResolveError>,
+-) {
+-    if let Some(image) = layer.image.as_ref() {
+-        apply_image_override(&mut environment.image, image);
+-    }
+-    if let Some(resources) = layer.resources.as_ref() {
+-        apply_resources_override(&mut environment.resources, resources);
+-    }
+-    if let Some(network) = layer.network.as_ref() {
+-        apply_network_override(
+-            &mut environment.network,
+-            network,
+-            "run.environment.network",
+-            errors,
+-        );
+-    }
+-    if let Some(lifecycle) = layer.lifecycle.as_ref() {
+-        apply_lifecycle_override(&mut environment.lifecycle, lifecycle);
+-    }
+-    environment.labels.extend(layer.labels.clone().into_inner());
+-    if let Some(volumes) = layer.volumes.as_deref() {
+-        environment.volumes = resolve_volumes(Some(volumes));
+-    }
+-    environment.env.extend(layer.env.clone().into_inner());
+-}
+-
+-fn apply_image_override(target: &mut EnvironmentImageSettings, layer: &EnvironmentImageLayer) {
+-    if let Some(reference) = layer.reference.as_ref() {
+-        target.reference = Some(reference.clone());
+-    }
+-    if let Some(dockerfile) = layer.dockerfile.as_ref() {
+-        target.dockerfile = Some(dockerfile_source(dockerfile));
+-    }
+-}
+-
+-fn apply_resources_override(
+-    target: &mut EnvironmentResourcesSettings,
+-    layer: &EnvironmentResourcesLayer,
+-) {
+-    if layer.cpu.is_some() {
+-        target.cpu = layer.cpu;
+-    }
+-    if layer.memory.is_some() {
+-        target.memory = layer.memory;
+-    }
+-    if layer.disk.is_some() {
+-        target.disk = layer.disk;
+-    }
+-}
+-
+-fn apply_network_override(
+-    target: &mut EnvironmentNetworkSettings,
+-    layer: &EnvironmentNetworkLayer,
+-    path: &str,
+-    errors: &mut Vec<ResolveError>,
+-) {
+-    for (index, cidr) in layer.allow.iter().enumerate() {
+-        if cidr.parse::<ipnet::IpNet>().is_err() {
+-            errors.push(ResolveError::Invalid {
+-                path:   format!("{path}.allow[{index}]"),
+-                reason: format!("invalid CIDR: {cidr}"),
+-            });
+-        }
+-    }
+-    if let Some(raw) = layer.mode.as_deref() {
+-        target.mode = parse_network_mode(raw, &format!("{path}.mode"), errors);
+-    }
+-    if !layer.allow.is_empty() {
+-        target.allow.clone_from(&layer.allow);
+-    }
+-}
+-
+ fn dockerfile_source(dockerfile: &EnvironmentDockerfileLayer) -> DockerfileSource {
+     match dockerfile {
+         EnvironmentDockerfileLayer::Inline(text) => DockerfileSource::Inline(text.clone()),
+@@ -269,21 +176,6 @@ fn dockerfile_source(dockerfile: &EnvironmentDockerfileLayer) -> DockerfileSourc
+     }
+ }
+ 
+-fn apply_lifecycle_override(
+-    target: &mut EnvironmentLifecycleSettings,
+-    layer: &EnvironmentLifecycleLayer,
+-) {
+-    if let Some(preserve) = layer.preserve {
+-        target.preserve = preserve;
+-    }
+-    if let Some(stop_on_terminal) = layer.stop_on_terminal {
+-        target.stop_on_terminal = stop_on_terminal;
+-    }
+-    if layer.auto_stop.is_some() {
+-        target.auto_stop = layer.auto_stop;
+-    }
+-}
+-
+ fn validate_daytona_snapshot_name(
+     environment: &EnvironmentSettings,
+     path: &str,
+@@ -306,7 +198,6 @@ fn validate_provider_capabilities(
+     path: &str,
+     errors: &mut Vec<ResolveError>,
+ ) {
+-    validate_daytona_snapshot_name(environment, path, errors);
+     match environment.provider {
+         EnvironmentProvider::Local => {
+             if matches!(
+diff --git a/lib/crates/fabro-config/src/resolve/mod.rs b/lib/crates/fabro-config/src/resolve/mod.rs
+index 5206d31c6..a61598574 100644
+--- a/lib/crates/fabro-config/src/resolve/mod.rs
++++ b/lib/crates/fabro-config/src/resolve/mod.rs
+@@ -7,7 +7,7 @@ mod server;
+ mod workflow;
+ 
+ pub use cli::resolve_cli;
+-pub(crate) use environment::{resolve_environments, resolve_run_environment};
++pub(crate) use environment::resolve_run_environment;
+ pub use error::ResolveError;
+ use fabro_types::settings::InterpString;
+ pub use project::resolve_project;
+diff --git a/lib/crates/fabro-config/src/resolve/run.rs b/lib/crates/fabro-config/src/resolve/run.rs
+index ee4eac7ba..043968226 100644
+--- a/lib/crates/fabro-config/src/resolve/run.rs
++++ b/lib/crates/fabro-config/src/resolve/run.rs
+@@ -1,26 +1,27 @@
+ use fabro_types::settings::InterpString;
+ use fabro_types::settings::run::{
+-    ArtifactsSettings, EnvironmentSettings, GitAuthorSettings, HookDefinition, HookType,
+-    InterviewProviderSettings, McpServerSettings, McpTransport, MergeStrategy,
+-    NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings, RunAgentSettings,
+-    RunBranchSettings, RunCheckpointSettings, RunCloneSettings, RunExecutionSettings,
+-    RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
+-    RunInterviewsSettings, RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace,
+-    RunPrepareSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
++    ArtifactsSettings, GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings,
++    McpServerSettings, McpTransport, MergeStrategy, NotificationProviderSettings,
++    NotificationRouteSettings, PullRequestSettings, RunAgentSettings, RunBranchSettings,
++    RunCheckpointSettings, RunCloneSettings, RunExecutionSettings, RunGitSettings, RunGoal,
++    RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
++    RunMetaBranchSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
++    RunScmSettings, ScmGitHubSettings, TlsMode,
+ };
+ 
+ use super::{ResolveError, resolve_run_environment};
+ use crate::{
+-    HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer, InterviewsLayer,
+-    McpEntryLayer, ModelRefOrSplice, NotificationProviderLayer, NotificationRouteLayer,
+-    RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer, RunExecutionLayer,
+-    RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer, RunMetaBranchLayer, RunModelLayer,
+-    RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer, RunScmLayer, StringOrSplice,
++    EnvironmentLayer, HookAgentMarker, HookEntry, HookTlsMode, InterviewProviderLayer,
++    InterviewsLayer, McpEntryLayer, MergeMap, ModelRefOrSplice, NotificationProviderLayer,
++    NotificationRouteLayer, RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunCloneLayer,
++    RunExecutionLayer, RunGitLayer, RunGoalLayer, RunIntegrationsLayer, RunLayer,
++    RunMetaBranchLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunRunBranchLayer,
++    RunScmLayer, StringOrSplice,
+ };
+ 
+ pub fn resolve_run(
+     layer: &RunLayer,
+-    environments: &std::collections::HashMap<String, EnvironmentSettings>,
++    environments: &MergeMap<EnvironmentLayer>,
+     errors: &mut Vec<ResolveError>,
+ ) -> RunNamespace {
+     let clone = resolve_clone(layer.clone.as_ref());
+diff --git a/lib/crates/fabro-config/src/tests/resolve_root.rs b/lib/crates/fabro-config/src/tests/resolve_root.rs
+index 94c261711..bad738301 100644
+--- a/lib/crates/fabro-config/src/tests/resolve_root.rs
++++ b/lib/crates/fabro-config/src/tests/resolve_root.rs
+@@ -67,7 +67,7 @@ provider = "not-a-provider"
+ 
+     assert!(rendered.contains("server.listen.address"));
+     assert!(rendered.contains("server.auth.github.allowed_usernames"));
+-    assert!(rendered.contains("environments.bad.provider"));
++    assert!(rendered.contains("run.environment.provider"));
+ }
+ 
+ #[test]
+@@ -189,7 +189,7 @@ provider = "not-a-provider"
+     assert!(errors.iter().any(|error| {
+         matches!(
+             error,
+-            fabro_config::ResolveError::Invalid { path, .. } if path == "environments.bad.provider"
++            fabro_config::ResolveError::Invalid { path, .. } if path == "run.environment.provider"
+         )
+     }));
+ }
+@@ -214,6 +214,6 @@ command = ["echo", "hi"]
+     .expect_err("invalid workflow settings should fail")
+     .to_string();
+ 
+-    assert!(rendered.contains("environments.bad.provider"));
++    assert!(rendered.contains("run.environment.provider"));
+     assert!(rendered.contains("run.prepare.steps[0]"));
+ }
+diff --git a/lib/crates/fabro-config/src/tests/resolve_run.rs b/lib/crates/fabro-config/src/tests/resolve_run.rs
+index c691c71f4..408210a54 100644
+--- a/lib/crates/fabro-config/src/tests/resolve_run.rs
++++ b/lib/crates/fabro-config/src/tests/resolve_run.rs
+@@ -119,7 +119,6 @@ NODE_ENV = "development"
+     )
+     .expect("daytona environment should resolve");
+ 
+-    assert!(settings.environments.contains_key("fabro-dev"));
+     let environment = settings.run.environment;
+ 
+     assert_eq!(environment.id, "fabro-dev");
+diff --git a/lib/crates/fabro-sandbox/src/from_environment.rs b/lib/crates/fabro-sandbox/src/from_environment.rs
+new file mode 100644
+index 000000000..c59fb5044
+--- /dev/null
++++ b/lib/crates/fabro-sandbox/src/from_environment.rs
+@@ -0,0 +1,146 @@
++//! Convert resolved [`RunEnvironmentSettings`] into runtime sandbox configs.
++//!
++//! These mappings are consumed by both the workflow run-start path and the
++//! server preflight path, so they live here next to their destination types.
++
++#[cfg(feature = "docker")]
++use fabro_types::settings::interp::InterpString;
++#[cfg(feature = "daytona")]
++use fabro_types::settings::run::DockerfileSource as ResolvedDockerfileSource;
++use fabro_types::settings::run::{EnvironmentNetworkMode, RunEnvironmentSettings};
++
++#[cfg(feature = "daytona")]
++use crate::config::{
++    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
++    DockerfileSource as SandboxDockerfileSource,
++};
++#[cfg(feature = "daytona")]
++use crate::daytona::DaytonaConfig;
++#[cfg(feature = "docker")]
++use crate::docker::DockerSandboxOptions;
++
++#[cfg(feature = "daytona")]
++#[must_use]
++pub fn daytona_config_from_environment(
++    settings: &RunEnvironmentSettings,
++    skip_clone: bool,
++) -> DaytonaConfig {
++    DaytonaConfig {
++        auto_stop_interval: settings
++            .lifecycle
++            .auto_stop
++            .map(|duration| duration_to_minutes_i32(duration.as_std())),
++        labels: (!settings.labels.is_empty()).then(|| settings.labels.clone()),
++        volumes: settings
++            .volumes
++            .iter()
++            .map(|volume| DaytonaVolumeMount {
++                volume_id:  volume.id.clone(),
++                mount_path: volume.mount_path.clone(),
++                subpath:    volume.subpath.clone(),
++            })
++            .collect(),
++        snapshot: settings
++            .image
++            .reference
++            .as_ref()
++            .map(|name| DaytonaSnapshotSettings {
++                name:       name.clone(),
++                cpu:        settings.resources.cpu,
++                memory:     settings
++                    .resources
++                    .memory
++                    .map(|size| size_to_gb_i32(size.as_bytes())),
++                disk:       settings
++                    .resources
++                    .disk
++                    .map(|size| size_to_gb_i32(size.as_bytes())),
++                dockerfile: settings.image.dockerfile.as_ref().map(|dockerfile| {
++                    match dockerfile {
++                        ResolvedDockerfileSource::Inline(text) => {
++                            SandboxDockerfileSource::Inline(text.clone())
++                        }
++                        ResolvedDockerfileSource::Path { path } => {
++                            SandboxDockerfileSource::Path { path: path.clone() }
++                        }
++                    }
++                }),
++            }),
++        network: Some(match settings.network.mode {
++            EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
++            EnvironmentNetworkMode::AllowAll => DaytonaNetwork::AllowAll,
++            EnvironmentNetworkMode::CidrAllowList => {
++                DaytonaNetwork::AllowList(settings.network.allow.clone())
++            }
++        }),
++        skip_clone,
++    }
++}
++
++#[cfg(feature = "docker")]
++#[must_use]
++pub fn docker_config_from_environment(
++    settings: &RunEnvironmentSettings,
++    skip_clone: bool,
++) -> DockerSandboxOptions {
++    let mut env_vars = settings
++        .env
++        .iter()
++        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
++        .collect::<Vec<_>>();
++    env_vars.sort();
++    let default_options = DockerSandboxOptions::default();
++
++    DockerSandboxOptions {
++        image: settings
++            .image
++            .reference
++            .clone()
++            .unwrap_or(default_options.image),
++        network_mode: match settings.network.mode {
++            EnvironmentNetworkMode::Block => Some("none".to_string()),
++            EnvironmentNetworkMode::AllowAll | EnvironmentNetworkMode::CidrAllowList => {
++                default_options.network_mode
++            }
++        },
++        memory_limit: settings
++            .resources
++            .memory
++            .and_then(|size| i64::try_from(size.as_bytes()).ok()),
++        cpu_quota: settings
++            .resources
++            .cpu
++            .map(|cpu| i64::from(cpu).saturating_mul(100_000)),
++        env_vars,
++        skip_clone,
++        ..DockerSandboxOptions::default()
++    }
++}
++
++#[cfg(feature = "docker")]
++fn resolve_interp(value: &InterpString) -> String {
++    value
++        .resolve(process_env_var)
++        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
++}
++
++#[cfg(feature = "docker")]
++#[expect(
++    clippy::disallowed_methods,
++    reason = "Environment interpolation owns a process-env lookup facade for {{ env.* }} values."
++)]
++fn process_env_var(name: &str) -> Option<String> {
++    std::env::var(name).ok()
++}
++
++#[cfg(feature = "daytona")]
++fn duration_to_minutes_i32(duration: std::time::Duration) -> i32 {
++    let minutes = duration.as_secs() / 60;
++    i32::try_from(minutes).unwrap_or(i32::MAX)
++}
++
++#[cfg(feature = "daytona")]
++fn size_to_gb_i32(bytes: u64) -> i32 {
++    let gb = bytes / 1_000_000_000;
++    i32::try_from(gb).unwrap_or(i32::MAX)
++}
+diff --git a/lib/crates/fabro-sandbox/src/lib.rs b/lib/crates/fabro-sandbox/src/lib.rs
+index 036a0dd1c..3d3fe4a64 100644
+--- a/lib/crates/fabro-sandbox/src/lib.rs
++++ b/lib/crates/fabro-sandbox/src/lib.rs
+@@ -1,5 +1,7 @@
+ pub mod config;
+ pub mod error;
++#[cfg(any(feature = "docker", feature = "daytona"))]
++pub mod from_environment;
+ pub mod sandbox;
+ pub mod sandbox_spec;
+ 
+diff --git a/lib/crates/fabro-server/src/demo/mod.rs b/lib/crates/fabro-server/src/demo/mod.rs
+index 9f80e83c0..c5814e2b7 100644
+--- a/lib/crates/fabro-server/src/demo/mod.rs
++++ b/lib/crates/fabro-server/src/demo/mod.rs
+@@ -1714,34 +1714,34 @@ mod runs {
+     }
+ 
+     pub(super) fn settings() -> serde_json::Value {
++        let environment = EnvironmentSettings {
++            provider: EnvironmentProvider::Daytona,
++            image: EnvironmentImageSettings {
++                reference:  Some("api-server-dev".into()),
++                dockerfile: None,
++            },
++            resources: EnvironmentResourcesSettings {
++                cpu:    Some(4),
++                memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
++                disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
++            },
++            lifecycle: EnvironmentLifecycleSettings {
++                preserve:         false,
++                stop_on_terminal: true,
++                auto_stop:        Some(
++                    "60m".parse().expect("hardcoded demo duration should parse"),
++                ),
++            },
++            labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
++            ..EnvironmentSettings::default()
++        };
+         let settings = WorkflowSettings {
+-            project:      ProjectNamespace::default(),
+-            workflow:     WorkflowNamespace {
++            project:  ProjectNamespace::default(),
++            workflow: WorkflowNamespace {
+                 graph: "workflow.fabro".into(),
+                 ..WorkflowNamespace::default()
+             },
+-            environments: HashMap::from([("api-server".to_string(), EnvironmentSettings {
+-                provider: EnvironmentProvider::Daytona,
+-                image: EnvironmentImageSettings {
+-                    reference:  Some("api-server-dev".into()),
+-                    dockerfile: None,
+-                },
+-                resources: EnvironmentResourcesSettings {
+-                    cpu:    Some(4),
+-                    memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
+-                    disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
+-                },
+-                lifecycle: EnvironmentLifecycleSettings {
+-                    preserve:         false,
+-                    stop_on_terminal: true,
+-                    auto_stop:        Some(
+-                        "60m".parse().expect("hardcoded demo duration should parse"),
+-                    ),
+-                },
+-                labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
+-                ..EnvironmentSettings::default()
+-            })]),
+-            run:          RunNamespace {
++            run:      RunNamespace {
+                 goal: Some(RunGoal::Inline(InterpString::parse(
+                     "Add rate limiting to auth endpoints",
+                 ))),
+@@ -1757,27 +1757,7 @@ mod runs {
+                 },
+                 environment: RunEnvironmentSettings::from_environment(
+                     "api-server".to_string(),
+-                    EnvironmentSettings {
+-                        provider: EnvironmentProvider::Daytona,
+-                        image: EnvironmentImageSettings {
+-                            reference:  Some("api-server-dev".into()),
+-                            dockerfile: None,
+-                        },
+-                        resources: EnvironmentResourcesSettings {
+-                            cpu:    Some(4),
+-                            memory: Some(fabro_types::settings::Size::from_gigabytes(8)),
+-                            disk:   Some(fabro_types::settings::Size::from_gigabytes(10)),
+-                        },
+-                        lifecycle: EnvironmentLifecycleSettings {
+-                            preserve:         false,
+-                            stop_on_terminal: true,
+-                            auto_stop:        Some(
+-                                "60m".parse().expect("hardcoded demo duration should parse"),
+-                            ),
+-                        },
+-                        labels: HashMap::from([("project".to_string(), "api-server".to_string())]),
+-                        ..EnvironmentSettings::default()
+-                    },
++                    environment,
+                 ),
+                 ..RunNamespace::default()
+             },
+diff --git a/lib/crates/fabro-server/src/run_manifest.rs b/lib/crates/fabro-server/src/run_manifest.rs
+index 3b8474d51..ecc61e589 100644
+--- a/lib/crates/fabro-server/src/run_manifest.rs
++++ b/lib/crates/fabro-server/src/run_manifest.rs
+@@ -16,20 +16,16 @@ use fabro_graphviz::graph::{Graph, is_llm_handler_type};
+ use fabro_graphviz::render::apply_direction;
+ use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
+ use fabro_model::{Catalog, ProviderId};
+-use fabro_sandbox::config::{
+-    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
+-    DockerfileSource as SandboxDockerfileSource,
+-};
+ use fabro_sandbox::daytona::DaytonaConfig;
++use fabro_sandbox::from_environment::{
++    daytona_config_from_environment, docker_config_from_environment,
++};
+ use fabro_sandbox::redact::redact_auth_url;
+ use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
+ use fabro_static::EnvVars;
+ use fabro_types::settings::cli::OutputVerbosity;
+ use fabro_types::settings::interp::InterpString;
+-use fabro_types::settings::run::{
+-    DockerfileSource, EnvironmentNetworkMode, EnvironmentProvider, RunEnvironmentSettings, RunGoal,
+-    RunMode, RunNamespace,
+-};
++use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunMode, RunNamespace};
+ use fabro_types::{ManifestPath, RunId, WorkflowSettings};
+ use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
+ use fabro_validate::Severity;
+@@ -399,12 +395,6 @@ fn resolve_working_directory(settings: &WorkflowSettings, caller_cwd: &Path) ->
+     }
+ }
+ 
+-fn resolve_interp(value: &InterpString) -> String {
+-    value
+-        .resolve(process_env_var)
+-        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
+-}
+-
+ #[expect(
+     clippy::disallowed_methods,
+     reason = "Manifest preflight interpolation owns a process-env lookup facade for {{ env.* }} values."
+@@ -632,15 +622,11 @@ fn resolve_sandbox_provider(settings: &RunNamespace) -> SandboxProvider {
+ }
+ 
+ fn resolve_daytona_config(settings: &RunNamespace) -> DaytonaConfig {
+-    let mut config = runtime_daytona_config(&settings.environment, !settings.clone.enabled);
+-    config.skip_clone = !settings.clone.enabled;
+-    config
++    daytona_config_from_environment(&settings.environment, !settings.clone.enabled)
+ }
+ 
+ fn resolve_docker_config(settings: &RunNamespace) -> DockerSandboxOptions {
+-    let mut config = runtime_docker_config(&settings.environment, !settings.clone.enabled);
+-    config.skip_clone = !settings.clone.enabled;
+-    config
++    docker_config_from_environment(&settings.environment, !settings.clone.enabled)
+ }
+ 
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -1184,109 +1170,6 @@ fn resolve_model_provider(
+     }
+ }
+ 
+-fn runtime_daytona_config(settings: &RunEnvironmentSettings, skip_clone: bool) -> DaytonaConfig {
+-    DaytonaConfig {
+-        auto_stop_interval: settings
+-            .lifecycle
+-            .auto_stop
+-            .map(|duration| duration_to_minutes_i32(duration.as_std())),
+-        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+-        volumes: settings
+-            .volumes
+-            .iter()
+-            .map(|volume| DaytonaVolumeMount {
+-                volume_id:  volume.id.clone(),
+-                mount_path: volume.mount_path.clone(),
+-                subpath:    volume.subpath.clone(),
+-            })
+-            .collect(),
+-        snapshot: settings
+-            .image
+-            .reference
+-            .as_ref()
+-            .map(|name| DaytonaSnapshotSettings {
+-                name:       name.clone(),
+-                cpu:        settings.resources.cpu,
+-                memory:     settings
+-                    .resources
+-                    .memory
+-                    .map(|size| size_to_gb_i32(size.as_bytes())),
+-                disk:       settings
+-                    .resources
+-                    .disk
+-                    .map(|size| size_to_gb_i32(size.as_bytes())),
+-                dockerfile: settings
+-                    .image
+-                    .dockerfile
+-                    .as_ref()
+-                    .map(|dockerfile| match dockerfile {
+-                        DockerfileSource::Inline(text) => {
+-                            SandboxDockerfileSource::Inline(text.clone())
+-                        }
+-                        DockerfileSource::Path { path } => {
+-                            SandboxDockerfileSource::Path { path: path.clone() }
+-                        }
+-                    }),
+-            }),
+-        network: Some(match settings.network.mode {
+-            EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
+-            EnvironmentNetworkMode::AllowAll => DaytonaNetwork::AllowAll,
+-            EnvironmentNetworkMode::CidrAllowList => {
+-                DaytonaNetwork::AllowList(settings.network.allow.clone())
+-            }
+-        }),
+-        skip_clone,
+-    }
+-}
+-
+-fn runtime_docker_config(
+-    settings: &RunEnvironmentSettings,
+-    skip_clone: bool,
+-) -> DockerSandboxOptions {
+-    let mut env_vars = settings
+-        .env
+-        .iter()
+-        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
+-        .collect::<Vec<_>>();
+-    env_vars.sort();
+-    let default_options = DockerSandboxOptions::default();
+-
+-    DockerSandboxOptions {
+-        image: settings
+-            .image
+-            .reference
+-            .clone()
+-            .unwrap_or(default_options.image),
+-        network_mode: match settings.network.mode {
+-            EnvironmentNetworkMode::Block => Some("none".to_string()),
+-            EnvironmentNetworkMode::AllowAll | EnvironmentNetworkMode::CidrAllowList => {
+-                default_options.network_mode
+-            }
+-        },
+-        memory_limit: settings
+-            .resources
+-            .memory
+-            .and_then(|size| i64::try_from(size.as_bytes()).ok()),
+-        cpu_quota: settings
+-            .resources
+-            .cpu
+-            .map(|cpu| i64::from(cpu).saturating_mul(100_000)),
+-        env_vars,
+-        skip_clone,
+-        ..DockerSandboxOptions::default()
+-    }
+-}
+-
+-fn duration_to_minutes_i32(duration: Duration) -> i32 {
+-    let minutes = duration.as_secs() / 60;
+-    i32::try_from(minutes).unwrap_or(i32::MAX)
+-}
+-
+-fn size_to_gb_i32(bytes: u64) -> i32 {
+-    let gb = bytes / 1_000_000_000;
+-    i32::try_from(gb).unwrap_or(i32::MAX)
+-}
+-
+ async fn run_github_token_check(
+     checks: &mut Vec<CheckResult>,
+     prepared: &PreparedManifest,
+@@ -1599,7 +1482,7 @@ enabled = {clone_enabled}
+ 
+     #[test]
+     fn runtime_daytona_config_preserves_volume_mounts() {
+-        let settings = RunEnvironmentSettings::from_environment(
++        let settings = fabro_types::settings::run::RunEnvironmentSettings::from_environment(
+             "cloud".to_string(),
+             fabro_types::settings::run::EnvironmentSettings {
+                 volumes: vec![fabro_types::settings::run::EnvironmentVolumeSettings {
+@@ -1611,7 +1494,7 @@ enabled = {clone_enabled}
+             },
+         );
+ 
+-        let config = runtime_daytona_config(&settings, false);
++        let config = daytona_config_from_environment(&settings, false);
+ 
+         assert_eq!(config.volumes.len(), 1);
+         assert_eq!(config.volumes[0].volume_id, "vol_auth");
+@@ -1669,8 +1552,10 @@ dockerfile = { path = "Dockerfile" }
+             .as_ref()
+             .expect("project Dockerfile should resolve");
+         match dockerfile {
+-            DockerfileSource::Inline(value) => assert_eq!(value, "FROM ubuntu:24.04\n"),
+-            DockerfileSource::Path { path } => {
++            fabro_types::settings::run::DockerfileSource::Inline(value) => {
++                assert_eq!(value, "FROM ubuntu:24.04\n");
++            }
++            fabro_types::settings::run::DockerfileSource::Path { path } => {
+                 panic!("project Dockerfile should be inline, got path {path}")
+             }
+         }
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index adc0e2370..9abc90d6c 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -1684,10 +1684,6 @@ fn system_sandbox_provider(
+     )
+ }
+ 
+-fn clone_sandbox_can_use_github_credentials(provider: &str) -> bool {
+-    matches!(provider, "docker" | "daytona")
+-}
+-
+ fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {
+     let raw = raw.trim();
+     anyhow::ensure!(!raw.is_empty(), "empty duration string");
+@@ -3247,7 +3243,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
+         let run_spec = persisted.run_spec();
+         let settings = &run_spec.settings.run;
+         let clone_can_use_github_credentials = settings.execution.mode != RunMode::DryRun
+-            && clone_sandbox_can_use_github_credentials(&settings.environment.provider.to_string())
++            && settings.environment.provider.is_clone_based()
+             && run_spec
+                 .repo_origin_url()
+                 .is_some_and(|origin| !origin.trim().is_empty());
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index 9bed0ae67..274b3d573 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -905,9 +905,10 @@ id = "missing"
+ 
+ #[test]
+ fn clone_sandbox_credentials_are_available_for_clone_based_providers() {
+-    assert!(clone_sandbox_can_use_github_credentials("docker"));
+-    assert!(clone_sandbox_can_use_github_credentials("daytona"));
+-    assert!(!clone_sandbox_can_use_github_credentials("local"));
++    use fabro_types::settings::run::EnvironmentProvider;
++    assert!(EnvironmentProvider::Docker.is_clone_based());
++    assert!(EnvironmentProvider::Daytona.is_clone_based());
++    assert!(!EnvironmentProvider::Local.is_clone_based());
+ }
+ 
+ #[tokio::test]
+diff --git a/lib/crates/fabro-types/src/dense.rs b/lib/crates/fabro-types/src/dense.rs
+index c3fe39689..6ffacc92a 100644
+--- a/lib/crates/fabro-types/src/dense.rs
++++ b/lib/crates/fabro-types/src/dense.rs
+@@ -4,8 +4,8 @@ use std::path::Path;
+ use serde::{Deserialize, Serialize};
+ 
+ use crate::settings::{
+-    CliNamespace, EnvironmentSettings, InterpString, ObjectStoreSettings, ProjectNamespace,
+-    RunNamespace, ServerNamespace, WorkflowNamespace,
++    CliNamespace, InterpString, ObjectStoreSettings, ProjectNamespace, RunNamespace,
++    ServerNamespace, WorkflowNamespace,
+ };
+ 
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+@@ -47,10 +47,9 @@ pub struct UserSettings {
+ 
+ #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+ pub struct WorkflowSettings {
+-    pub project:      ProjectNamespace,
+-    pub workflow:     WorkflowNamespace,
+-    pub environments: HashMap<String, EnvironmentSettings>,
+-    pub run:          RunNamespace,
++    pub project:  ProjectNamespace,
++    pub workflow: WorkflowNamespace,
++    pub run:      RunNamespace,
+ }
+ 
+ impl WorkflowSettings {
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index bda21541c..f99f317ec 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -8,18 +8,16 @@ use fabro_interview::{AutoApproveInterviewer, Interviewer};
+ use fabro_llm::client::Client as LlmClient;
+ use fabro_mcp::config::{McpServerSettings, McpTransport};
+ use fabro_model::{Catalog, FallbackTarget, ProviderId};
+-use fabro_sandbox::config::{
+-    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
+-    DockerfileSource as SandboxDockerfileSource,
+-};
+ use fabro_sandbox::daytona::DaytonaConfig;
++use fabro_sandbox::from_environment::{
++    daytona_config_from_environment, docker_config_from_environment,
++};
+ use fabro_sandbox::{DockerSandboxOptions, SandboxProvider, SandboxSpec};
+ use fabro_static::EnvVars;
+ use fabro_types::settings::run::{
+-    ApprovalMode, DockerfileSource as ResolvedDockerfileSource, EnvironmentNetworkMode,
+-    HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
++    ApprovalMode, HookDefinition as ResolvedHookDefinition, HookEvent as ResolvedHookEvent,
+     HookType as ResolvedHookType, McpServerSettings as ResolvedMcpServerSettings,
+-    McpTransport as ResolvedMcpTransport, PullRequestSettings, RunEnvironmentSettings, RunMode,
++    McpTransport as ResolvedMcpTransport, PullRequestSettings, RunMode,
+     RunModelSettings as ResolvedRunModelSettings, RunNamespace as ResolvedRunSettings,
+     TlsMode as ResolvedTlsMode,
+ };
+@@ -517,15 +515,11 @@ fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> SandboxProvider {
+ }
+ 
+ fn resolve_daytona_config(settings: &ResolvedRunSettings) -> DaytonaConfig {
+-    let mut config = runtime_daytona_config(&settings.environment, !settings.clone.enabled);
+-    config.skip_clone = !settings.clone.enabled;
+-    config
++    daytona_config_from_environment(&settings.environment, !settings.clone.enabled)
+ }
+ 
+ fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions {
+-    let mut config = runtime_docker_config(&settings.environment, !settings.clone.enabled);
+-    config.skip_clone = !settings.clone.enabled;
+-    config
++    docker_config_from_environment(&settings.environment, !settings.clone.enabled)
+ }
+ 
+ fn resolve_start_llm(
+@@ -658,109 +652,6 @@ fn runtime_mcp_server(settings: &ResolvedMcpServerSettings) -> McpServerSettings
+     }
+ }
+ 
+-fn runtime_daytona_config(settings: &RunEnvironmentSettings, skip_clone: bool) -> DaytonaConfig {
+-    DaytonaConfig {
+-        auto_stop_interval: settings
+-            .lifecycle
+-            .auto_stop
+-            .map(|duration| duration_to_minutes_i32(duration.as_std())),
+-        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+-        volumes: settings
+-            .volumes
+-            .iter()
+-            .map(|volume| DaytonaVolumeMount {
+-                volume_id:  volume.id.clone(),
+-                mount_path: volume.mount_path.clone(),
+-                subpath:    volume.subpath.clone(),
+-            })
+-            .collect(),
+-        snapshot: settings
+-            .image
+-            .reference
+-            .as_ref()
+-            .map(|name| DaytonaSnapshotSettings {
+-                name:       name.clone(),
+-                cpu:        settings.resources.cpu,
+-                memory:     settings
+-                    .resources
+-                    .memory
+-                    .map(|size| size_to_gb_i32(size.as_bytes())),
+-                disk:       settings
+-                    .resources
+-                    .disk
+-                    .map(|size| size_to_gb_i32(size.as_bytes())),
+-                dockerfile: settings
+-                    .image
+-                    .dockerfile
+-                    .as_ref()
+-                    .map(|dockerfile| match dockerfile {
+-                        ResolvedDockerfileSource::Inline(text) => {
+-                            SandboxDockerfileSource::Inline(text.clone())
+-                        }
+-                        ResolvedDockerfileSource::Path { path } => {
+-                            SandboxDockerfileSource::Path { path: path.clone() }
+-                        }
+-                    }),
+-            }),
+-        network: Some(match settings.network.mode {
+-            EnvironmentNetworkMode::Block => DaytonaNetwork::Block,
+-            EnvironmentNetworkMode::AllowAll => DaytonaNetwork::AllowAll,
+-            EnvironmentNetworkMode::CidrAllowList => {
+-                DaytonaNetwork::AllowList(settings.network.allow.clone())
+-            }
+-        }),
+-        skip_clone,
+-    }
+-}
+-
+-fn runtime_docker_config(
+-    settings: &RunEnvironmentSettings,
+-    skip_clone: bool,
+-) -> DockerSandboxOptions {
+-    let mut env_vars = settings
+-        .env
+-        .iter()
+-        .map(|(key, value)| format!("{key}={}", resolve_interp(value)))
+-        .collect::<Vec<_>>();
+-    env_vars.sort();
+-    let default_options = DockerSandboxOptions::default();
+-
+-    DockerSandboxOptions {
+-        image: settings
+-            .image
+-            .reference
+-            .clone()
+-            .unwrap_or(default_options.image),
+-        network_mode: match settings.network.mode {
+-            EnvironmentNetworkMode::Block => Some("none".to_string()),
+-            EnvironmentNetworkMode::AllowAll | EnvironmentNetworkMode::CidrAllowList => {
+-                default_options.network_mode
+-            }
+-        },
+-        memory_limit: settings
+-            .resources
+-            .memory
+-            .and_then(|size| i64::try_from(size.as_bytes()).ok()),
+-        cpu_quota: settings
+-            .resources
+-            .cpu
+-            .map(|cpu| i64::from(cpu).saturating_mul(100_000)),
+-        env_vars,
+-        skip_clone,
+-        ..DockerSandboxOptions::default()
+-    }
+-}
+-
+-fn duration_to_minutes_i32(duration: Duration) -> i32 {
+-    let minutes = duration.as_secs() / 60;
+-    i32::try_from(minutes).unwrap_or(i32::MAX)
+-}
+-
+-fn size_to_gb_i32(bytes: u64) -> i32 {
+-    let gb = bytes / 1_000_000_000;
+-    i32::try_from(gb).unwrap_or(i32::MAX)
+-}
+-
+ fn runtime_hook_definition(definition: &ResolvedHookDefinition) -> fabro_hooks::HookDefinition {
+     fabro_hooks::HookDefinition {
+         name:       definition.name.clone(),
