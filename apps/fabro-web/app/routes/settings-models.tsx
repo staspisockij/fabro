@@ -92,7 +92,7 @@ function ProviderRow({ provider }: { provider: Provider }) {
   return (
     <Row
       title={
-        <span className="flex items-center gap-3">
+        <span className="flex items-center gap-4">
           <ProviderLogo provider={provider} />
           <span className="flex min-w-0 flex-col">
             <span className="text-sm text-fg-2">{name}</span>

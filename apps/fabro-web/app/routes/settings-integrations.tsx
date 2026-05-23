@@ -140,7 +140,7 @@ function IntegrationRow({
   return (
     <Row
       title={
-        <span className="flex items-center gap-3">
+        <span className="flex items-center gap-4">
           <IntegrationLogo slug={slug} name={name} />
           <span className="flex min-w-0 flex-col">
             <span className="text-sm text-fg-2">{name}</span>
