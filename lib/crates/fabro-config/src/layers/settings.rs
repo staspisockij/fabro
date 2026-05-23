@@ -10,7 +10,9 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use super::cli::CliLayer;
+use super::environment::EnvironmentLayer;
 use super::llm::LlmLayer;
+use super::maps::MergeMap;
 use super::project::ProjectLayer;
 use super::run::RunLayer;
 use super::server::ServerLayer;
@@ -34,6 +36,10 @@ pub(crate) struct SettingsLayer {
     pub server:   Option<ServerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm:      Option<LlmLayer>,
+    /// Top-level `[environments.<slug>]` catalog. Merges by slug across
+    /// settings layers; each value recursively combines.
+    #[serde(default, skip_serializing_if = "MergeMap::is_empty")]
+    pub environments: MergeMap<EnvironmentLayer>,
 }
 
 impl FromStr for SettingsLayer {

@@ -4,8 +4,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::settings::{
-    CliNamespace, InterpString, ObjectStoreSettings, ProjectNamespace, RunNamespace,
-    ServerNamespace, WorkflowNamespace,
+    CliNamespace, EnvironmentSettings, InterpString, ObjectStoreSettings, ProjectNamespace,
+    RunNamespace, ServerNamespace, WorkflowNamespace,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,9 +47,13 @@ pub struct UserSettings {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowSettings {
-    pub project:  ProjectNamespace,
-    pub workflow: WorkflowNamespace,
-    pub run:      RunNamespace,
+    pub project:      ProjectNamespace,
+    pub workflow:     WorkflowNamespace,
+    pub run:          RunNamespace,
+    /// Resolved environment catalog merged across config layers, keyed by
+    /// slug. The selected environment also appears as `run.environment`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub environments: HashMap<String, EnvironmentSettings>,
 }
 
 impl WorkflowSettings {
