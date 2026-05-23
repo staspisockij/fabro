@@ -512,14 +512,106 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KSAJP2RE9SYJ1YQ86632JV8A",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-23T14:09:24.387870Z",
+    "run_branch": "fabro/run/01KSAJP2RE9SYJ1YQ86632JV8A",
+    "base_sha": "6cb3d03ade338afb2139523d5f5aab7fb578af3d"
   },
-  "status_updated_at": "2026-05-23T14:09:04.834438Z",
-  "last_event_at": "2026-05-23T14:09:23.956087Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-23T14:09:24.387924Z",
+  "last_event_at": "2026-05-23T14:09:26.268523Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-23T14:09:26.268295Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "outcome": "succeeded",
+          "failure_class": "",
+          "internal.run_id": "01KSAJP2RE9SYJ1YQ86632JV8A",
+          "failure_signature": "",
+          "graph.goal": "# Per-stage agent state in `StageProjection`\n\n## Context\n\nThe agent-node stage pages (`/runs/<id>/stages/<sid>`) will get a new left sidebar showing: todo list, subagents, skills (available/activated), MCP servers, permissions, and (later) context-window breakdown.\n\nInvestigation showed:\n- **Permissions** (`AgentPermissions`) are already on `RunAgentSettings` and returned by the run-settings endpoint — no work needed.\n- **Todos, subagents, skills, MCP servers** all emit events today (`Event::Agent { stage, visit, session_id, event: AgentEvent::... }`) and the event envelope already carries `stage_id` (`lib/crates/fabro-workflow/src/event/stored_fields.rs:226`). The reducer just ignores most of them.\n- **Todos** are partially projected — into a *run-level* `RunProjection.todos_by_list`. There's no cross-stage use case for that placement, and the existing keying (`anthropic_tasks:<root_session>`, `openai_plan:<session>`) is already 1:1 with stages.\n\nThis plan moves todos onto `StageProjection` and folds the other three event families into the same per-stage shape, all surfaced through the existing `GET /runs/{id}` endpoint. **No new endpoints, no parallel types.** The token-breakdown sidebar item is out of scope.\n\n## Approach\n\n### 1. Extend `StageProjection` (`lib/crates/fabro-types/src/run_projection.rs`)\n\nAdd four fields, reusing existing event payload types wherever possible:\n\n```rust\npub struct StageProjection {\n    // ...existing fields...\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub todos:       Option<TodoListProjection>,\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    pub subagents:   Vec<SubAgentProjection>,\n    #[serde(default, skip_serializing_if = \"SkillsProjection::is_empty\")]\n    pub skills:      SkillsProjection,\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    pub mcp_servers: Vec<McpServerProjection>,\n}\n```\n\nThree small new projection structs in the same file (avoid sprawl by colocating, not creating a new module):\n\n```rust\npub struct SubAgentProjection {\n    pub agent_id: String,\n    pub depth:    usize,\n    pub task:     String,\n    pub status:   SubAgentStatus,  // Running | Completed{success, turns_used} | Failed{error} | Closed\n}\n\npub struct SkillsProjection {\n    pub available: Vec<AgentSkillSummary>,                // reused from run_event::agent\n    pub activated: Vec<ActivatedSkill>,                   // { name: String, source: AgentSkillActivationSource }\n}\n\npub struct McpServerProjection {\n    pub server_name: String,\n    pub status:      McpServerStatus,                     // Ready{tools: Vec<AgentMcpToolSummary>} | Failed{error}\n    pub tool_count:  usize,\n}\n```\n\nReused as-is (no new types): `TodoListProjection` (`lib/crates/fabro-types/src/todo.rs:230`), `AgentSkillSummary`, `AgentSkillActivationSource`, `AgentMcpToolSummary` (`lib/crates/fabro-types/src/run_event/agent.rs:244,283,296`).\n\n`SubAgentStatus` and `McpServerStatus` are projection-side enums — distinct from the runtime `fabro-agent::subagent::Status` (which is per-process and not in `fabro-types`). Don't pull that across the crate boundary.\n\n### 2. Remove `RunProjection.todos_by_list`\n\nDrop the field entirely (`run_projection.rs:40`) and its initializer (`:188`). No cross-stage aggregation use case exists. The only TS reference is a stale comment in `apps/fabro-web/app/lib/run-events.ts:100` — update or delete.\n\n### 3. Teach the reducer (`lib/crates/fabro-store/src/run_state.rs`)\n\nExisting pattern: agent events route to a stage via `stage_at_stored_or_visit` / `stage_at_stored_or_current_visit` helpers (lines 594–614). Apply the same pattern for the new variants:\n\n- `TodoCreated/Updated/Deleted` — currently calls `apply_todo_created/updated/deleted` against `state.todos_by_list` (lines 456–504). Rewrite each to resolve the stage from `event.stage_id` and mutate `stage.todos: Option<TodoListProjection>`. Reuse the existing per-list upsert/patch/delete logic against a single `TodoListProjection` instead of a map.\n- `SubAgentSpawned` → push a new `SubAgentProjection { status: Running }`\n- `SubAgentCompleted` → find by `agent_id`, set `status: Completed{success, turns_used}`\n- `SubAgentFailed` → find by `agent_id`, set `status: Failed{error}`\n- `SubAgentClosed` → find by `agent_id`, set `status: Closed`\n- `SkillsDiscovered` → set `stage.skills.available = props.skills`\n- `SkillActivated` → push to `stage.skills.activated` (dedupe-by-name policy: keep the latest source, or append every activation? **default: append every activation** — matches event-sourced replay; UI can collapse if it wants)\n- `McpServerReady` → upsert by `server_name`, status `Ready{tools}`, `tool_count = props.tool_count`\n- `McpServerFailed` → upsert by `server_name`, status `Failed{error}`\n\n### 4. Update OpenAPI + regenerated client (`docs/public/api-reference/fabro-api.yaml`)\n\nMirror the four fields onto the `StageProjection` schema. For the reused types (`TodoListProjection`, `AgentSkillSummary`, `AgentSkillActivationSource`, `AgentMcpToolSummary`), wire them through `lib/crates/fabro-api/build.rs` `with_replacement(...)` per CLAUDE.md \"API type ownership\" guidance so progenitor doesn't generate parallel `ApiFoo` types. Add `fabro-api` parity test entries.\n\nRemove the `todos_by_list` field from the `RunProjection` schema in the same change.\n\nThe TS Axios client (`lib/packages/fabro-api-client`) regenerates via `bun run generate`.\n\n### 5. Tests\n\n- `lib/crates/fabro-store/src/run_state.rs` already has todo reducer tests at lines 3194–3383. Rewrite assertions to read from `state.stage(&stage_id).unwrap().todos` instead of `state.todos_by_list`.\n- Add reducer tests for each new event family: emit the sequence and assert the projected state on `StageProjection`.\n- Add a `fabro-api` test proving JSON parity for the new `StageProjection` schema (same pattern as existing `with_replacement` tests).\n- No insta snapshots affected — confirmed none exist for these types.\n\n### 6. Web UI consumption (out of scope for this plan, but unblocks)\n\nOnce the projection ships, the sidebar reads everything from the existing `GET /runs/{id}` response. The route already loads the projection. Sidebar component work is a follow-up.\n\n## Files to modify\n\n| File | Change |\n|---|---|\n| `lib/crates/fabro-types/src/run_projection.rs` | Add 4 fields + 3 new projection structs to `StageProjection`; remove `todos_by_list` from `RunProjection` |\n| `lib/crates/fabro-store/src/run_state.rs` | Reroute todo handlers; add handlers for subagent/skill/MCP events; update tests |\n| `docs/public/api-reference/fabro-api.yaml` | Mirror new fields on `StageProjection`; remove `todos_by_list` from `RunProjection` |\n| `lib/crates/fabro-api/build.rs` | Add `with_replacement(...)` entries for reused types so progenitor reuses them |\n| `apps/fabro-web/app/lib/run-events.ts` (comment only) | Delete the stale `todos_by_list` comment at line 100 |\n\n## Verification\n\n1. `cargo build --workspace` — compiles; progenitor regenerates without parallel API types.\n2. `cargo nextest run -p fabro-types -p fabro-store -p fabro-api -p fabro-server` — reducer tests, projection parity, conformance tests pass.\n3. `cd lib/packages/fabro-api-client && bun run generate && bun run typecheck` — TS client regenerates cleanly.\n4. End-to-end: start `fabro server start`, run a workflow with an agent stage that creates todos, spawns a subagent, and activates a skill (use the `repl` workflow or similar). `curl /api/v1/runs/<id>` and confirm the new fields appear under `stages.<stage_id>` and that `todos_by_list` is gone from the top level.\n5. `cargo +nightly-2026-04-14 fmt --check --all && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — formatting + lint clean.\n\n## Anti-sprawl checks\n\n- No new `ApiFoo` aliases or `foo_to_api`/`foo_from_api` adapters introduced.\n- Reused: `TodoListProjection`, `AgentSkillSummary`, `AgentSkillActivationSource`, `AgentMcpToolSummary` (4 existing types).\n- Added: `SubAgentProjection`, `SubAgentStatus`, `SkillsProjection`, `ActivatedSkill`, `McpServerProjection`, `McpServerStatus` — all colocated in `run_projection.rs`, none duplicate existing semantics. Projection-side status enums are intentionally distinct from runtime per-process status types in `fabro-agent`.\n- One field removed (`RunProjection.todos_by_list`) — net structural simplification at the run level.\n\n## Unresolved questions\n\n- **Activation dedupe policy**: append every `SkillActivated` event vs. dedupe-by-name (keep latest source)? Plan defaults to append; flag if you want set semantics.\n- **Subagent ordering**: insertion order vs. depth-then-spawn-order? Plan defaults to insertion order (matches event replay).\n- **`AgentPermissions` ↔ `PermissionLevel` type duplication**: pre-existing, not introduced here. Worth a separate cleanup pass per CLAUDE.md \"API type ownership\" — out of scope for this plan.\n",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "current_node": "start",
+          "graph.rankdir": "LR",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.start": 0,
+          "internal.thread_id": null,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.fidelity": "compact"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-23T14:09:27.627021Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.thread_id": "start",
+          "outcome": "succeeded",
+          "failure_class": "",
+          "internal.retry_count.toolchain": 0,
+          "internal.retry_count.start": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "failure_signature": "",
+          "graph.goal": "# Per-stage agent state in `StageProjection`\n\n## Context\n\nThe agent-node stage pages (`/runs/<id>/stages/<sid>`) will get a new left sidebar showing: todo list, subagents, skills (available/activated), MCP servers, permissions, and (later) context-window breakdown.\n\nInvestigation showed:\n- **Permissions** (`AgentPermissions`) are already on `RunAgentSettings` and returned by the run-settings endpoint — no work needed.\n- **Todos, subagents, skills, MCP servers** all emit events today (`Event::Agent { stage, visit, session_id, event: AgentEvent::... }`) and the event envelope already carries `stage_id` (`lib/crates/fabro-workflow/src/event/stored_fields.rs:226`). The reducer just ignores most of them.\n- **Todos** are partially projected — into a *run-level* `RunProjection.todos_by_list`. There's no cross-stage use case for that placement, and the existing keying (`anthropic_tasks:<root_session>`, `openai_plan:<session>`) is already 1:1 with stages.\n\nThis plan moves todos onto `StageProjection` and folds the other three event families into the same per-stage shape, all surfaced through the existing `GET /runs/{id}` endpoint. **No new endpoints, no parallel types.** The token-breakdown sidebar item is out of scope.\n\n## Approach\n\n### 1. Extend `StageProjection` (`lib/crates/fabro-types/src/run_projection.rs`)\n\nAdd four fields, reusing existing event payload types wherever possible:\n\n```rust\npub struct StageProjection {\n    // ...existing fields...\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    pub todos:       Option<TodoListProjection>,\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    pub subagents:   Vec<SubAgentProjection>,\n    #[serde(default, skip_serializing_if = \"SkillsProjection::is_empty\")]\n    pub skills:      SkillsProjection,\n    #[serde(default, skip_serializing_if = \"Vec::is_empty\")]\n    pub mcp_servers: Vec<McpServerProjection>,\n}\n```\n\nThree small new projection structs in the same file (avoid sprawl by colocating, not creating a new module):\n\n```rust\npub struct SubAgentProjection {\n    pub agent_id: String,\n    pub depth:    usize,\n    pub task:     String,\n    pub status:   SubAgentStatus,  // Running | Completed{success, turns_used} | Failed{error} | Closed\n}\n\npub struct SkillsProjection {\n    pub available: Vec<AgentSkillSummary>,                // reused from run_event::agent\n    pub activated: Vec<ActivatedSkill>,                   // { name: String, source: AgentSkillActivationSource }\n}\n\npub struct McpServerProjection {\n    pub server_name: String,\n    pub status:      McpServerStatus,                     // Ready{tools: Vec<AgentMcpToolSummary>} | Failed{error}\n    pub tool_count:  usize,\n}\n```\n\nReused as-is (no new types): `TodoListProjection` (`lib/crates/fabro-types/src/todo.rs:230`), `AgentSkillSummary`, `AgentSkillActivationSource`, `AgentMcpToolSummary` (`lib/crates/fabro-types/src/run_event/agent.rs:244,283,296`).\n\n`SubAgentStatus` and `McpServerStatus` are projection-side enums — distinct from the runtime `fabro-agent::subagent::Status` (which is per-process and not in `fabro-types`). Don't pull that across the crate boundary.\n\n### 2. Remove `RunProjection.todos_by_list`\n\nDrop the field entirely (`run_projection.rs:40`) and its initializer (`:188`). No cross-stage aggregation use case exists. The only TS reference is a stale comment in `apps/fabro-web/app/lib/run-events.ts:100` — update or delete.\n\n### 3. Teach the reducer (`lib/crates/fabro-store/src/run_state.rs`)\n\nExisting pattern: agent events route to a stage via `stage_at_stored_or_visit` / `stage_at_stored_or_current_visit` helpers (lines 594–614). Apply the same pattern for the new variants:\n\n- `TodoCreated/Updated/Deleted` — currently calls `apply_todo_created/updated/deleted` against `state.todos_by_list` (lines 456–504). Rewrite each to resolve the stage from `event.stage_id` and mutate `stage.todos: Option<TodoListProjection>`. Reuse the existing per-list upsert/patch/delete logic against a single `TodoListProjection` instead of a map.\n- `SubAgentSpawned` → push a new `SubAgentProjection { status: Running }`\n- `SubAgentCompleted` → find by `agent_id`, set `status: Completed{success, turns_used}`\n- `SubAgentFailed` → find by `agent_id`, set `status: Failed{error}`\n- `SubAgentClosed` → find by `agent_id`, set `status: Closed`\n- `SkillsDiscovered` → set `stage.skills.available = props.skills`\n- `SkillActivated` → push to `stage.skills.activated` (dedupe-by-name policy: keep the latest source, or append every activation? **default: append every activation** — matches event-sourced replay; UI can collapse if it wants)\n- `McpServerReady` → upsert by `server_name`, status `Ready{tools}`, `tool_count = props.tool_count`\n- `McpServerFailed` → upsert by `server_name`, status `Failed{error}`\n\n### 4. Update OpenAPI + regenerated client (`docs/public/api-reference/fabro-api.yaml`)\n\nMirror the four fields onto the `StageProjection` schema. For the reused types (`TodoListProjection`, `AgentSkillSummary`, `AgentSkillActivationSource`, `AgentMcpToolSummary`), wire them through `lib/crates/fabro-api/build.rs` `with_replacement(...)` per CLAUDE.md \"API type ownership\" guidance so progenitor doesn't generate parallel `ApiFoo` types. Add `fabro-api` parity test entries.\n\nRemove the `todos_by_list` field from the `RunProjection` schema in the same change.\n\nThe TS Axios client (`lib/packages/fabro-api-client`) regenerates via `bun run generate`.\n\n### 5. Tests\n\n- `lib/crates/fabro-store/src/run_state.rs` already has todo reducer tests at lines 3194–3383. Rewrite assertions to read from `state.stage(&stage_id).unwrap().todos` instead of `state.todos_by_list`.\n- Add reducer tests for each new event family: emit the sequence and assert the projected state on `StageProjection`.\n- Add a `fabro-api` test proving JSON parity for the new `StageProjection` schema (same pattern as existing `with_replacement` tests).\n- No insta snapshots affected — confirmed none exist for these types.\n\n### 6. Web UI consumption (out of scope for this plan, but unblocks)\n\nOnce the projection ships, the sidebar reads everything from the existing `GET /runs/{id}` response. The route already loads the projection. Sidebar component work is a follow-up.\n\n## Files to modify\n\n| File | Change |\n|---|---|\n| `lib/crates/fabro-types/src/run_projection.rs` | Add 4 fields + 3 new projection structs to `StageProjection`; remove `todos_by_list` from `RunProjection` |\n| `lib/crates/fabro-store/src/run_state.rs` | Reroute todo handlers; add handlers for subagent/skill/MCP events; update tests |\n| `docs/public/api-reference/fabro-api.yaml` | Mirror new fields on `StageProjection`; remove `todos_by_list` from `RunProjection` |\n| `lib/crates/fabro-api/build.rs` | Add `with_replacement(...)` entries for reused types so progenitor reuses them |\n| `apps/fabro-web/app/lib/run-events.ts` (comment only) | Delete the stale `todos_by_list` comment at line 100 |\n\n## Verification\n\n1. `cargo build --workspace` — compiles; progenitor regenerates without parallel API types.\n2. `cargo nextest run -p fabro-types -p fabro-store -p fabro-api -p fabro-server` — reducer tests, projection parity, conformance tests pass.\n3. `cd lib/packages/fabro-api-client && bun run generate && bun run typecheck` — TS client regenerates cleanly.\n4. End-to-end: start `fabro server start`, run a workflow with an agent stage that creates todos, spawns a subagent, and activates a skill (use the `repl` workflow or similar). `curl /api/v1/runs/<id>` and confirm the new fields appear under `stages.<stage_id>` and that `todos_by_list` is gone from the top level.\n5. `cargo +nightly-2026-04-14 fmt --check --all && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` — formatting + lint clean.\n\n## Anti-sprawl checks\n\n- No new `ApiFoo` aliases or `foo_to_api`/`foo_from_api` adapters introduced.\n- Reused: `TodoListProjection`, `AgentSkillSummary`, `AgentSkillActivationSource`, `AgentMcpToolSummary` (4 existing types).\n- Added: `SubAgentProjection`, `SubAgentStatus`, `SkillsProjection`, `ActivatedSkill`, `McpServerProjection`, `McpServerStatus` — all colocated in `run_projection.rs`, none duplicate existing semantics. Projection-side status enums are intentionally distinct from runtime per-process status types in `fabro-agent`.\n- One field removed (`RunProjection.todos_by_list`) — net structural simplification at the run level.\n\n## Unresolved questions\n\n- **Activation dedupe policy**: append every `SkillActivated` event vs. dedupe-by-name (keep latest source)? Plan defaults to append; flag if you want set semantics.\n- **Subagent ordering**: insertion order vs. depth-then-spawn-order? Plan defaults to insertion order (matches event replay).\n- **`AgentPermissions` ↔ `PermissionLevel` type duplication**: pre-existing, not introduced here. Worth a separate cleanup pass per CLAUDE.md \"API type ownership\" — out of scope for this plan.\n",
+          "internal.fidelity": "compact",
+          "internal.run_id": "01KSAJP2RE9SYJ1YQ86632JV8A",
+          "thread.start.current_node": "toolchain",
+          "current_node": "toolchain",
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "internal.node_visit_count": 1,
+          "graph.rankdir": "LR",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "node_visits": {
+          "toolchain": 1,
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -540,5 +632,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-23T14:09:26.268011Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T14:09:26.267565Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "toolchain@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T14:09:26.268379Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
