@@ -515,14 +515,106 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KSAQHF95BET5A7XQX42SPFJ4",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-23T15:34:15.802803Z",
+    "run_branch": "fabro/run/01KSAQHF95BET5A7XQX42SPFJ4",
+    "base_sha": "a64a58d567e3de775aff86503703934c64fe2d38"
   },
-  "status_updated_at": "2026-05-23T15:33:56.699787Z",
-  "last_event_at": "2026-05-23T15:34:15.083922Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-23T15:34:15.802864Z",
+  "last_event_at": "2026-05-23T15:34:17.655110Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-23T15:34:17.654815Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "current_node": "start",
+          "internal.node_visit_count": 1,
+          "graph.rankdir": "LR",
+          "internal.retry_count.start": 0,
+          "internal.thread_id": null,
+          "internal.fidelity": "compact",
+          "outcome": "succeeded",
+          "failure_class": "",
+          "graph.goal": "# Pending Runnable Run Queue Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Replace Fabro's single queued state with explicit `pending` and `runnable` pre-execution states, and require one-time human approval before parent-generated child runs can execute.\n\n**Architecture:** Treat pre-execution approval as durable run lifecycle state, not as an interview, run-control action, or separate approval resource. `pending` means the run is in the queue but unschedulable; `runnable` means it is eligible for the scheduler. The scheduler only claims `runnable` runs.\n\n**Tech Stack:** Rust, Axum, OpenAPI/progenitor, TypeScript generated API client, React, Bun tests, cargo nextest.\n\n---\n\n## Intended Semantics\n\n- Public lifecycle order is `submitted -> pending | runnable -> starting -> running -> terminal`.\n- `pending` has a single reason in v1: `approval_required`.\n- A run can require approval at most once.\n- `auto_approve` remains scoped to in-workflow human prompts and does not bypass pre-execution approval.\n- Denial is terminal and distinct from cancellation: denied runs fail with `approval_denied`.\n- No backwards compatibility is required. Remove `queued` and `run.queued` rather than aliasing them.\n\n## Public API And Event Surface\n\n### Status Types\n\n`RunStatus` should become:\n\n```rust\npub enum RunStatus {\n    Submitted,\n    Pending { reason: PendingReason },\n    Runnable,\n    Starting,\n    Running,\n    Blocked { blocked_reason: BlockedReason },\n    Paused { prior_block: Option<BlockedReason> },\n    Removing,\n    Succeeded { reason: SuccessReason },\n    Failed { reason: FailureReason },\n    Dead,\n}\n\npub enum PendingReason {\n    ApprovalRequired,\n}\n```\n\nAdd `FailureReason::ApprovalDenied`.\n\n### Events\n\nAdd these typed run events:\n\n```text\nrun.start_requested\nrun.pending\nrun.approved\nrun.denied\nrun.runnable\n```\n\nEvent properties:\n\n```json\n{ \"event\": \"run.start_requested\", \"properties\": { \"resume\": false } }\n{ \"event\": \"run.pending\", \"properties\": { \"reason\": \"approval_required\" } }\n{ \"event\": \"run.approved\", \"properties\": {} }\n{ \"event\": \"run.denied\", \"properties\": { \"reason\": \"Not approved for execution\" } }\n{ \"event\": \"run.runnable\", \"properties\": { \"source\": \"approved\" } }\n```\n\n`run.runnable.properties.source` is one of:\n\n```text\nstart_requested\napproved\n```\n\nActor identity belongs in the canonical event envelope, not in event properties.\n\n### REST API\n\nKeep run creation and start request separate:\n\n```http\nPOST /api/v1/runs\nPOST /api/v1/runs/{id}/start\nPOST /api/v1/runs/{id}/approve\nPOST /api/v1/runs/{id}/deny\n```\n\n`POST /runs/{id}/deny` accepts:\n\n```json\n{ \"reason\": \"Not approved for execution\" }\n```\n\n`reason` is optional. Empty or whitespace-only reasons are stored as absent.\n\n### Run Projection Shape\n\nAdd a singular approval projection to the run lifecycle response:\n\n```json\n{\n  \"status\": { \"kind\": \"pending\", \"reason\": \"approval_required\" },\n  \"approval\": {\n    \"state\": \"pending\",\n    \"requested_at\": \"2026-05-23T12:00:00Z\",\n    \"decided_at\": null,\n    \"denial_reason\": null\n  }\n}\n```\n\nFor runs that never needed approval:\n\n```json\n{\n  \"status\": { \"kind\": \"runnable\" },\n  \"approval\": null\n}\n```\n\n## Implementation Tasks\n\n### Task 1: Replace Queued With Pending And Runnable In Shared Types\n\n**Files:**\n\n- Modify `lib/crates/fabro-types/src/status.rs`\n- Modify `lib/crates/fabro-types/src/lib.rs`\n- Modify `lib/crates/fabro-api/tests/status_round_trip.rs`\n\n- [ ] Add `PendingReason` with serde and strum snake_case behavior.\n- [ ] Remove `RunStatusKind::Queued` and `RunStatus::Queued`.\n- [ ] Add `RunStatusKind::Pending`, `RunStatusKind::Runnable`, `RunStatus::Pending { reason }`, and `RunStatus::Runnable`.\n- [ ] Add `FailureReason::ApprovalDenied`.\n- [ ] Update `RunStatus::is_active`, `is_terminal`, `is_immutable`, `requires_force_to_delete`, `kind`, `Display`, and transition tests.\n- [ ] Allow transitions:\n  - `Submitted -> Pending`\n  - `Submitted -> Runnable`\n  - `Pending -> Runnable`\n  - `Pending -> Failed { reason: ApprovalDenied | Cancelled }`\n  - `Runnable -> Starting`\n  - `Runnable -> Failed { reason: Cancelled }`\n  - `Pending | Runnable -> Removing`\n- [ ] Remove direct `Submitted -> Starting` except where tests explicitly build synthetic already-starting projections.\n- [ ] Run `cargo nextest run -p fabro-types status`.\n\n### Task 2: Add Lifecycle Events And Projection State\n\n**Files:**\n\n- Modify `lib/crates/fabro-types/src/run_event/mod.rs`\n- Modify `lib/crates/fabro-types/src/run_event/run.rs`\n- Modify `lib/crates/fabro-workflow/src/event/events.rs`\n- Modify `lib/crates/fabro-workflow/src/event/convert.rs`\n- Modify `lib/crates/fabro-workflow/src/event/names.rs`\n- Modify `lib/crates/fabro-store/src/run_state.rs`\n- Modify `lib/crates/fabro-types/src/run_projection.rs`\n- Modify `lib/crates/fabro-types/src/run_summary.rs`\n\n- [ ] Add typed event property structs:\n  - `RunStartRequestedProps { resume: bool }`\n  - `RunPendingProps { reason: PendingReason }`\n  - `RunApprovedProps {}`\n  - `RunDeniedProps { reason: Option<String> }`\n  - `RunRunnableProps { source: RunRunnableSource }`\n- [ ] Add `RunRunnableSource::{StartRequested, Approved}`.\n- [ ] Remove `RunQueued` and all `run.queued` event handling.\n- [ ] Add `RunApproval` projection data with `state`, `requested_at`, `decided_at`, and `denial_reason`.\n- [ ] Apply events in projection:\n  - `run.start_requested` records the request only.\n  - `run.pending` sets `Pending { reason }` and creates `approval.state = pending` for `approval_required`.\n  - `run.approved` marks approval approved without changing status.\n  - `run.denied` marks approval denied without changing status.\n  - `run.runnable` sets `Runnable`.\n  - `run.failed` remains responsible for terminal failure state.\n- [ ] Add serde round-trip tests for all new events.\n- [ ] Add projection tests for pending, approval, denial, and runnable transitions.\n- [ ] Run `cargo nextest run -p fabro-types run_event`.\n- [ ] Run `cargo nextest run -p fabro-store run_state`.\n\n### Task 3: Update OpenAPI And Generated Clients\n\n**Files:**\n\n- Modify `docs/public/api-reference/fabro-api.yaml`\n- Regenerate `lib/crates/fabro-api` generated output through build.rs\n- Regenerate `lib/packages/fabro-api-client`\n\n- [ ] Replace `queued` with `pending` and `runnable` in `RunStatus` and `BoardColumn`.\n- [ ] Add `PendingReason`, `RunApproval`, `RunApprovalState`, `RunRunnableSource`, and `DenyRunRequest` schemas.\n- [ ] Add `POST /api/v1/runs/{id}/approve`.\n- [ ] Add `POST /api/v1/runs/{id}/deny`.\n- [ ] Add `RunLifecycle.approval`.\n- [ ] Run `cargo build -p fabro-api`.\n- [ ] Run `cd lib/packages/fabro-api-client && bun run generate`.\n- [ ] Run `cargo nextest run -p fabro-api`.\n\n### Task 4: Update Server Start, Approval, And Scheduler Behavior\n\n**Files:**\n\n- Modify `lib/crates/fabro-server/src/server/handler/lifecycle.rs`\n- Modify `lib/crates/fabro-server/src/server.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/runs.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/system.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/steer.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/pair.rs`\n\n- [ ] Change `start_run` to emit `run.start_requested`.\n- [ ] In `start_run`, choose the next state:\n  - worker actor starting a child run whose `parent_id` is the worker's run id -> emit `run.pending { approval_required }`\n  - every other valid start request -> emit `run.runnable { source: start_requested }`\n- [ ] Insert managed runs with `Pending` or `Runnable`, never `Queued`.\n- [ ] Add `approve_run`:\n  - allowed only for `Pending { ApprovalRequired }`\n  - emits `run.approved`\n  - emits `run.runnable { source: approved }`\n  - notifies scheduler\n- [ ] Add `deny_run`:\n  - allowed only for `Pending { ApprovalRequired }`\n  - emits `run.denied`\n  - emits `run.failed { reason: ApprovalDenied }`\n  - clears live managed-run state\n- [ ] Change scheduler selection to scan only `RunStatus::Runnable`.\n- [ ] Change `execute_run_in_process` and `execute_run_subprocess` claim checks from `Queued` to `Runnable`.\n- [ ] Update board column mapping:\n  - `Submitted | Pending` -> pending column\n  - `Runnable` -> runnable column\n  - `Starting` -> initializing column\n- [ ] Update cancellation handling so `Pending` and `Runnable` fail with `Cancelled` without starting a worker.\n- [ ] Run `cargo nextest run -p fabro-server lifecycle`.\n- [ ] Run `cargo nextest run -p fabro-server runs`.\n\n### Task 5: Update Fabro Run Tools\n\n**Files:**\n\n- Modify `lib/crates/fabro-tool/src/create.rs`\n- Modify `lib/crates/fabro-tool/src/common.rs`\n- Modify `lib/crates/fabro-tool/src/search.rs`\n- Modify `lib/crates/fabro-tool/src/fabro_client.rs`\n- Modify `lib/crates/fabro-workflow/src/handler/llm/api.rs`\n- Modify `lib/crates/fabro-server/src/run_tool_manifest.rs`\n\n- [ ] Keep `fabro_run_create` defaulting to `start: true`.\n- [ ] Rename `CreatedRunResult.started` to `start_requested`.\n- [ ] For agent-created child runs, expect returned status `pending`.\n- [ ] Keep `ensure_current_run_parent` so run-tool-created runs always have the parent run as `parent_id`.\n- [ ] Update tool summaries from `created N Fabro run(s), started M` to `created N Fabro run(s), start requested for M`.\n- [ ] Run `cargo nextest run -p fabro-tool create`.\n- [ ] Run relevant workflow LLM API tool tests in `cargo nextest run -p fabro-workflow fabro_run`.\n\n### Task 6: Update CLI And Web UI Surfaces\n\n**Files:**\n\n- Modify `lib/crates/fabro-cli/src/commands/runs/list.rs`\n- Modify `lib/crates/fabro-cli/src/commands/run/wait.rs`\n- Modify `lib/crates/fabro-cli/src/commands/run/run_progress/event.rs`\n- Modify `apps/fabro-web/app/data/runs.ts`\n- Modify `apps/fabro-web/app/lib/run-phases.ts`\n- Modify `apps/fabro-web/app/lib/board-events.ts`\n- Modify `apps/fabro-web/app/lib/run-events.ts`\n- Modify affected run detail and board route components under `apps/fabro-web/app/routes/`\n\n- [ ] Replace Queued labels with Pending and Runnable labels.\n- [ ] Add approve and deny actions for `status.kind === \"pending\"` and `lifecycle.approval?.state === \"pending\"`.\n- [ ] Update waterfall phases to derive Submitted, Pending, Runnable, Initializing from `run.start_requested`, `run.pending`, `run.runnable`, `run.starting`, and `run.running`.\n- [ ] Refresh board and run detail views on `run.pending`, `run.runnable`, `run.approved`, and `run.denied`.\n- [ ] Run `cd apps/fabro-web && bun test`.\n- [ ] Run `cd apps/fabro-web && bun run typecheck`.\n\n### Task 7: Remove Queued References And Run Full Verification\n\n**Files:**\n\n- Modify any remaining references found by `rg -n \"Queued|queued|run\\\\.queued\"`.\n- Modify `docs/internal/events.md`.\n- Modify public docs that describe run status or queue behavior.\n\n- [ ] Run `rg -n \"RunStatus::Queued|RunQueued|run\\\\.queued|queued\"` and remove or intentionally replace every product lifecycle reference.\n- [ ] Keep non-run-domain uses of \"queued\" only where the meaning is unrelated, such as UI rebuild queues.\n- [ ] Run `cargo +nightly-2026-04-14 fmt --check --all`.\n- [ ] Run `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n- [ ] Run `cargo nextest run --workspace`.\n- [ ] Run `cd apps/fabro-web && bun test`.\n- [ ] Run `cd apps/fabro-web && bun run typecheck`.\n\n## Acceptance Criteria\n\n- A normal user-created run moves from `submitted` to `runnable` after start is requested.\n- A parent-generated child run moves from `submitted` to `pending` after start is requested by the parent worker.\n- Pending child runs do not start until approved.\n- Approval moves the run to `runnable`; scheduler then starts it when capacity is available.\n- Denial moves the run to failed with `approval_denied`.\n- No public API, event, generated client, CLI, or web UI surface exposes `queued` for run lifecycle.\n",
+          "internal.run_id": "01KSAQHF95BET5A7XQX42SPFJ4",
+          "failure_signature": ""
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-23T15:34:19.886886Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "current_node": "toolchain",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "failure_class": "",
+          "internal.retry_count.toolchain": 0,
+          "internal.run_id": "01KSAQHF95BET5A7XQX42SPFJ4",
+          "outcome": "succeeded",
+          "internal.retry_count.start": 0,
+          "failure_signature": "",
+          "graph.goal": "# Pending Runnable Run Queue Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Replace Fabro's single queued state with explicit `pending` and `runnable` pre-execution states, and require one-time human approval before parent-generated child runs can execute.\n\n**Architecture:** Treat pre-execution approval as durable run lifecycle state, not as an interview, run-control action, or separate approval resource. `pending` means the run is in the queue but unschedulable; `runnable` means it is eligible for the scheduler. The scheduler only claims `runnable` runs.\n\n**Tech Stack:** Rust, Axum, OpenAPI/progenitor, TypeScript generated API client, React, Bun tests, cargo nextest.\n\n---\n\n## Intended Semantics\n\n- Public lifecycle order is `submitted -> pending | runnable -> starting -> running -> terminal`.\n- `pending` has a single reason in v1: `approval_required`.\n- A run can require approval at most once.\n- `auto_approve` remains scoped to in-workflow human prompts and does not bypass pre-execution approval.\n- Denial is terminal and distinct from cancellation: denied runs fail with `approval_denied`.\n- No backwards compatibility is required. Remove `queued` and `run.queued` rather than aliasing them.\n\n## Public API And Event Surface\n\n### Status Types\n\n`RunStatus` should become:\n\n```rust\npub enum RunStatus {\n    Submitted,\n    Pending { reason: PendingReason },\n    Runnable,\n    Starting,\n    Running,\n    Blocked { blocked_reason: BlockedReason },\n    Paused { prior_block: Option<BlockedReason> },\n    Removing,\n    Succeeded { reason: SuccessReason },\n    Failed { reason: FailureReason },\n    Dead,\n}\n\npub enum PendingReason {\n    ApprovalRequired,\n}\n```\n\nAdd `FailureReason::ApprovalDenied`.\n\n### Events\n\nAdd these typed run events:\n\n```text\nrun.start_requested\nrun.pending\nrun.approved\nrun.denied\nrun.runnable\n```\n\nEvent properties:\n\n```json\n{ \"event\": \"run.start_requested\", \"properties\": { \"resume\": false } }\n{ \"event\": \"run.pending\", \"properties\": { \"reason\": \"approval_required\" } }\n{ \"event\": \"run.approved\", \"properties\": {} }\n{ \"event\": \"run.denied\", \"properties\": { \"reason\": \"Not approved for execution\" } }\n{ \"event\": \"run.runnable\", \"properties\": { \"source\": \"approved\" } }\n```\n\n`run.runnable.properties.source` is one of:\n\n```text\nstart_requested\napproved\n```\n\nActor identity belongs in the canonical event envelope, not in event properties.\n\n### REST API\n\nKeep run creation and start request separate:\n\n```http\nPOST /api/v1/runs\nPOST /api/v1/runs/{id}/start\nPOST /api/v1/runs/{id}/approve\nPOST /api/v1/runs/{id}/deny\n```\n\n`POST /runs/{id}/deny` accepts:\n\n```json\n{ \"reason\": \"Not approved for execution\" }\n```\n\n`reason` is optional. Empty or whitespace-only reasons are stored as absent.\n\n### Run Projection Shape\n\nAdd a singular approval projection to the run lifecycle response:\n\n```json\n{\n  \"status\": { \"kind\": \"pending\", \"reason\": \"approval_required\" },\n  \"approval\": {\n    \"state\": \"pending\",\n    \"requested_at\": \"2026-05-23T12:00:00Z\",\n    \"decided_at\": null,\n    \"denial_reason\": null\n  }\n}\n```\n\nFor runs that never needed approval:\n\n```json\n{\n  \"status\": { \"kind\": \"runnable\" },\n  \"approval\": null\n}\n```\n\n## Implementation Tasks\n\n### Task 1: Replace Queued With Pending And Runnable In Shared Types\n\n**Files:**\n\n- Modify `lib/crates/fabro-types/src/status.rs`\n- Modify `lib/crates/fabro-types/src/lib.rs`\n- Modify `lib/crates/fabro-api/tests/status_round_trip.rs`\n\n- [ ] Add `PendingReason` with serde and strum snake_case behavior.\n- [ ] Remove `RunStatusKind::Queued` and `RunStatus::Queued`.\n- [ ] Add `RunStatusKind::Pending`, `RunStatusKind::Runnable`, `RunStatus::Pending { reason }`, and `RunStatus::Runnable`.\n- [ ] Add `FailureReason::ApprovalDenied`.\n- [ ] Update `RunStatus::is_active`, `is_terminal`, `is_immutable`, `requires_force_to_delete`, `kind`, `Display`, and transition tests.\n- [ ] Allow transitions:\n  - `Submitted -> Pending`\n  - `Submitted -> Runnable`\n  - `Pending -> Runnable`\n  - `Pending -> Failed { reason: ApprovalDenied | Cancelled }`\n  - `Runnable -> Starting`\n  - `Runnable -> Failed { reason: Cancelled }`\n  - `Pending | Runnable -> Removing`\n- [ ] Remove direct `Submitted -> Starting` except where tests explicitly build synthetic already-starting projections.\n- [ ] Run `cargo nextest run -p fabro-types status`.\n\n### Task 2: Add Lifecycle Events And Projection State\n\n**Files:**\n\n- Modify `lib/crates/fabro-types/src/run_event/mod.rs`\n- Modify `lib/crates/fabro-types/src/run_event/run.rs`\n- Modify `lib/crates/fabro-workflow/src/event/events.rs`\n- Modify `lib/crates/fabro-workflow/src/event/convert.rs`\n- Modify `lib/crates/fabro-workflow/src/event/names.rs`\n- Modify `lib/crates/fabro-store/src/run_state.rs`\n- Modify `lib/crates/fabro-types/src/run_projection.rs`\n- Modify `lib/crates/fabro-types/src/run_summary.rs`\n\n- [ ] Add typed event property structs:\n  - `RunStartRequestedProps { resume: bool }`\n  - `RunPendingProps { reason: PendingReason }`\n  - `RunApprovedProps {}`\n  - `RunDeniedProps { reason: Option<String> }`\n  - `RunRunnableProps { source: RunRunnableSource }`\n- [ ] Add `RunRunnableSource::{StartRequested, Approved}`.\n- [ ] Remove `RunQueued` and all `run.queued` event handling.\n- [ ] Add `RunApproval` projection data with `state`, `requested_at`, `decided_at`, and `denial_reason`.\n- [ ] Apply events in projection:\n  - `run.start_requested` records the request only.\n  - `run.pending` sets `Pending { reason }` and creates `approval.state = pending` for `approval_required`.\n  - `run.approved` marks approval approved without changing status.\n  - `run.denied` marks approval denied without changing status.\n  - `run.runnable` sets `Runnable`.\n  - `run.failed` remains responsible for terminal failure state.\n- [ ] Add serde round-trip tests for all new events.\n- [ ] Add projection tests for pending, approval, denial, and runnable transitions.\n- [ ] Run `cargo nextest run -p fabro-types run_event`.\n- [ ] Run `cargo nextest run -p fabro-store run_state`.\n\n### Task 3: Update OpenAPI And Generated Clients\n\n**Files:**\n\n- Modify `docs/public/api-reference/fabro-api.yaml`\n- Regenerate `lib/crates/fabro-api` generated output through build.rs\n- Regenerate `lib/packages/fabro-api-client`\n\n- [ ] Replace `queued` with `pending` and `runnable` in `RunStatus` and `BoardColumn`.\n- [ ] Add `PendingReason`, `RunApproval`, `RunApprovalState`, `RunRunnableSource`, and `DenyRunRequest` schemas.\n- [ ] Add `POST /api/v1/runs/{id}/approve`.\n- [ ] Add `POST /api/v1/runs/{id}/deny`.\n- [ ] Add `RunLifecycle.approval`.\n- [ ] Run `cargo build -p fabro-api`.\n- [ ] Run `cd lib/packages/fabro-api-client && bun run generate`.\n- [ ] Run `cargo nextest run -p fabro-api`.\n\n### Task 4: Update Server Start, Approval, And Scheduler Behavior\n\n**Files:**\n\n- Modify `lib/crates/fabro-server/src/server/handler/lifecycle.rs`\n- Modify `lib/crates/fabro-server/src/server.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/runs.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/system.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/steer.rs`\n- Modify `lib/crates/fabro-server/src/server/handler/pair.rs`\n\n- [ ] Change `start_run` to emit `run.start_requested`.\n- [ ] In `start_run`, choose the next state:\n  - worker actor starting a child run whose `parent_id` is the worker's run id -> emit `run.pending { approval_required }`\n  - every other valid start request -> emit `run.runnable { source: start_requested }`\n- [ ] Insert managed runs with `Pending` or `Runnable`, never `Queued`.\n- [ ] Add `approve_run`:\n  - allowed only for `Pending { ApprovalRequired }`\n  - emits `run.approved`\n  - emits `run.runnable { source: approved }`\n  - notifies scheduler\n- [ ] Add `deny_run`:\n  - allowed only for `Pending { ApprovalRequired }`\n  - emits `run.denied`\n  - emits `run.failed { reason: ApprovalDenied }`\n  - clears live managed-run state\n- [ ] Change scheduler selection to scan only `RunStatus::Runnable`.\n- [ ] Change `execute_run_in_process` and `execute_run_subprocess` claim checks from `Queued` to `Runnable`.\n- [ ] Update board column mapping:\n  - `Submitted | Pending` -> pending column\n  - `Runnable` -> runnable column\n  - `Starting` -> initializing column\n- [ ] Update cancellation handling so `Pending` and `Runnable` fail with `Cancelled` without starting a worker.\n- [ ] Run `cargo nextest run -p fabro-server lifecycle`.\n- [ ] Run `cargo nextest run -p fabro-server runs`.\n\n### Task 5: Update Fabro Run Tools\n\n**Files:**\n\n- Modify `lib/crates/fabro-tool/src/create.rs`\n- Modify `lib/crates/fabro-tool/src/common.rs`\n- Modify `lib/crates/fabro-tool/src/search.rs`\n- Modify `lib/crates/fabro-tool/src/fabro_client.rs`\n- Modify `lib/crates/fabro-workflow/src/handler/llm/api.rs`\n- Modify `lib/crates/fabro-server/src/run_tool_manifest.rs`\n\n- [ ] Keep `fabro_run_create` defaulting to `start: true`.\n- [ ] Rename `CreatedRunResult.started` to `start_requested`.\n- [ ] For agent-created child runs, expect returned status `pending`.\n- [ ] Keep `ensure_current_run_parent` so run-tool-created runs always have the parent run as `parent_id`.\n- [ ] Update tool summaries from `created N Fabro run(s), started M` to `created N Fabro run(s), start requested for M`.\n- [ ] Run `cargo nextest run -p fabro-tool create`.\n- [ ] Run relevant workflow LLM API tool tests in `cargo nextest run -p fabro-workflow fabro_run`.\n\n### Task 6: Update CLI And Web UI Surfaces\n\n**Files:**\n\n- Modify `lib/crates/fabro-cli/src/commands/runs/list.rs`\n- Modify `lib/crates/fabro-cli/src/commands/run/wait.rs`\n- Modify `lib/crates/fabro-cli/src/commands/run/run_progress/event.rs`\n- Modify `apps/fabro-web/app/data/runs.ts`\n- Modify `apps/fabro-web/app/lib/run-phases.ts`\n- Modify `apps/fabro-web/app/lib/board-events.ts`\n- Modify `apps/fabro-web/app/lib/run-events.ts`\n- Modify affected run detail and board route components under `apps/fabro-web/app/routes/`\n\n- [ ] Replace Queued labels with Pending and Runnable labels.\n- [ ] Add approve and deny actions for `status.kind === \"pending\"` and `lifecycle.approval?.state === \"pending\"`.\n- [ ] Update waterfall phases to derive Submitted, Pending, Runnable, Initializing from `run.start_requested`, `run.pending`, `run.runnable`, `run.starting`, and `run.running`.\n- [ ] Refresh board and run detail views on `run.pending`, `run.runnable`, `run.approved`, and `run.denied`.\n- [ ] Run `cd apps/fabro-web && bun test`.\n- [ ] Run `cd apps/fabro-web && bun run typecheck`.\n\n### Task 7: Remove Queued References And Run Full Verification\n\n**Files:**\n\n- Modify any remaining references found by `rg -n \"Queued|queued|run\\\\.queued\"`.\n- Modify `docs/internal/events.md`.\n- Modify public docs that describe run status or queue behavior.\n\n- [ ] Run `rg -n \"RunStatus::Queued|RunQueued|run\\\\.queued|queued\"` and remove or intentionally replace every product lifecycle reference.\n- [ ] Keep non-run-domain uses of \"queued\" only where the meaning is unrelated, such as UI rebuild queues.\n- [ ] Run `cargo +nightly-2026-04-14 fmt --check --all`.\n- [ ] Run `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n- [ ] Run `cargo nextest run --workspace`.\n- [ ] Run `cd apps/fabro-web && bun test`.\n- [ ] Run `cd apps/fabro-web && bun run typecheck`.\n\n## Acceptance Criteria\n\n- A normal user-created run moves from `submitted` to `runnable` after start is requested.\n- A parent-generated child run moves from `submitted` to `pending` after start is requested by the parent worker.\n- Pending child runs do not start until approved.\n- Approval moves the run to `runnable`; scheduler then starts it when capacity is available.\n- Denial moves the run to failed with `approval_denied`.\n- No public API, event, generated client, CLI, or web UI surface exposes `queued` for run lifecycle.\n",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.node_visit_count": 1,
+          "internal.thread_id": "start",
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "thread.start.current_node": "toolchain",
+          "graph.rankdir": "LR",
+          "internal.fidelity": "compact"
+        },
+        "node_outcomes": {
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "node_visits": {
+          "start": 1,
+          "toolchain": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -543,5 +635,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-23T15:34:17.654626Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T15:34:17.654219Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "toolchain@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T15:34:17.654895Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
