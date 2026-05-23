@@ -1,0 +1,547 @@
+{
+  "title": "Small Default Models and Generated Run Titles",
+  "spec": {
+    "run_id": "01KSAPNHN9QC70047ACRGFKPPY",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Small Default Models and Generated Run Titles\n\n## Summary\n\nAdd a model-level `small_default = true` catalog role, make it easy for Rust call sites to resolve the small default model for a configured provider set, and use that model to generate workflow run titles from the workflow and run inputs.\n\nRuns should still be created immediately. If the create request does not include an explicit `RunManifest.title`, the server persists the existing deterministic inferred title first, then asynchronously asks the small default model for a better title and emits `run.title.updated` if generation succeeds.\n\n## Goals\n\n- Let each provider identify one small/cheap/default utility model without changing its normal `default = true` model.\n- Keep normal model selection and workflow execution precedence unchanged.\n- Give code a direct helper for \"the small default model for these configured providers.\"\n- Generate useful run titles from workflow context, `goal`, and input overrides.\n- Preserve existing explicit title behavior for API callers that already send `RunManifest.title`.\n- Keep run creation reliable when no LLM provider is configured or title generation fails.\n\n## Non-Goals\n\n- Do not add a `fabro run --title` CLI flag in this change.\n- Do not add title generation to post-create `PATCH /runs/{id}` edits.\n- Do not add a multi-provider fallback chain for failed title-generation requests.\n- Do not redact workflow inputs before sending them to the title-generation model.\n\n## Current Behavior\n\n- `RunManifest.title` already exists on the create-run API. The server trims it, rejects blank/control/newline/over-100-character values, and stores it on `run.created`.\n- The regular CLI run path does not expose a `--title` flag today, and the Fabro tool create schema does not expose a `title` field today.\n- If `RunManifest.title` is absent, `fabro_workflow::operations::create` stores `fabro_types::infer_run_title(record.graph.goal())`.\n- Users can later edit titles through `PATCH /api/v1/runs/{id}`, which appends `run.title.updated`.\n\n## Catalog Changes\n\n- Add `small_default: Option<bool>` to `ModelCatalogSettings` and merge it the same way `default` and `probe` are merged.\n- Add `small_default: bool` to the public `Model` type so model-list APIs and generated clients can show the role.\n- Add `small_default: bool` to `CatalogModelSettings` if that keeps role checks consistent with existing `probe` handling.\n- Add a `CatalogBuildError::MultipleProviderSmallDefaults` validation error when a provider has more than one model with `small_default = true`.\n- Allow zero small defaults for a provider. The lookup helper must fall back to that provider's normal default.\n- Allow a higher-precedence catalog layer to clear an inherited small default with `small_default = false`.\n\nBuilt-in small defaults:\n\n- Anthropic: `claude-haiku-4-5`\n- OpenAI: `gpt-5.4-mini`\n- Gemini: `gemini-3.1-flash-lite-preview`\n\n## Catalog Helpers\n\nAdd helpers on `Catalog`:\n\n- `small_default_for_provider(&ProviderId) -> Option<&Model>`\n  - Resolve provider aliases the same way `default_for_provider` does.\n  - Return the provider's `small_default = true` model when present.\n  - Otherwise return `default_for_provider(provider_id)`.\n\n- `small_default_for_configured_ids(&[ProviderId]) -> &Model`\n  - Mirror `default_for_configured_ids`.\n  - If the list is empty, return the global default model.\n  - Otherwise choose the highest-priority configured provider, then return `small_default_for_provider` for that provider.\n  - If that provider has no explicit small default, use its regular default.\n\nExisting `default_for_provider`, `default_for_configured_ids`, and `probe_for_provider` behavior must remain unchanged.\n\n## Title Generation\n\nAdd a workflow/server helper for generated run titles.\n\nInputs to the helper:\n\n- Run ID.\n- Current deterministic title.\n- Workflow target/path/name where available.\n- Workflow goal from the materialized graph.\n- Run input overrides/settings relevant to the workflow.\n- A compact workflow summary, such as stage IDs, labels, and handler types.\n- Selected small-default model ID.\n- LLM credential source/client dependencies already used by server-side LLM calls.\n\nPrompt behavior:\n\n- Ask for a concise human-readable title for the run.\n- Base the title on the workflow identity, goal, and provided inputs.\n- Include input values as-is. Do not call `fabro_redact` and do not redact secrets for this feature.\n- Bound prompt size by truncating large serialized workflow/input sections if necessary.\n- Request structured output with one field: `{ \"title\": \"...\" }`.\n\nGeneration behavior:\n\n- Use the selected small default model.\n- Use a short response budget, for example `max_tokens(64)`.\n- Use a short timeout and low retry count so title generation cannot stall run creation follow-up work.\n- Normalize generated output by trimming, rejecting blank/control/newline output, and truncating generated titles to the existing 100-character title limit.\n- If output is invalid or generation fails, leave the deterministic title unchanged.\n\n## Server Integration\n\n- In the create-run handler, compute whether the request supplied an explicit `RunManifest.title` before creation.\n- Always call existing create logic first so run creation remains synchronous and reliable.\n- If `RunManifest.title` was present, do not generate a title. The API caller intentionally supplied one.\n- If `RunManifest.title` was absent and there is at least one ready configured LLM provider, spawn an asynchronous title-generation task after the run is persisted.\n- Select the model with `catalog.small_default_for_configured_ids(&configured_provider_ids)`.\n- On successful generated title:\n  - Re-read the run summary/projection.\n  - Append `run.title.updated` with the system actor only if the current title still equals the deterministic title stored at creation.\n  - This prevents overwriting a user title edit made through `PATCH /runs/{id}` while generation was in flight.\n- If no providers are configured, or title generation fails, append no event and keep the deterministic title.\n\n## Public Interfaces\n\n- OpenAPI `Model` schema gains required `small_default: boolean`.\n- Generated Rust API types continue reusing the canonical `fabro_model::Model`.\n- Generated TypeScript API client gains `small_default` on `Model`.\n- User configuration docs document `small_default = true` alongside `default` and `probe`.\n- Create-run API semantics remain compatible:\n  - `RunManifest.title` still means \"caller-provided explicit title.\"\n  - Generated titles only apply when `RunManifest.title` is absent.\n\n## Test Plan\n\nCatalog tests:\n\n- Built-in Anthropic small default is `claude-haiku-4-5`.\n- Built-in OpenAI small default is `gpt-5.4-mini`.\n- Built-in Gemini small default is `gemini-3.1-flash-lite-preview`.\n- `small_default_for_provider` returns an explicit small default when configured.\n- `small_default_for_provider` falls back to provider default when no small default exists.\n- Provider aliases resolve for small-default lookup.\n- Multiple small defaults for one provider fail catalog build.\n- Higher-precedence `small_default = false` clears an inherited small default.\n- Existing default/probe tests still pass unchanged.\n\nAPI/client tests:\n\n- Update `fabro-api` model round-trip tests to include `small_default`.\n- Regenerate OpenAPI-derived Rust and TypeScript clients.\n\nTitle-generation tests:\n\n- Prompt construction includes workflow goal and input values without redaction.\n- Prompt construction bounds very large input/workflow sections.\n- Valid generated title is normalized and returned.\n- Blank, newline/control-containing, or invalid generated title falls back to deterministic title.\n- Over-100-character generated title is truncated to the existing title limit.\n- Helper uses the supplied small-default model ID.\n\nServer tests:\n\n- Create without `RunManifest.title` returns the deterministic title immediately, then emits `run.title.updated` when mock title generation succeeds.\n- Create with `RunManifest.title` skips generated title work.\n- No ready LLM providers skips generated title work.\n- LLM title-generation failure leaves deterministic title unchanged.\n- A user `PATCH /runs/{id}` title update made before async generation completes is not overwritten.\n\nSuggested targeted commands:\n\n- `cargo nextest run -p fabro-model`\n- `cargo nextest run -p fabro-workflow`\n- `cargo nextest run -p fabro-server`\n- `cargo build -p fabro-api`\n- `cd lib/packages/fabro-api-client && bun run generate`\n\n## Assumptions\n\n- \"Latest Haiku\" means the latest Haiku model already present in the built-in catalog: `claude-haiku-4-5`.\n- `gpt-5.4-mini` and `gemini-3.1-flash-lite-preview` are sensible small defaults because they are the small/low-cost current variants in the local provider catalogs.\n- Generated title work is best-effort metadata enrichment, not part of run creation success.\n- Raw run inputs may be sent to the configured LLM provider for title generation.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": [],
+          "controls": {
+            "reasoning_effort": null,
+            "speed": null
+          }
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt"
+        },
+        "checkpoint": {
+          "exclude_globs": [],
+          "skip_git_hooks": false
+        },
+        "clone": {
+          "enabled": true
+        },
+        "run_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "meta_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "sandbox": {
+          "provider": "daytona",
+          "preserve": false,
+          "stop_on_terminal": true,
+          "devcontainer": false,
+          "env": {},
+          "docker": {
+            "image": "buildpack-deps:noble",
+            "network_mode": null,
+            "memory_limit": 4000000000,
+            "cpu_quota": 200000,
+            "env_vars": {}
+          },
+          "daytona": {
+            "auto_stop_interval": 30,
+            "labels": {
+              "repo": "fabro-sh/fabro"
+            },
+            "volumes": [],
+            "snapshot": {
+              "name": "fabro-v11",
+              "cpu": 8,
+              "memory_gb": 16,
+              "disk_gb": 20,
+              "dockerfile": {
+                "type": "inline",
+                "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 \\\n        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \\\n        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install real Chromium (not the snap stub) via xtradeb PPA\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        software-properties-common curl gnupg \\\n    && add-apt-repository -y ppa:xtradeb/apps \\\n    && apt-get update \\\n    && apt-get install -y --no-install-recommends chromium \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Wrapper: Chromium needs --no-sandbox when running as root in a container,\n# and --disable-dev-shm-usage avoids crashes from small /dev/shm\nRUN printf '#!/bin/bash\\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage \"$@\"\\n' \\\n        > /usr/local/bin/chromium-wrapper \\\n    && chmod +x /usr/local/bin/chromium-wrapper\n\n# Make the wrapper the default in the system .desktop file and via alternatives\nRUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \\\n        /usr/share/applications/chromium.desktop \\\n    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \\\n        /usr/local/bin/chromium-wrapper 100\n\n# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)\nRUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \\\n    && printf 'WebBrowser=custom-WebBrowser\\n' > /etc/xdg/xfce4/helpers.rc \\\n    && printf '[Desktop Entry]\\n\\\nVersion=1.0\\n\\\nType=X-XFCE-Helper\\n\\\nName=Chromium\\n\\\nIcon=chromium\\n\\\nX-XFCE-Category=WebBrowser\\n\\\nX-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper \"%%s\"\\n\\\nX-XFCE-Commands=/usr/local/bin/chromium-wrapper\\n' \\\n        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\\n        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\\n    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" \\\n        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\\n    && apt-get update && apt-get install -y --no-install-recommends gh \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+              }
+            },
+            "network": null
+          }
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null
+        },
+        "agent": {
+          "fabro_tools": false,
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        },
+        "integrations": {
+          "github": {
+            "permissions": {}
+          }
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "label": {
+              "String": "Implement"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "reasoning_effort": {
+              "String": "xhigh"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "label": {
+              "String": "Start"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "max_visits": {
+              "Integer": 3
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "fmt": {
+          "id": "fmt",
+          "attrs": {
+            "script": {
+              "String": "cargo +nightly-2026-04-14 fmt --all 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Format"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "fmt",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "fmt",
+          "to": "exit",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "goal": {
+          "String": "# Small Default Models and Generated Run Titles\n\n## Summary\n\nAdd a model-level `small_default = true` catalog role, make it easy for Rust call sites to resolve the small default model for a configured provider set, and use that model to generate workflow run titles from the workflow and run inputs.\n\nRuns should still be created immediately. If the create request does not include an explicit `RunManifest.title`, the server persists the existing deterministic inferred title first, then asynchronously asks the small default model for a better title and emits `run.title.updated` if generation succeeds.\n\n## Goals\n\n- Let each provider identify one small/cheap/default utility model without changing its normal `default = true` model.\n- Keep normal model selection and workflow execution precedence unchanged.\n- Give code a direct helper for \"the small default model for these configured providers.\"\n- Generate useful run titles from workflow context, `goal`, and input overrides.\n- Preserve existing explicit title behavior for API callers that already send `RunManifest.title`.\n- Keep run creation reliable when no LLM provider is configured or title generation fails.\n\n## Non-Goals\n\n- Do not add a `fabro run --title` CLI flag in this change.\n- Do not add title generation to post-create `PATCH /runs/{id}` edits.\n- Do not add a multi-provider fallback chain for failed title-generation requests.\n- Do not redact workflow inputs before sending them to the title-generation model.\n\n## Current Behavior\n\n- `RunManifest.title` already exists on the create-run API. The server trims it, rejects blank/control/newline/over-100-character values, and stores it on `run.created`.\n- The regular CLI run path does not expose a `--title` flag today, and the Fabro tool create schema does not expose a `title` field today.\n- If `RunManifest.title` is absent, `fabro_workflow::operations::create` stores `fabro_types::infer_run_title(record.graph.goal())`.\n- Users can later edit titles through `PATCH /api/v1/runs/{id}`, which appends `run.title.updated`.\n\n## Catalog Changes\n\n- Add `small_default: Option<bool>` to `ModelCatalogSettings` and merge it the same way `default` and `probe` are merged.\n- Add `small_default: bool` to the public `Model` type so model-list APIs and generated clients can show the role.\n- Add `small_default: bool` to `CatalogModelSettings` if that keeps role checks consistent with existing `probe` handling.\n- Add a `CatalogBuildError::MultipleProviderSmallDefaults` validation error when a provider has more than one model with `small_default = true`.\n- Allow zero small defaults for a provider. The lookup helper must fall back to that provider's normal default.\n- Allow a higher-precedence catalog layer to clear an inherited small default with `small_default = false`.\n\nBuilt-in small defaults:\n\n- Anthropic: `claude-haiku-4-5`\n- OpenAI: `gpt-5.4-mini`\n- Gemini: `gemini-3.1-flash-lite-preview`\n\n## Catalog Helpers\n\nAdd helpers on `Catalog`:\n\n- `small_default_for_provider(&ProviderId) -> Option<&Model>`\n  - Resolve provider aliases the same way `default_for_provider` does.\n  - Return the provider's `small_default = true` model when present.\n  - Otherwise return `default_for_provider(provider_id)`.\n\n- `small_default_for_configured_ids(&[ProviderId]) -> &Model`\n  - Mirror `default_for_configured_ids`.\n  - If the list is empty, return the global default model.\n  - Otherwise choose the highest-priority configured provider, then return `small_default_for_provider` for that provider.\n  - If that provider has no explicit small default, use its regular default.\n\nExisting `default_for_provider`, `default_for_configured_ids`, and `probe_for_provider` behavior must remain unchanged.\n\n## Title Generation\n\nAdd a workflow/server helper for generated run titles.\n\nInputs to the helper:\n\n- Run ID.\n- Current deterministic title.\n- Workflow target/path/name where available.\n- Workflow goal from the materialized graph.\n- Run input overrides/settings relevant to the workflow.\n- A compact workflow summary, such as stage IDs, labels, and handler types.\n- Selected small-default model ID.\n- LLM credential source/client dependencies already used by server-side LLM calls.\n\nPrompt behavior:\n\n- Ask for a concise human-readable title for the run.\n- Base the title on the workflow identity, goal, and provided inputs.\n- Include input values as-is. Do not call `fabro_redact` and do not redact secrets for this feature.\n- Bound prompt size by truncating large serialized workflow/input sections if necessary.\n- Request structured output with one field: `{ \"title\": \"...\" }`.\n\nGeneration behavior:\n\n- Use the selected small default model.\n- Use a short response budget, for example `max_tokens(64)`.\n- Use a short timeout and low retry count so title generation cannot stall run creation follow-up work.\n- Normalize generated output by trimming, rejecting blank/control/newline output, and truncating generated titles to the existing 100-character title limit.\n- If output is invalid or generation fails, leave the deterministic title unchanged.\n\n## Server Integration\n\n- In the create-run handler, compute whether the request supplied an explicit `RunManifest.title` before creation.\n- Always call existing create logic first so run creation remains synchronous and reliable.\n- If `RunManifest.title` was present, do not generate a title. The API caller intentionally supplied one.\n- If `RunManifest.title` was absent and there is at least one ready configured LLM provider, spawn an asynchronous title-generation task after the run is persisted.\n- Select the model with `catalog.small_default_for_configured_ids(&configured_provider_ids)`.\n- On successful generated title:\n  - Re-read the run summary/projection.\n  - Append `run.title.updated` with the system actor only if the current title still equals the deterministic title stored at creation.\n  - This prevents overwriting a user title edit made through `PATCH /runs/{id}` while generation was in flight.\n- If no providers are configured, or title generation fails, append no event and keep the deterministic title.\n\n## Public Interfaces\n\n- OpenAPI `Model` schema gains required `small_default: boolean`.\n- Generated Rust API types continue reusing the canonical `fabro_model::Model`.\n- Generated TypeScript API client gains `small_default` on `Model`.\n- User configuration docs document `small_default = true` alongside `default` and `probe`.\n- Create-run API semantics remain compatible:\n  - `RunManifest.title` still means \"caller-provided explicit title.\"\n  - Generated titles only apply when `RunManifest.title` is absent.\n\n## Test Plan\n\nCatalog tests:\n\n- Built-in Anthropic small default is `claude-haiku-4-5`.\n- Built-in OpenAI small default is `gpt-5.4-mini`.\n- Built-in Gemini small default is `gemini-3.1-flash-lite-preview`.\n- `small_default_for_provider` returns an explicit small default when configured.\n- `small_default_for_provider` falls back to provider default when no small default exists.\n- Provider aliases resolve for small-default lookup.\n- Multiple small defaults for one provider fail catalog build.\n- Higher-precedence `small_default = false` clears an inherited small default.\n- Existing default/probe tests still pass unchanged.\n\nAPI/client tests:\n\n- Update `fabro-api` model round-trip tests to include `small_default`.\n- Regenerate OpenAPI-derived Rust and TypeScript clients.\n\nTitle-generation tests:\n\n- Prompt construction includes workflow goal and input values without redaction.\n- Prompt construction bounds very large input/workflow sections.\n- Valid generated title is normalized and returned.\n- Blank, newline/control-containing, or invalid generated title falls back to deterministic title.\n- Over-100-character generated title is truncated to the existing title limit.\n- Helper uses the supplied small-default model ID.\n\nServer tests:\n\n- Create without `RunManifest.title` returns the deterministic title immediately, then emits `run.title.updated` when mock title generation succeeds.\n- Create with `RunManifest.title` skips generated title work.\n- No ready LLM providers skips generated title work.\n- LLM title-generation failure leaves deterministic title unchanged.\n- A user `PATCH /runs/{id}` title update made before async generation completes is not overwritten.\n\nSuggested targeted commands:\n\n- `cargo nextest run -p fabro-model`\n- `cargo nextest run -p fabro-workflow`\n- `cargo nextest run -p fabro-server`\n- `cargo build -p fabro-api`\n- `cd lib/packages/fabro-api-client && bun run generate`\n\n## Assumptions\n\n- \"Latest Haiku\" means the latest Haiku model already present in the built-in catalog: `claude-haiku-4-5`.\n- `gpt-5.4-mini` and `gemini-3.1-flash-lite-preview` are sensible small defaults because they are the small/low-cost current variants in the local provider catalogs.\n- Generated title work is best-effort metadata enrichment, not part of run creation success.\n- Raw run inputs may be sent to the configured LLM provider for title generation.\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "rankdir": {
+          "String": "LR"
+        }
+      }
+    },
+    "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\", model=\"gpt-55\", reasoning_effort=\"xhigh\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all clippy lint warnings, test failures, and generated docs errors.\", max_visits=3]\n    fmt               [label=\"Format\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 fmt --all 2>&1\", max_retries=0]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> fmt   [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n    fmt -> exit\n}\n",
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.241.0-nightly.1"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.242.0-nightly.1",
+        "name": "fabro-cli",
+        "version": "0.242.0-nightly.1"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github"
+      }
+    },
+    "manifest_blob": "407295a97a87f152e6774bc53385c095c44eacbccad7e7f6be8d20fdd5e426d9",
+    "definition_blob": "811fd5dcda24924503c13891abfcd3d34877f7defa3c70aa3e1a748040f0532b",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "59f80c91901b628927b8905ea7742d245de16ba3",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "failed",
+        "remote": "origin",
+        "branch": "main",
+        "message": "Engine error: git push failed: To github.com:fabro-sh/fabro.git\n ! [rejected]            main -> main (fetch first)\nerror: failed to push some refs to 'github.com:fabro-sh/fabro.git'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally. This is usually caused by another repository pushing to\nhint: the same ref. If you want to integrate the remote changes, use\nhint: 'git pull' before pushing again.\nhint: See the 'Note about fast-forwards' in 'git push --help' for details.\n"
+      }
+    }
+  },
+  "web_url": "http://127.0.0.1:32276/runs/01KSAPNHN9QC70047ACRGFKPPY",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-23T15:18:41.629263Z",
+  "last_event_at": "2026-05-23T15:18:58.036198Z",
+  "pending_control": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "sandbox": {
+    "provider": "daytona",
+    "image": "buildpack-deps:noble",
+    "snapshot": "fabro-v11",
+    "runtime": {
+      "id": "fabro-01KSAPNHN9QC70047ACRGFKPPY",
+      "working_directory": "/home/daytona/workspace/fabro",
+      "repo_cloned": true,
+      "clone_origin_url": "https://github.com/fabro-sh/fabro",
+      "clone_branch": "main",
+      "workspace_root": "/home/daytona/workspace",
+      "repos_root": "/home/daytona/repos",
+      "primary_repo_path": "/home/daytona/repos/fabro-sh/fabro",
+      "primary_repo_link": "/home/daytona/workspace/fabro"
+    }
+  },
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
