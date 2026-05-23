@@ -2604,6 +2604,7 @@ dependencies = [
  "git2",
  "hex",
  "httpmock",
+ "jsonschema",
  "md5",
  "miette",
  "mime_guess",
