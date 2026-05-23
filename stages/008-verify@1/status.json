@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "Script failed with exit code: 128\n\n## output\nFrom https://github.com/fabro-sh/fabro\n * branch                main       -> FETCH_HEAD\n   a64a58d56..caba862a3  main       -> origin/main\nCommitter identity unknown\n\n*** Please tell me who you are.\n\nRun\n\n  git config --global user.email \"you@example.com\"\n  git config --global user.name \"Your Name\"\n\nto set your account's default identity.\nOmit --global to set the identity only in this repository.\n\nfatal: unable to auto-detect email address (got 'root@e2a149ab-1b61-4353-80c8-bfa6c242b88e.(none)')\n",
+  "timestamp": "2026-05-23T17:43:42.661094Z"
+}
