@@ -485,14 +485,106 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KSB6X4YBFK3TZ7TA1GXGEFZR",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-23T20:02:44.865098Z",
+    "run_branch": "fabro/run/01KSB6X4YBFK3TZ7TA1GXGEFZR",
+    "base_sha": "0f583f8e8b0eedc90e62eaeb0656f6cd366dd103"
   },
-  "status_updated_at": "2026-05-23T20:02:27.965532Z",
-  "last_event_at": "2026-05-23T20:02:44.583674Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-23T20:02:44.865212Z",
+  "last_event_at": "2026-05-23T20:02:46.868708Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 20,
+      "checkpoint": {
+        "timestamp": "2026-05-23T20:02:46.868603Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.node_visit_count": 1,
+          "outcome": "succeeded",
+          "failure_class": "",
+          "graph.goal": "# Expose Agent Permission Level on StageProjection\n\n## Context\n\nThe agent stage detail page (e.g. `/runs/{id}/stages/implement@1`) will gain a new left sidebar showing live agent runtime data (todos, subagents, skills, MCPs, permissions, context window). Of those six items, **permissions** is the only one not currently flowing to the API. `PermissionLevel` (`ReadOnly | ReadWrite | Full`) is known inside `fabro-agent` at session start but never reaches `StageProjection`. Add it by extending an existing event (`agent.session.activated`) — no new event — and folding it into the stage projection like `provider_used` already is.\n\n## Approach\n\nSingle field: `permission_level: Option<PermissionLevel>` on `StageProjection`, populated by extending the already-projected `agent.session.activated` event.\n\n### Changes\n\n1. **`lib/crates/fabro-agent/src/config.rs`** — Add `permission_level: Option<PermissionLevel>` to `SessionOptions` (~line 121) so the level survives next to `tool_access_policy`. CLI already has the raw level at `cli.rs:130-179` (`build_tool_approval`); thread it into `SessionOptions` at the construction site (~`cli.rs:575`).\n\n2. **`lib/crates/fabro-types/src/run_event/agent.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `AgentSessionActivatedProps` (lines 31-44). Import `PermissionLevel` from `crate::session`. `#[serde(skip_serializing_if = \"Option::is_none\")]` to keep payloads compact on older runs.\n\n3. **`lib/crates/fabro-workflow/src/handler/llm/api.rs`** — At the `agent.session.activated` emission site, read `permission_level` from the session config and set the new prop. Mirror how existing fields (`provider`, `model`, `reasoning_effort`) are populated.\n\n4. **`lib/crates/fabro-types/src/run_projection.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `StageProjection` (near line 158, alongside `skills`/`mcp_servers`). `#[serde(skip_serializing_if = \"Option::is_none\")]`. `PermissionLevel` already lives in this crate (`session.rs:28`) and is serde-derived, so reuse it directly — no new type.\n\n5. **`lib/crates/fabro-store/src/run_state.rs`** — In `apply_event` for `EventBody::AgentSessionActivated` (lines 403-409, where `provider_used` is already set), also write `stage.permission_level = props.permission_level`.\n\n6. **`docs/public/api-reference/fabro-api.yaml`** —\n   - Add a `PermissionLevel` schema (string enum: `read-only`, `read-write`, `full`) under `components/schemas`. Match the serde rename used by the Rust enum at `fabro-types/src/session.rs:28`.\n   - Add `permission_level` (nullable, `$ref: PermissionLevel`) to `StageProjection` (lines 7869-7960).\n   - Add `permission_level` to `AgentSessionActivatedProps` schema.\n\n7. **`lib/crates/fabro-api/build.rs`** — Add `with_replacement(\"PermissionLevel\", \"fabro_types::PermissionLevel\", …)` to the progenitor type replacements (around line 355, next to `SkillsProjection`). `cargo build -p fabro-api` regenerates.\n\n8. **`lib/packages/fabro-api-client`** — Regenerate the TS client: `cd lib/packages/fabro-api-client && bun run generate`. No hand edits.\n\n### Files to reuse, not duplicate\n\n- `PermissionLevel` enum at `lib/crates/fabro-types/src/session.rs:28` — use as-is, do not create a parallel API DTO. Per `CLAUDE.md` \"API type ownership\", search-then-reuse: this is the canonical type.\n- Projection-folding pattern at `lib/crates/fabro-store/src/run_state.rs:545-587` (skills/mcp_servers) — same shape of edit.\n\n### Frontend (out of scope for this change, but unblocked by it)\n\nThe agent stage sidebar component (`apps/fabro-web/app/components/stage-sidebar.tsx`) currently does not render skills/MCPs either. The follow-up UI work reads `stage.permission_level` from `useRunStages(id)` and shows a single badge. No new client query needed.\n\n## Verification\n\n1. **Unit test** — Add to `lib/crates/fabro-store/src/run_state.rs` next to `skill_events_update_stage_projection` (lines 3966-4028). Pattern:\n   - Build `initialized_projection()`.\n   - Apply an `AgentSessionActivated` envelope with `permission_level: Some(PermissionLevel::ReadOnly)` and a `visit`.\n   - Assert `state.stage(&stage_id).unwrap().permission_level == Some(PermissionLevel::ReadOnly)`.\n   - Repeat with `None` (legacy event) and assert field stays `None`.\n\n2. **Round-trip test** — Add to `lib/crates/fabro-api/tests/stage_projection_round_trip.rs` to confirm JSON parity between `fabro_types::StageProjection` and the OpenAPI schema (`CLAUDE.md` API type ownership rule).\n\n3. **Conformance** — `cargo nextest run -p fabro-server` catches OpenAPI/router drift.\n\n4. **Format/lint** —\n   - `cargo +nightly-2026-04-14 fmt --check --all`\n   - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n5. **Manual end-to-end** —\n   - `fabro server start` and run a workflow with `--permissions read-only`.\n   - `curl http://127.0.0.1:32276/api/v1/runs/{id}/stages | jq '.stages[].permission_level'` — expect `\"read-only\"` on agent stages, `null` on non-agent stages.\n   - `bun run typecheck` in `apps/fabro-web` after TS client regen — confirms the new field is typed.\n\n## Notes\n\n- Older events without `permission_level` (in-flight runs, persisted history) deserialize to `None`; projection field stays `Option`. No migration needed.\n- Per the user's six-item sidebar plan, this is the only item requiring backend changes. Todos/subagents/skills/MCPs are already on `StageProjection`; context-window breakdown is deferred.\n",
+          "internal.run_id": "01KSB6X4YBFK3TZ7TA1GXGEFZR",
+          "graph.rankdir": "LR",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.fidelity": "compact",
+          "internal.thread_id": null,
+          "internal.retry_count.start": 0,
+          "failure_signature": "",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "current_node": "start"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-23T20:02:48.195839Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "current_node": "toolchain",
+          "graph.rankdir": "LR",
+          "internal.run_id": "01KSB6X4YBFK3TZ7TA1GXGEFZR",
+          "internal.thread_id": "start",
+          "outcome": "succeeded",
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "thread.start.current_node": "toolchain",
+          "graph.goal": "# Expose Agent Permission Level on StageProjection\n\n## Context\n\nThe agent stage detail page (e.g. `/runs/{id}/stages/implement@1`) will gain a new left sidebar showing live agent runtime data (todos, subagents, skills, MCPs, permissions, context window). Of those six items, **permissions** is the only one not currently flowing to the API. `PermissionLevel` (`ReadOnly | ReadWrite | Full`) is known inside `fabro-agent` at session start but never reaches `StageProjection`. Add it by extending an existing event (`agent.session.activated`) — no new event — and folding it into the stage projection like `provider_used` already is.\n\n## Approach\n\nSingle field: `permission_level: Option<PermissionLevel>` on `StageProjection`, populated by extending the already-projected `agent.session.activated` event.\n\n### Changes\n\n1. **`lib/crates/fabro-agent/src/config.rs`** — Add `permission_level: Option<PermissionLevel>` to `SessionOptions` (~line 121) so the level survives next to `tool_access_policy`. CLI already has the raw level at `cli.rs:130-179` (`build_tool_approval`); thread it into `SessionOptions` at the construction site (~`cli.rs:575`).\n\n2. **`lib/crates/fabro-types/src/run_event/agent.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `AgentSessionActivatedProps` (lines 31-44). Import `PermissionLevel` from `crate::session`. `#[serde(skip_serializing_if = \"Option::is_none\")]` to keep payloads compact on older runs.\n\n3. **`lib/crates/fabro-workflow/src/handler/llm/api.rs`** — At the `agent.session.activated` emission site, read `permission_level` from the session config and set the new prop. Mirror how existing fields (`provider`, `model`, `reasoning_effort`) are populated.\n\n4. **`lib/crates/fabro-types/src/run_projection.rs`** — Add `pub permission_level: Option<PermissionLevel>` to `StageProjection` (near line 158, alongside `skills`/`mcp_servers`). `#[serde(skip_serializing_if = \"Option::is_none\")]`. `PermissionLevel` already lives in this crate (`session.rs:28`) and is serde-derived, so reuse it directly — no new type.\n\n5. **`lib/crates/fabro-store/src/run_state.rs`** — In `apply_event` for `EventBody::AgentSessionActivated` (lines 403-409, where `provider_used` is already set), also write `stage.permission_level = props.permission_level`.\n\n6. **`docs/public/api-reference/fabro-api.yaml`** —\n   - Add a `PermissionLevel` schema (string enum: `read-only`, `read-write`, `full`) under `components/schemas`. Match the serde rename used by the Rust enum at `fabro-types/src/session.rs:28`.\n   - Add `permission_level` (nullable, `$ref: PermissionLevel`) to `StageProjection` (lines 7869-7960).\n   - Add `permission_level` to `AgentSessionActivatedProps` schema.\n\n7. **`lib/crates/fabro-api/build.rs`** — Add `with_replacement(\"PermissionLevel\", \"fabro_types::PermissionLevel\", …)` to the progenitor type replacements (around line 355, next to `SkillsProjection`). `cargo build -p fabro-api` regenerates.\n\n8. **`lib/packages/fabro-api-client`** — Regenerate the TS client: `cd lib/packages/fabro-api-client && bun run generate`. No hand edits.\n\n### Files to reuse, not duplicate\n\n- `PermissionLevel` enum at `lib/crates/fabro-types/src/session.rs:28` — use as-is, do not create a parallel API DTO. Per `CLAUDE.md` \"API type ownership\", search-then-reuse: this is the canonical type.\n- Projection-folding pattern at `lib/crates/fabro-store/src/run_state.rs:545-587` (skills/mcp_servers) — same shape of edit.\n\n### Frontend (out of scope for this change, but unblocked by it)\n\nThe agent stage sidebar component (`apps/fabro-web/app/components/stage-sidebar.tsx`) currently does not render skills/MCPs either. The follow-up UI work reads `stage.permission_level` from `useRunStages(id)` and shows a single badge. No new client query needed.\n\n## Verification\n\n1. **Unit test** — Add to `lib/crates/fabro-store/src/run_state.rs` next to `skill_events_update_stage_projection` (lines 3966-4028). Pattern:\n   - Build `initialized_projection()`.\n   - Apply an `AgentSessionActivated` envelope with `permission_level: Some(PermissionLevel::ReadOnly)` and a `visit`.\n   - Assert `state.stage(&stage_id).unwrap().permission_level == Some(PermissionLevel::ReadOnly)`.\n   - Repeat with `None` (legacy event) and assert field stays `None`.\n\n2. **Round-trip test** — Add to `lib/crates/fabro-api/tests/stage_projection_round_trip.rs` to confirm JSON parity between `fabro_types::StageProjection` and the OpenAPI schema (`CLAUDE.md` API type ownership rule).\n\n3. **Conformance** — `cargo nextest run -p fabro-server` catches OpenAPI/router drift.\n\n4. **Format/lint** —\n   - `cargo +nightly-2026-04-14 fmt --check --all`\n   - `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n\n5. **Manual end-to-end** —\n   - `fabro server start` and run a workflow with `--permissions read-only`.\n   - `curl http://127.0.0.1:32276/api/v1/runs/{id}/stages | jq '.stages[].permission_level'` — expect `\"read-only\"` on agent stages, `null` on non-agent stages.\n   - `bun run typecheck` in `apps/fabro-web` after TS client regen — confirms the new field is typed.\n\n## Notes\n\n- Older events without `permission_level` (in-flight runs, persisted history) deserialize to `None`; projection field stays `Option`. No migration needed.\n- Per the user's six-item sidebar plan, this is the only item requiring backend changes. Todos/subagents/skills/MCPs are already on `StageProjection`; context-window breakdown is deferred.\n",
+          "failure_class": "",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "failure_signature": "",
+          "internal.retry_count.toolchain": 0,
+          "internal.retry_count.start": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "node_outcomes": {
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "node_visits": {
+          "start": 1,
+          "toolchain": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -512,5 +604,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "toolchain@1": {
+      "first_event_seq": 21,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T20:02:46.868687Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    },
+    "start@1": {
+      "first_event_seq": 17,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-23T20:02:46.868415Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T20:02:46.867893Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    }
+  }
 }
