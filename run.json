@@ -512,14 +512,106 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KSAJRA1SB258HTA5E7VRNH1T",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-23T14:10:36.810738Z",
+    "run_branch": "fabro/run/01KSAJRA1SB258HTA5E7VRNH1T",
+    "base_sha": "6cb3d03ade338afb2139523d5f5aab7fb578af3d"
   },
-  "status_updated_at": "2026-05-23T14:10:17.834657Z",
-  "last_event_at": "2026-05-23T14:10:35.662315Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-23T14:10:36.810792Z",
+  "last_event_at": "2026-05-23T14:10:38.675121Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 19,
+      "checkpoint": {
+        "timestamp": "2026-05-23T14:10:38.674853Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_signature": "",
+          "graph.rankdir": "LR",
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "current_node": "start",
+          "failure_class": "",
+          "internal.node_visit_count": 1,
+          "internal.run_id": "01KSAJRA1SB258HTA5E7VRNH1T",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "graph.goal": "# Slack Run Lifecycle Notifications\n\n## Summary\n\nAdd Slack notifications for `run.started`, `run.completed`, and `run.failed` using the existing `[run.notifications]` namespace as the per-run/per-workflow source of truth. Keep Slack interviews as separate behavior sharing the same Slack connection, and do not move notification settings to server config.\n\n## Key Changes\n\n- Treat configured routes like this as active runtime subscriptions:\n\n  ```toml\n  [run.notifications.deploys]\n  enabled = true\n  provider = \"slack\"\n  events = [\"run.started\", \"run.completed\", \"run.failed\"]\n\n  [run.notifications.deploys.slack]\n  channel = \"#deploys\"\n  ```\n\n- Require `[run.notifications.<name>.slack].channel` for lifecycle Slack notifications; skip and log a warning if missing or unresolved.\n- Start `SlackService` when Slack credentials are present, even if `server.integrations.slack.default_channel` is absent. Keep `default_channel` only for the existing interview path.\n- Keep interview messages and lifecycle notifications independent:\n  - interviews keep `posted_messages` and `thread_registry` behavior\n  - lifecycle notifications are fire-and-forget and never accept answers or update messages\n\n## Implementation\n\n- In `lib/crates/fabro-server/src/server.rs`, extend `SlackService::handle_event`:\n  - Existing interview event handling remains unchanged.\n  - Add a lifecycle path for `RunStarted`, `RunCompleted`, and `RunFailed`.\n  - For lifecycle events, load the cached run projection, inspect `projection.spec.settings.run.notifications`, select enabled Slack routes whose `events` contains the current event name, resolve each route channel, and post once per route.\n- In `lib/crates/fabro-slack/src/blocks.rs`, add lifecycle-specific Block Kit builders separate from interview builders.\n  - Include run ID, Fabro run link when available, workflow label, result when applicable, duration when applicable, and PR info when available.\n  - Use existing Slack escaping/truncation patterns for all untrusted text.\n- Derive fields as follows:\n  - workflow: workflow name, then workflow slug, then graph name, then `run.started` event name\n  - result: completed status/reason or failed reason/message\n  - duration: `RunTiming.wall_time_ms` from completed/failed events, formatted compactly\n  - PR: latest prior `pull_request.created` event for number/title/link; if unavailable, fall back to projection `PullRequestLink` with number/link only\n- Update public docs for Slack and run configuration to document `[run.notifications]` and remove or qualify the \"interviews only\" limitation.\n\n## Test Plan\n\n- Add `fabro-slack` unit tests for lifecycle block rendering, escaping, truncation, run links, duration formatting, failed/completed variants, and optional PR fields.\n- Add server tests with a fake Slack endpoint/client path proving:\n  - `run.started` posts for a matching enabled route\n  - `run.completed` includes result and duration\n  - `run.failed` includes failure result/message and duration\n  - non-matching events and disabled routes do not post\n  - missing lifecycle route channel is skipped and does not affect other routes\n  - prior `pull_request.created` adds PR number/title/link\n  - interview Slack messages still use interview state and are not mixed with lifecycle notification state\n\n## Assumptions\n\n- Lifecycle Slack notifications are opt-in only through `[run.notifications]`.\n- `provider = \"slack\"` is required; other providers remain parsed but unsupported.\n- Route-level Slack channel is required for lifecycle notifications.\n- Slack post failures are logged and never fail, block, or alter the run.\n- No GitHub API call is made during notification delivery; PR title comes only from existing run events.\n",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.thread_id": null,
+          "internal.fidelity": "compact"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-23T14:10:41.007038Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "failure_signature": "",
+          "internal.run_id": "01KSAJRA1SB258HTA5E7VRNH1T",
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "graph.goal": "# Slack Run Lifecycle Notifications\n\n## Summary\n\nAdd Slack notifications for `run.started`, `run.completed`, and `run.failed` using the existing `[run.notifications]` namespace as the per-run/per-workflow source of truth. Keep Slack interviews as separate behavior sharing the same Slack connection, and do not move notification settings to server config.\n\n## Key Changes\n\n- Treat configured routes like this as active runtime subscriptions:\n\n  ```toml\n  [run.notifications.deploys]\n  enabled = true\n  provider = \"slack\"\n  events = [\"run.started\", \"run.completed\", \"run.failed\"]\n\n  [run.notifications.deploys.slack]\n  channel = \"#deploys\"\n  ```\n\n- Require `[run.notifications.<name>.slack].channel` for lifecycle Slack notifications; skip and log a warning if missing or unresolved.\n- Start `SlackService` when Slack credentials are present, even if `server.integrations.slack.default_channel` is absent. Keep `default_channel` only for the existing interview path.\n- Keep interview messages and lifecycle notifications independent:\n  - interviews keep `posted_messages` and `thread_registry` behavior\n  - lifecycle notifications are fire-and-forget and never accept answers or update messages\n\n## Implementation\n\n- In `lib/crates/fabro-server/src/server.rs`, extend `SlackService::handle_event`:\n  - Existing interview event handling remains unchanged.\n  - Add a lifecycle path for `RunStarted`, `RunCompleted`, and `RunFailed`.\n  - For lifecycle events, load the cached run projection, inspect `projection.spec.settings.run.notifications`, select enabled Slack routes whose `events` contains the current event name, resolve each route channel, and post once per route.\n- In `lib/crates/fabro-slack/src/blocks.rs`, add lifecycle-specific Block Kit builders separate from interview builders.\n  - Include run ID, Fabro run link when available, workflow label, result when applicable, duration when applicable, and PR info when available.\n  - Use existing Slack escaping/truncation patterns for all untrusted text.\n- Derive fields as follows:\n  - workflow: workflow name, then workflow slug, then graph name, then `run.started` event name\n  - result: completed status/reason or failed reason/message\n  - duration: `RunTiming.wall_time_ms` from completed/failed events, formatted compactly\n  - PR: latest prior `pull_request.created` event for number/title/link; if unavailable, fall back to projection `PullRequestLink` with number/link only\n- Update public docs for Slack and run configuration to document `[run.notifications]` and remove or qualify the \"interviews only\" limitation.\n\n## Test Plan\n\n- Add `fabro-slack` unit tests for lifecycle block rendering, escaping, truncation, run links, duration formatting, failed/completed variants, and optional PR fields.\n- Add server tests with a fake Slack endpoint/client path proving:\n  - `run.started` posts for a matching enabled route\n  - `run.completed` includes result and duration\n  - `run.failed` includes failure result/message and duration\n  - non-matching events and disabled routes do not post\n  - missing lifecycle route channel is skipped and does not affect other routes\n  - prior `pull_request.created` adds PR number/title/link\n  - interview Slack messages still use interview state and are not mixed with lifecycle notification state\n\n## Assumptions\n\n- Lifecycle Slack notifications are opt-in only through `[run.notifications]`.\n- `provider = \"slack\"` is required; other providers remain parsed but unsupported.\n- Route-level Slack channel is required for lifecycle notifications.\n- Slack post failures are logged and never fail, block, or alter the run.\n- No GitHub API call is made during notification delivery; PR title comes only from existing run events.\n",
+          "internal.thread_id": "start",
+          "thread.start.current_node": "toolchain",
+          "graph.rankdir": "LR",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.fidelity": "compact",
+          "current_node": "toolchain",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "failure_class": "",
+          "internal.retry_count.toolchain": 0
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "node_visits": {
+          "start": 1,
+          "toolchain": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "provider": "daytona",
@@ -540,5 +632,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 16,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-23T14:10:38.674565Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T14:10:38.674130Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "toolchain@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-23T14:10:38.674938Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
