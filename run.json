@@ -524,7 +524,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-23T15:20:09.659052Z",
-  "last_event_at": "2026-05-23T15:50:54.809125Z",
+  "last_event_at": "2026-05-23T15:51:04.375696Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -1458,9 +1458,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 900,
       "checkpoint": {
-        "timestamp": "2026-05-23T15:50:58.086369Z",
+        "timestamp": "2026-05-23T15:51:04.375226Z",
         "current_node": "fmt",
         "completed_nodes": [
           "start",
@@ -1475,96 +1475,58 @@
         ],
         "node_retries": {},
         "context_values": {
-          "response.implement": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.total_tokens() > 0` as baseline.\n  - Adds local estimates only for turns after that assistant response.\n  - Falls back to existing whole-history `chars / 4` local estimate when no usable assistant usage exists.\n  - Adds `estimate_method` to context-window warning details.\n  - Uses the improved estimate for `CompactionStarted`.\n  - Prevents no-op compaction from emitting `CompactionStarted`.\n- Updated `lib/crates/fabro-agent/src/history.rs`\n  - `History::compact()` now resets preserved assistant `usage` to `TokenCounts::default()`.\n  - Assistant content, tool calls, response IDs, and non-stripped provider parts remain preserved.\n- Added/updated tests in:\n  - `compaction.rs`\n  - `history.rs`\n  - `session.rs`\n- Confirmed no `llm_client.count_input_tokens()` / provider token-count API calls were added.\n\nVerification:\n- Red phase confirmed initially with failing new compaction tests.\n- Passed:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - `cargo nextest run -p fabro-agent session`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`",
-          "internal.retry_count.simplify_gpt": 0,
-          "internal.work_dir": "/home/daytona/workspace/fabro",
-          "internal.retry_count.implement": 0,
-          "current_node": "fmt",
           "internal.retry_count.simplify_opus": 0,
-          "internal.run_id": "01KSAPQQSVK4FY3CWHYVZYD7T6",
-          "thread.implement.current_node": "simplify_opus",
-          "internal.retry_count.verify": 0,
-          "thread.preflight_lint.current_node": "implement",
-          "failure_class": "",
-          "internal.retry_count.preflight_lint": 0,
-          "response.simplify_opus": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate_token_count` (no external callers); tests updated to call `estimate_active_context_usage` directly.\n- Replaced the hand-rolled `ContextEstimateMethod::as_str()` with `#[derive(strum::IntoStaticStr)] #[strum(serialize_all = \"snake_case\")]` per repo convention in CLAUDE.md.\n- Split `estimate_local_token_count(system_prompt, turns)` into two single-purpose helpers (`estimate_turns_local_tokens`, `estimate_system_prompt_local_tokens`) to remove the `\"\"` sentinel call from the baseline+delta path.\n- Replaced the literal `4` in `summary_token_estimate = summary_content.len() / 4` with `APPROX_CHARS_PER_TOKEN`.\n- Made `check_context_usage` return `Option<ContextEstimate>` and `compact_context` accept the pre-computed estimate, eliminating a duplicate full estimate scan per actual compaction. Both fns are now `pub(crate)` since they have no external callers. Dropped the redundant `system_prompt` parameter from `compact_context`.\n- Tightened visibility on `ContextEstimate` and `ContextEstimateMethod` to `pub(crate)`.\n\n**`lib/crates/fabro-agent/src/history.rs`**\n- Moved the free `invalidate_assistant_usage` function into `impl History` as a private `invalidate_preserved_usage` method.\n- Added a doc comment on `History::compact` explaining the usage-invalidation invariant.\n\n**`lib/crates/fabro-agent/src/session.rs`**\n- Rewired `compact_if_needed` to consume the `Option<ContextEstimate>` from `check_context_usage` and pass it through.\n- Renamed misleading test helper `response_with_total_usage` → `response_with_input_tokens` (it only set `input_tokens`, never the other usage fields).\n\n**`lib/crates/fabro-agent/Cargo.toml`**\n- Added `strum.workspace = true` (workspace dep) to support the derive.\n\n## Findings skipped\n\n- **Test builder for `Message::Assistant`** (Quality #3): broader scope than just the diff and only marginal cleanup.\n- **Counting-writer for JSON length** (Efficiency #3): the hot-path concern is real but speculative without profiling; the prevailing pattern in fabro-agent uses `Value::to_string()`. Out of scope.\n- **Extract `\"context_window\"` / `\"estimate_method\"` JSON-key constants** (Quality #5): pre-existing pattern beyond this diff.\n- **Reshape `latest_assistant_usage_baseline` to return `(tokens, &[Message])`** (Quality #4): cosmetic; current `+ 1` indexing is local and clear.\n- **`APPROX_CHARS_PER_TOKEN` in `history.rs` `extract_recent_user_messages`** (Reuse #1): out of scope — that code is not part of the change.\n\nVerification: `cargo nextest run -p fabro-agent` → 447/447 pass; `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` → clean; `cargo +nightly-2026-04-14 fmt --check --all` → clean.",
-          "internal.retry_count.start": 0,
-          "internal.fidelity": "compact",
-          "internal.retry_count.preflight_compile": 0,
-          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-          "thread.verify.current_node": "fmt",
-          "failure_signature": "",
           "thread.simplify_opus.current_node": "simplify_gpt",
-          "thread.simplify_gpt.current_node": "verify",
-          "last_stage": "simplify_gpt",
-          "thread.preflight_compile.current_node": "preflight_lint",
-          "thread.toolchain.current_node": "preflight_compile",
-          "graph.rankdir": "LR",
-          "internal.thread_id": "verify",
-          "outcome": "succeeded",
-          "response.simplify_gpt": "Reviewed the compaction changes vs `origin/main` and launched the three requested parallel review agents.\n\nFixed one correctness/quality issue found during review:\n\n- `estimate_active_context_usage()` local fallback was dividing the system prompt and turns separately, which could differ from the previous whole-history `chars / 4` behavior due to integer rounding.\n- Updated it to sum system prompt chars + turn chars first, then divide once.\n- Reused the same local char/token helper for fallback, post-baseline delta, and summary token estimate.\n- Added a regression test proving whole-history rounding is preserved.\n\nVerification run:\n\n- `cargo nextest run -p fabro-agent compaction` ✅\n- `cargo nextest run -p fabro-agent history` ✅\n- `cargo +nightly-2026-04-14 fmt --check --all` ✅\n- `cargo nextest run -p fabro-agent` ✅ 448 passed\n- `cargo +nightly-2026-04-14 clippy -q --package fabro-agent --tests --no-deps -- -D warnings` ✅\n\nNote: a broader `cargo +nightly-2026-04-14 clippy -q -p fabro-agent --all-targets -- -D warnings` hit an unrelated dependency lint in `fabro-sandbox::SandboxSpec` (`large_enum_variant`), so I reran clippy scoped to `fabro-agent` without dependencies, which passed.",
-          "thread.start.current_node": "toolchain",
-          "internal.retry_count.fmt": 0,
-          "internal.retry_count.toolchain": 0,
-          "internal.node_visit_count": 1,
-          "last_response": "Reviewed the compaction changes vs `origin/main` and launched the three requested parallel review agents.\n\nFixed one correctness/quality issue found during review:\n\n- `estimate_active_context_usage()`",
+          "internal.fidelity": "compact",
+          "current_node": "fmt",
+          "failure_signature": "",
           "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
-          "graph.goal": "# Agent Compaction API Usage Baseline Plan\n\nDate: 2026-05-23\n\n## Summary\n\nChange Fabro's agent compaction trigger from a whole-history `chars / 4`\nestimate to a Claude Code-style hot-path estimate: use the latest real\nassistant response's stored `usage.total_tokens()` as the baseline, then add\nlocal estimates for turns appended after that response. This avoids token-count\nprovider API calls while making compaction sensitive to actual\nprovider-reported context usage, including cache and reasoning tokens.\n\nNo provider token-count API calls should be added in this change.\n\n## Key Changes\n\n- Replace the current compaction estimate in `fabro-agent` with a new\n  active-context estimator.\n- Find the newest assistant turn whose `usage.total_tokens() > 0`.\n- Use that `usage.total_tokens()` as the baseline.\n- Add local estimates only for turns after that assistant turn.\n- If no usable assistant usage exists, fall back to the existing local\n  whole-history estimate.\n- Reuse a shared per-turn local estimate helper so fallback and post-baseline\n  delta counting stay consistent.\n- Keep the estimator local and in-process. Do not call\n  `llm_client.count_input_tokens()` from `compact_if_needed()`.\n\n## Implementation Details\n\n- Update `lib/crates/fabro-agent/src/compaction.rs`:\n  - Add an estimator that returns both token count and method, for example\n    `ApiUsagePlusLocalDelta` or `LocalEstimate`.\n  - Make `check_context_usage()` use the new estimator and include the method\n    in warning `details`.\n  - Make `compact_context()` report the same improved estimate in\n    `CompactionStarted`.\n  - Move `CompactionStarted` emission after the\n    `original_turn_count <= preserve_count` no-op check, so a no-op compact\n    cannot emit started without completed.\n- Update `lib/crates/fabro-agent/src/history.rs`:\n  - In `History::compact()`, invalidate preserved assistant usage by replacing\n    preserved assistant `usage` with `TokenCounts::default()`.\n  - Keep provider parts, response IDs, text, and tool calls unchanged.\n  - Rationale: preserved assistant usage reflects the pre-compaction context and\n    must not become the next baseline. Billing remains available from emitted\n    run events, so mutable runtime history should prefer compaction correctness.\n- Leave public run event names and schemas unchanged:\n  - `agent.compaction.started`\n  - `agent.compaction.completed`\n  - Existing warning event remains a warning with richer `details`.\n\n## Test Plan\n\n- Add unit coverage in `lib/crates/fabro-agent/src/compaction.rs`:\n  - No assistant usage: estimator matches current local whole-history behavior.\n  - Latest assistant usage present: estimator uses `usage.total_tokens()` plus\n    only later tool/user/steering turns.\n  - Usage fields include cache and reasoning through `TokenCounts::total_tokens()`.\n  - Earlier assistant usage is ignored when a later assistant usage exists.\n- Add unit coverage in `lib/crates/fabro-agent/src/history.rs`:\n  - `History::compact()` preserves assistant content, tool calls, and provider\n    parts, but resets preserved assistant usage to default.\n  - Existing OpenAI opaque stripping and Anthropic thinking preservation tests\n    still pass.\n- Add session coverage in `lib/crates/fabro-agent/src/session.rs`:\n  - A short assistant response with high `usage.total_tokens()` triggers\n    compaction even when text length is small.\n  - A compact no-op due to `turns.len() <= preserve_count` does not emit\n    `CompactionStarted`.\n  - Compaction disabled still prevents compaction even if the API usage\n    baseline exceeds threshold.\n- Run targeted verification:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - If those pass, run `cargo nextest run -p fabro-agent`.\n\n## Assumptions\n\n- Runtime/session `Message::Assistant.usage` is safe to invalidate after\n  compaction because authoritative billing comes from emitted workflow/run\n  events, not preserved mutable agent history.\n- A zero-token `TokenCounts::default()` should be treated as no usable API\n  baseline.\n- Provider token-count APIs remain available for future near-threshold\n  confirmation, but are intentionally out of scope for this change.\n"
+          "last_response": "Reviewed the compaction changes vs `origin/main` and launched the three requested parallel review agents.\n\nFixed one correctness/quality issue found during review:\n\n- `estimate_active_context_usage()`",
+          "thread.simplify_gpt.current_node": "verify",
+          "internal.thread_id": "verify",
+          "thread.start.current_node": "toolchain",
+          "thread.verify.current_node": "fmt",
+          "thread.toolchain.current_node": "preflight_compile",
+          "internal.run_id": "01KSAPQQSVK4FY3CWHYVZYD7T6",
+          "outcome": "succeeded",
+          "internal.retry_count.toolchain": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.node_visit_count": 1,
+          "thread.preflight_lint.current_node": "implement",
+          "internal.retry_count.preflight_compile": 0,
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "internal.retry_count.implement": 0,
+          "internal.retry_count.verify": 0,
+          "graph.goal": "# Agent Compaction API Usage Baseline Plan\n\nDate: 2026-05-23\n\n## Summary\n\nChange Fabro's agent compaction trigger from a whole-history `chars / 4`\nestimate to a Claude Code-style hot-path estimate: use the latest real\nassistant response's stored `usage.total_tokens()` as the baseline, then add\nlocal estimates for turns appended after that response. This avoids token-count\nprovider API calls while making compaction sensitive to actual\nprovider-reported context usage, including cache and reasoning tokens.\n\nNo provider token-count API calls should be added in this change.\n\n## Key Changes\n\n- Replace the current compaction estimate in `fabro-agent` with a new\n  active-context estimator.\n- Find the newest assistant turn whose `usage.total_tokens() > 0`.\n- Use that `usage.total_tokens()` as the baseline.\n- Add local estimates only for turns after that assistant turn.\n- If no usable assistant usage exists, fall back to the existing local\n  whole-history estimate.\n- Reuse a shared per-turn local estimate helper so fallback and post-baseline\n  delta counting stay consistent.\n- Keep the estimator local and in-process. Do not call\n  `llm_client.count_input_tokens()` from `compact_if_needed()`.\n\n## Implementation Details\n\n- Update `lib/crates/fabro-agent/src/compaction.rs`:\n  - Add an estimator that returns both token count and method, for example\n    `ApiUsagePlusLocalDelta` or `LocalEstimate`.\n  - Make `check_context_usage()` use the new estimator and include the method\n    in warning `details`.\n  - Make `compact_context()` report the same improved estimate in\n    `CompactionStarted`.\n  - Move `CompactionStarted` emission after the\n    `original_turn_count <= preserve_count` no-op check, so a no-op compact\n    cannot emit started without completed.\n- Update `lib/crates/fabro-agent/src/history.rs`:\n  - In `History::compact()`, invalidate preserved assistant usage by replacing\n    preserved assistant `usage` with `TokenCounts::default()`.\n  - Keep provider parts, response IDs, text, and tool calls unchanged.\n  - Rationale: preserved assistant usage reflects the pre-compaction context and\n    must not become the next baseline. Billing remains available from emitted\n    run events, so mutable runtime history should prefer compaction correctness.\n- Leave public run event names and schemas unchanged:\n  - `agent.compaction.started`\n  - `agent.compaction.completed`\n  - Existing warning event remains a warning with richer `details`.\n\n## Test Plan\n\n- Add unit coverage in `lib/crates/fabro-agent/src/compaction.rs`:\n  - No assistant usage: estimator matches current local whole-history behavior.\n  - Latest assistant usage present: estimator uses `usage.total_tokens()` plus\n    only later tool/user/steering turns.\n  - Usage fields include cache and reasoning through `TokenCounts::total_tokens()`.\n  - Earlier assistant usage is ignored when a later assistant usage exists.\n- Add unit coverage in `lib/crates/fabro-agent/src/history.rs`:\n  - `History::compact()` preserves assistant content, tool calls, and provider\n    parts, but resets preserved assistant usage to default.\n  - Existing OpenAI opaque stripping and Anthropic thinking preservation tests\n    still pass.\n- Add session coverage in `lib/crates/fabro-agent/src/session.rs`:\n  - A short assistant response with high `usage.total_tokens()` triggers\n    compaction even when text length is small.\n  - A compact no-op due to `turns.len() <= preserve_count` does not emit\n    `CompactionStarted`.\n  - Compaction disabled still prevents compaction even if the API usage\n    baseline exceeds threshold.\n- Run targeted verification:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - If those pass, run `cargo nextest run -p fabro-agent`.\n\n## Assumptions\n\n- Runtime/session `Message::Assistant.usage` is safe to invalidate after\n  compaction because authoritative billing comes from emitted workflow/run\n  events, not preserved mutable agent history.\n- A zero-token `TokenCounts::default()` should be treated as no usable API\n  baseline.\n- Provider token-count APIs remain available for future near-threshold\n  confirmation, but are intentionally out of scope for this change.\n",
+          "graph.rankdir": "LR",
+          "failure_class": "",
+          "internal.retry_count.fmt": 0,
+          "response.simplify_opus": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate_token_count` (no external callers); tests updated to call `estimate_active_context_usage` directly.\n- Replaced the hand-rolled `ContextEstimateMethod::as_str()` with `#[derive(strum::IntoStaticStr)] #[strum(serialize_all = \"snake_case\")]` per repo convention in CLAUDE.md.\n- Split `estimate_local_token_count(system_prompt, turns)` into two single-purpose helpers (`estimate_turns_local_tokens`, `estimate_system_prompt_local_tokens`) to remove the `\"\"` sentinel call from the baseline+delta path.\n- Replaced the literal `4` in `summary_token_estimate = summary_content.len() / 4` with `APPROX_CHARS_PER_TOKEN`.\n- Made `check_context_usage` return `Option<ContextEstimate>` and `compact_context` accept the pre-computed estimate, eliminating a duplicate full estimate scan per actual compaction. Both fns are now `pub(crate)` since they have no external callers. Dropped the redundant `system_prompt` parameter from `compact_context`.\n- Tightened visibility on `ContextEstimate` and `ContextEstimateMethod` to `pub(crate)`.\n\n**`lib/crates/fabro-agent/src/history.rs`**\n- Moved the free `invalidate_assistant_usage` function into `impl History` as a private `invalidate_preserved_usage` method.\n- Added a doc comment on `History::compact` explaining the usage-invalidation invariant.\n\n**`lib/crates/fabro-agent/src/session.rs`**\n- Rewired `compact_if_needed` to consume the `Option<ContextEstimate>` from `check_context_usage` and pass it through.\n- Renamed misleading test helper `response_with_total_usage` → `response_with_input_tokens` (it only set `input_tokens`, never the other usage fields).\n\n**`lib/crates/fabro-agent/Cargo.toml`**\n- Added `strum.workspace = true` (workspace dep) to support the derive.\n\n## Findings skipped\n\n- **Test builder for `Message::Assistant`** (Quality #3): broader scope than just the diff and only marginal cleanup.\n- **Counting-writer for JSON length** (Efficiency #3): the hot-path concern is real but speculative without profiling; the prevailing pattern in fabro-agent uses `Value::to_string()`. Out of scope.\n- **Extract `\"context_window\"` / `\"estimate_method\"` JSON-key constants** (Quality #5): pre-existing pattern beyond this diff.\n- **Reshape `latest_assistant_usage_baseline` to return `(tokens, &[Message])`** (Quality #4): cosmetic; current `+ 1` indexing is local and clear.\n- **`APPROX_CHARS_PER_TOKEN` in `history.rs` `extract_recent_user_messages`** (Reuse #1): out of scope — that code is not part of the change.\n\nVerification: `cargo nextest run -p fabro-agent` → 447/447 pass; `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` → clean; `cargo +nightly-2026-04-14 fmt --check --all` → clean.",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "response.implement": "Implemented the Agent Compaction API Usage Baseline plan.\n\nChanges made:\n- Added active context estimation in `lib/crates/fabro-agent/src/compaction.rs`\n  - Uses newest assistant turn with `usage.total_tokens() > 0` as baseline.\n  - Adds local estimates only for turns after that assistant response.\n  - Falls back to existing whole-history `chars / 4` local estimate when no usable assistant usage exists.\n  - Adds `estimate_method` to context-window warning details.\n  - Uses the improved estimate for `CompactionStarted`.\n  - Prevents no-op compaction from emitting `CompactionStarted`.\n- Updated `lib/crates/fabro-agent/src/history.rs`\n  - `History::compact()` now resets preserved assistant `usage` to `TokenCounts::default()`.\n  - Assistant content, tool calls, response IDs, and non-stripped provider parts remain preserved.\n- Added/updated tests in:\n  - `compaction.rs`\n  - `history.rs`\n  - `session.rs`\n- Confirmed no `llm_client.count_input_tokens()` / provider token-count API calls were added.\n\nVerification:\n- Red phase confirmed initially with failing new compaction tests.\n- Passed:\n  - `cargo nextest run -p fabro-agent compaction`\n  - `cargo nextest run -p fabro-agent history`\n  - `cargo nextest run -p fabro-agent session`\n  - `cargo nextest run -p fabro-agent`\n  - `cargo +nightly-2026-04-14 fmt --check --all`\n  - `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`",
+          "last_stage": "simplify_gpt",
+          "thread.implement.current_node": "simplify_opus",
+          "internal.retry_count.preflight_lint": 0,
+          "internal.retry_count.simplify_gpt": 0,
+          "internal.retry_count.start": 0,
+          "response.simplify_gpt": "Reviewed the compaction changes vs `origin/main` and launched the three requested parallel review agents.\n\nFixed one correctness/quality issue found during review:\n\n- `estimate_active_context_usage()` local fallback was dividing the system prompt and turns separately, which could differ from the previous whole-history `chars / 4` behavior due to integer rounding.\n- Updated it to sum system prompt chars + turn chars first, then divide once.\n- Reused the same local char/token helper for fallback, post-baseline delta, and summary token estimate.\n- Added a regression test proving whole-history rounding is preserved.\n\nVerification run:\n\n- `cargo nextest run -p fabro-agent compaction` ✅\n- `cargo nextest run -p fabro-agent history` ✅\n- `cargo +nightly-2026-04-14 fmt --check --all` ✅\n- `cargo nextest run -p fabro-agent` ✅ 448 passed\n- `cargo +nightly-2026-04-14 clippy -q --package fabro-agent --tests --no-deps -- -D warnings` ✅\n\nNote: a broader `cargo +nightly-2026-04-14 clippy -q -p fabro-agent --all-targets -- -D warnings` hit an unrelated dependency lint in `fabro-sandbox::SandboxSpec` (`large_enum_variant`), so I reran clippy scoped to `fabro-agent` without dependencies, which passed."
         },
         "node_outcomes": {
-          "toolchain": {
+          "verify": {
             "status": "succeeded",
             "context_updates": {
-              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+              "command.output": "blob://sha256/73ee7d4f71e69fb29ace2db42aeab348b9cc64924624ba42fde460bda17c19f9"
             },
-            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1",
             "usage": null
           },
-          "preflight_compile": {
+          "preflight_lint": {
             "status": "succeeded",
             "context_updates": {
               "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
             },
-            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
             "usage": null
-          },
-          "simplify_opus": {
-            "status": "succeeded",
-            "context_updates": {
-              "last_stage": "simplify_opus",
-              "last_response": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate",
-              "response.simplify_opus": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate_token_count` (no external callers); tests updated to call `estimate_active_context_usage` directly.\n- Replaced the hand-rolled `ContextEstimateMethod::as_str()` with `#[derive(strum::IntoStaticStr)] #[strum(serialize_all = \"snake_case\")]` per repo convention in CLAUDE.md.\n- Split `estimate_local_token_count(system_prompt, turns)` into two single-purpose helpers (`estimate_turns_local_tokens`, `estimate_system_prompt_local_tokens`) to remove the `\"\"` sentinel call from the baseline+delta path.\n- Replaced the literal `4` in `summary_token_estimate = summary_content.len() / 4` with `APPROX_CHARS_PER_TOKEN`.\n- Made `check_context_usage` return `Option<ContextEstimate>` and `compact_context` accept the pre-computed estimate, eliminating a duplicate full estimate scan per actual compaction. Both fns are now `pub(crate)` since they have no external callers. Dropped the redundant `system_prompt` parameter from `compact_context`.\n- Tightened visibility on `ContextEstimate` and `ContextEstimateMethod` to `pub(crate)`.\n\n**`lib/crates/fabro-agent/src/history.rs`**\n- Moved the free `invalidate_assistant_usage` function into `impl History` as a private `invalidate_preserved_usage` method.\n- Added a doc comment on `History::compact` explaining the usage-invalidation invariant.\n\n**`lib/crates/fabro-agent/src/session.rs`**\n- Rewired `compact_if_needed` to consume the `Option<ContextEstimate>` from `check_context_usage` and pass it through.\n- Renamed misleading test helper `response_with_total_usage` → `response_with_input_tokens` (it only set `input_tokens`, never the other usage fields).\n\n**`lib/crates/fabro-agent/Cargo.toml`**\n- Added `strum.workspace = true` (workspace dep) to support the derive.\n\n## Findings skipped\n\n- **Test builder for `Message::Assistant`** (Quality #3): broader scope than just the diff and only marginal cleanup.\n- **Counting-writer for JSON length** (Efficiency #3): the hot-path concern is real but speculative without profiling; the prevailing pattern in fabro-agent uses `Value::to_string()`. Out of scope.\n- **Extract `\"context_window\"` / `\"estimate_method\"` JSON-key constants** (Quality #5): pre-existing pattern beyond this diff.\n- **Reshape `latest_assistant_usage_baseline` to return `(tokens, &[Message])`** (Quality #4): cosmetic; current `+ 1` indexing is local and clear.\n- **`APPROX_CHARS_PER_TOKEN` in `history.rs` `extract_recent_user_messages`** (Reuse #1): out of scope — that code is not part of the change.\n\nVerification: `cargo nextest run -p fabro-agent` → 447/447 pass; `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` → clean; `cargo +nightly-2026-04-14 fmt --check --all` → clean."
-            },
-            "notes": "Stage completed: simplify_opus",
-            "usage": {
-              "input": {
-                "usage": {
-                  "model": {
-                    "provider": "anthropic",
-                    "model_id": "claude-opus-4-7"
-                  },
-                  "tokens": {
-                    "input_tokens": 66736,
-                    "output_tokens": 21289,
-                    "reasoning_tokens": 0,
-                    "cache_read_tokens": 1971515,
-                    "cache_write_tokens": 267947
-                  }
-                },
-                "facts": {
-                  "algorithm": "anthropic",
-                  "cache_write_5m_tokens": 267947,
-                  "cache_write_1h_tokens": 0
-                }
-              },
-              "total_usd_micros": 3526330
-            },
-            "files_touched": [
-              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/Cargo.toml",
-              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/compaction.rs",
-              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/history.rs",
-              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/session.rs"
-            ]
           },
           "start": {
             "status": "succeeded",
@@ -1608,6 +1570,14 @@
             "notes": "Script completed: cargo +nightly-2026-04-14 fmt --all 2>&1",
             "usage": null
           },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
           "simplify_gpt": {
             "status": "succeeded",
             "context_updates": {
@@ -1638,40 +1608,202 @@
               "total_usd_micros": 933863
             }
           },
-          "verify": {
+          "toolchain": {
             "status": "succeeded",
             "context_updates": {
-              "command.output": "blob://sha256/73ee7d4f71e69fb29ace2db42aeab348b9cc64924624ba42fde460bda17c19f9"
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
             },
-            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1 && cargo dev docs refresh 2>&1 && cargo dev docs check 2>&1",
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
             "usage": null
           },
-          "preflight_lint": {
+          "simplify_opus": {
             "status": "succeeded",
             "context_updates": {
-              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+              "last_stage": "simplify_opus",
+              "last_response": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate",
+              "response.simplify_opus": "All clean. Here's a summary of what was fixed based on the three reviews:\n\n## Summary of cleanup applied\n\n**`lib/crates/fabro-agent/src/compaction.rs`**\n- Removed the no-longer-needed `pub fn estimate_token_count` (no external callers); tests updated to call `estimate_active_context_usage` directly.\n- Replaced the hand-rolled `ContextEstimateMethod::as_str()` with `#[derive(strum::IntoStaticStr)] #[strum(serialize_all = \"snake_case\")]` per repo convention in CLAUDE.md.\n- Split `estimate_local_token_count(system_prompt, turns)` into two single-purpose helpers (`estimate_turns_local_tokens`, `estimate_system_prompt_local_tokens`) to remove the `\"\"` sentinel call from the baseline+delta path.\n- Replaced the literal `4` in `summary_token_estimate = summary_content.len() / 4` with `APPROX_CHARS_PER_TOKEN`.\n- Made `check_context_usage` return `Option<ContextEstimate>` and `compact_context` accept the pre-computed estimate, eliminating a duplicate full estimate scan per actual compaction. Both fns are now `pub(crate)` since they have no external callers. Dropped the redundant `system_prompt` parameter from `compact_context`.\n- Tightened visibility on `ContextEstimate` and `ContextEstimateMethod` to `pub(crate)`.\n\n**`lib/crates/fabro-agent/src/history.rs`**\n- Moved the free `invalidate_assistant_usage` function into `impl History` as a private `invalidate_preserved_usage` method.\n- Added a doc comment on `History::compact` explaining the usage-invalidation invariant.\n\n**`lib/crates/fabro-agent/src/session.rs`**\n- Rewired `compact_if_needed` to consume the `Option<ContextEstimate>` from `check_context_usage` and pass it through.\n- Renamed misleading test helper `response_with_total_usage` → `response_with_input_tokens` (it only set `input_tokens`, never the other usage fields).\n\n**`lib/crates/fabro-agent/Cargo.toml`**\n- Added `strum.workspace = true` (workspace dep) to support the derive.\n\n## Findings skipped\n\n- **Test builder for `Message::Assistant`** (Quality #3): broader scope than just the diff and only marginal cleanup.\n- **Counting-writer for JSON length** (Efficiency #3): the hot-path concern is real but speculative without profiling; the prevailing pattern in fabro-agent uses `Value::to_string()`. Out of scope.\n- **Extract `\"context_window\"` / `\"estimate_method\"` JSON-key constants** (Quality #5): pre-existing pattern beyond this diff.\n- **Reshape `latest_assistant_usage_baseline` to return `(tokens, &[Message])`** (Quality #4): cosmetic; current `+ 1` indexing is local and clear.\n- **`APPROX_CHARS_PER_TOKEN` in `history.rs` `extract_recent_user_messages`** (Reuse #1): out of scope — that code is not part of the change.\n\nVerification: `cargo nextest run -p fabro-agent` → 447/447 pass; `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` → clean; `cargo +nightly-2026-04-14 fmt --check --all` → clean."
             },
-            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
-            "usage": null
+            "notes": "Stage completed: simplify_opus",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 66736,
+                    "output_tokens": 21289,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 1971515,
+                    "cache_write_tokens": 267947
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 267947,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 3526330
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/Cargo.toml",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/compaction.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/history.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/session.rs"
+            ]
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "78352944075e71e7d9089b4a84f876057ce8f435",
         "node_visits": {
-          "toolchain": 1,
-          "verify": 1,
+          "preflight_compile": 1,
+          "fmt": 1,
+          "preflight_lint": 1,
           "start": 1,
           "simplify_opus": 1,
-          "implement": 1,
-          "preflight_compile": 1,
-          "preflight_lint": 1,
+          "verify": 1,
           "simplify_gpt": 1,
-          "fmt": 1
+          "implement": 1,
+          "toolchain": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "summary": {
+          "files_changed": 5,
+          "additions": 516,
+          "deletions": 86
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-23T15:51:04.414692Z",
+    "status": "succeeded",
+    "timing": {
+      "wall_time_ms": 1854707,
+      "inference_time_ms": 0,
+      "tool_time_ms": 0,
+      "active_time_ms": 0
+    },
+    "final_git_commit_sha": "78352944075e71e7d9089b4a84f876057ce8f435",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "toolchain",
+        "stage_label": "toolchain",
+        "timing": {
+          "wall_time_ms": 2513,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_compile",
+        "stage_label": "preflight_compile",
+        "timing": {
+          "wall_time_ms": 112321,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_lint",
+        "stage_label": "preflight_lint",
+        "timing": {
+          "wall_time_ms": 126453,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "implement",
+        "stage_label": "implement",
+        "timing": {
+          "wall_time_ms": 491879,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "billing_usd_micros": 3467628,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_opus",
+        "stage_label": "simplify_opus",
+        "timing": {
+          "wall_time_ms": 667186,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "billing_usd_micros": 3526330,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_gpt",
+        "stage_label": "simplify_gpt",
+        "timing": {
+          "wall_time_ms": 159112,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "billing_usd_micros": 933863,
+        "retries": 0
+      },
+      {
+        "stage_id": "verify",
+        "stage_label": "verify",
+        "timing": {
+          "wall_time_ms": 244512,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "fmt",
+        "stage_label": "fmt",
+        "timing": {
+          "wall_time_ms": 3276,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 305813,
+      "output_tokens": 34510,
+      "total_tokens": 7396455,
+      "reasoning_tokens": 13598,
+      "cache_read_tokens": 6774587,
+      "cache_write_tokens": 267947,
+      "total_usd_micros": 7927821
+    },
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "image": "buildpack-deps:noble",
@@ -1786,23 +1918,30 @@
       },
       "state": "succeeded"
     },
-    "fmt@1": {
-      "first_event_seq": 893,
+    "exit@1": {
+      "first_event_seq": 903,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-23T15:51:04.375696Z"
+      },
       "provider_used": null,
       "diff": null,
-      "script_invocation": {
-        "script": "cargo +nightly-2026-04-14 fmt --all 2>&1",
-        "command": "exec 2>&1\ncargo +nightly-2026-04-14 fmt --all 2>&1",
-        "language": "shell"
-      },
+      "script_invocation": null,
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-23T15:50:54.808706Z",
-      "handler": "command",
+      "started_at": "2026-05-23T15:51:04.375573Z",
+      "handler": "exit",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -1811,7 +1950,55 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
+    },
+    "fmt@1": {
+      "first_event_seq": 893,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo +nightly-2026-04-14 fmt --all 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-23T15:50:58.085159Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "cargo +nightly-2026-04-14 fmt --all 2>&1",
+        "command": "exec 2>&1\ncargo +nightly-2026-04-14 fmt --all 2>&1",
+        "language": "shell"
+      },
+      "script_timing": {
+        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 3263,
+        "termination": "exited",
+        "output_bytes": 0,
+        "live_streaming": false
+      },
+      "parallel_results": null,
+      "output": null,
+      "output_bytes": 0,
+      "live_streaming": false,
+      "termination": "exited",
+      "started_at": "2026-05-23T15:50:54.808706Z",
+      "handler": "command",
+      "timing": {
+        "wall_time_ms": 3276,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
     },
     "start@1": {
       "first_event_seq": 16,
