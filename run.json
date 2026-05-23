@@ -493,7 +493,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-23T16:30:00.579662Z",
-  "last_event_at": "2026-05-23T16:30:02.615209Z",
+  "last_event_at": "2026-05-23T16:30:07.684328Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -534,13 +534,71 @@
       "diff": {}
     },
     {
-      "seq": 0,
+      "seq": 27,
       "checkpoint": {
-        "timestamp": "2026-05-23T16:30:04.088451Z",
+        "timestamp": "2026-05-23T16:30:07.683118Z",
         "current_node": "toolchain",
         "completed_nodes": [
           "start",
           "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.rankdir": "LR",
+          "internal.retry_count.toolchain": 0,
+          "thread.start.current_node": "toolchain",
+          "graph.goal": "# Mid-Stage Agent Interview Tools\n\n## Summary\n\nAdd model-native question tools that let agents pause mid-stage and ask the human for input through Fabro's existing interview system.\n\nOpenAI-profile agents get `request_user_input`; Anthropic-profile agents get `AskUserQuestion`. When either tool is called, Fabro creates pending interview questions, surfaces them through the existing web/API/Slack paths, waits for answers, then returns provider-shaped tool results so the model can continue the same stage.\n\n## Key Changes\n\n- Extend the existing interview contract without type sprawl:\n  - Add optional `description` and `preview` fields to the canonical `fabro_types::InterviewOption`; reuse that type through `fabro-api` replacements instead of introducing `AgentQuestionOption`, API-only aliases, or adapter-only duplicate types.\n  - Update OpenAPI, generated Rust/TypeScript clients, event conversion, projection, Slack/web mappers, and the existing `with_replacement(\"InterviewOption\", \"fabro_types::InterviewOption\", ...)` parity tests.\n  - Treat both fields as untrusted model-authored display data. Store and expose them after enforcing bounded lengths; truncate or reject oversized values consistently before persistence.\n  - Initial UI behavior: display `description` under option labels where practical. Capture and expose `preview`, but do not render preview content specially in web or Slack v1.\n\n- Add a shared run-level interview runtime:\n  - Move the private human-node blocked-state refcount into a reusable run-level guard used by both `HumanHandler` and agent question tools, so `RunUnblocked` is emitted only when all human and agent interviews for the run are resolved.\n  - Runtime accepts the interviewer, workflow emitter, stage scope, stage id, tool call id, and normalized questions.\n  - Support batch asks as a first-class operation: emit/register all questions first, mark the run blocked once, await all answers concurrently, then emit completion/timeout/interrupted events per question and unblock when the batch resolves.\n  - Batch support applies only to multiple `questions[]` inside one question-tool call. Do not aggregate multiple separate question-tool calls from the same model round.\n  - Generate safe internal question IDs with a ULID/UUID plus stage visit/tool-call context; store original model question IDs/text in question metadata for provider result mapping.\n\n- Add provider-specific agent tools:\n  - `request_user_input` for `AgentProfileKind::OpenAi`.\n    - Accept Codex-compatible schema: `questions[]` with `id`, `header`, `question`, and `options[] { label, description }`.\n    - Normalize each question to `QuestionType::MultipleChoice` with `allow_freeform: true`.\n    - Return JSON text matching Codex shape, keyed by the original model question ID: `{\"answers\":{\"id\":{\"answers\":[\"...\"]}}}`.\n  - `AskUserQuestion` for `AgentProfileKind::Anthropic`.\n    - Accept Claude-compatible schema: `questions[]` with `question`, `header`, `options[] { label, description, preview? }`, and `multiSelect`.\n    - Normalize single-select to `MultipleChoice`, multi-select to `MultiSelect`, always with `allow_freeform: true`.\n    - Return Claude-style tool result text keyed by the original question text: `User has answered your questions: \"...question...\"=\"answer\". You can now continue...`.\n  - Answer formatting for both tools returns user-facing option labels to the model. Preserve internal option keys for validation and event storage. For multi-select, preserve the submission order supplied by the answer path.\n\n- Thread workflow interview context into agent tool execution:\n  - Add an explicit per-turn agent tool runtime context passed into `process_input` or an adjacent `process_input_with_runtime` API. It carries the interviewer, workflow emitter, stage scope/id, shared block guard, and provider answer formatter.\n  - Do not capture stage-specific interview handles in the profile registry or cached session construction; cached full-fidelity sessions must receive the current turn's stage context dynamically.\n  - Child/subagent sessions must not expose these question tools. If somehow called outside the root session, return a model-visible error.\n  - Question tools must execute alone in a model tool round. If a round contains one question tool plus any other tool call, execute the question tool and return model-visible error results for the non-question peers, preserving tool-call/tool-result ordering. If a round contains multiple separate question-tool calls, execute only the first and return model-visible error results for the later question-tool calls instructing the model to combine questions into one `questions[]` batch.\n  - Agent-originated questions have no per-question timeout in v1 because the provider schemas do not include timeout. They rely on existing stage timeout, wall-clock timeout, cancellation, and interruption behavior.\n\n- Preserve existing answer paths:\n  - Do not add a new answer endpoint.\n  - Continue using `GET /runs/{id}/questions` and `POST /runs/{id}/questions/{qid}/answer`.\n  - Keep `ControlInterviewer`, web `InterviewDock`, Slack blocks, and run projection as the delivery mechanism.\n\n## Test Plan\n\n- Unit tests for schema parsing and normalization:\n  - Codex request with descriptions maps to Fabro multiple-choice questions and returns answers by model question ID.\n  - Claude request with `multiSelect: true` maps to `MultiSelect` and returns comma-separated answer text.\n  - Batched Codex and Claude requests surface all questions as pending before awaiting answers, then return one result with every answer mapped to the original model ID/text.\n  - Optional `preview` and `description` survive event, projection, API conversion, OpenAPI replacement tests, and TypeScript client generation.\n  - Oversized `description`/`preview` values are bounded before persistence and never rendered as trusted HTML.\n\n- Workflow and agent tests:\n  - OpenAI-profile session advertises `request_user_input`; Anthropic-profile session advertises `AskUserQuestion`; Gemini advertises neither.\n  - Subagent profiles do not advertise the question tools.\n  - Root agent can ask a question and resume after the answer.\n  - Subagent or missing interview context returns a clear tool error.\n  - Cached full-fidelity session emits interview events against the current stage, not the original cached stage.\n  - A mixed tool round containing a human-question tool plus another tool preserves all required tool results and rejects the peer calls with model-visible errors.\n  - A round with multiple separate question-tool calls executes only the first and rejects later question-tool calls with model-visible errors.\n\n- Server, projection, and UI tests:\n  - `InterviewStarted` with option metadata appears in pending questions.\n  - Submitting valid selected, multi-selected, and freeform answers unblocks the waiting tool.\n  - Duplicate answer submission remains rejected through existing accepted-question logic.\n  - Parallel human gate plus agent question keeps the run blocked until both are answered.\n  - Pause, cancel, and interrupt while an agent question is waiting resolve pending questions consistently and do not leave the run blocked.\n  - Stage timeout or wall-clock timeout while an agent question is waiting interrupts the batch; no per-question timeout event is expected unless a future schema adds timeout.\n  - Slack answer submissions work for agent-originated questions using the same pending interview transport.\n\n- Run checks:\n  - `cargo nextest run -p fabro-interview -p fabro-workflow -p fabro-server -p fabro-agent`\n  - `cd apps/fabro-web && bun test && bun run typecheck`\n  - Regenerate and verify OpenAPI-derived Rust and TypeScript clients after schema changes.\n\n## Assumptions\n\n- This feature is only for in-process/API-backed agent sessions, not ACP external agents in v1.\n- `preview` is stored and exposed but not rendered specially in the first implementation.\n- Human-question tools are available only during root agent execution inside a workflow run with an active interviewer.\n- Existing interview events remain the source of truth for pending questions; no separate agent-question event family is added.\n- The implementation should prefer extending existing interview structs and replacement mappings over adding parallel API DTOs or conversion-only aliases.\n",
+          "failure_class": "",
+          "failure_signature": "",
+          "internal.retry_count.start": 0,
+          "internal.node_visit_count": 1,
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.thread_id": "start",
+          "internal.fidelity": "compact",
+          "current_node": "toolchain",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "internal.run_id": "01KSATQNAXG41FHKV0QH5N1QGC",
+          "outcome": "succeeded"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "git_commit_sha": "1030577de2d54628f91548ee9b1447f68cb05754",
+        "node_visits": {
+          "start": 1,
+          "toolchain": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-23T16:32:11.848490Z",
+        "current_node": "preflight_compile",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile"
         ],
         "node_retries": {},
         "context_values": {
@@ -550,11 +608,13 @@
           "failure_signature": "",
           "failure_class": "",
           "graph.rankdir": "LR",
-          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
-          "internal.thread_id": "start",
-          "current_node": "toolchain",
+          "thread.toolchain.current_node": "preflight_compile",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.thread_id": "toolchain",
+          "current_node": "preflight_compile",
           "internal.node_visit_count": 1,
           "internal.retry_count.toolchain": 0,
+          "internal.retry_count.preflight_compile": 0,
           "internal.retry_count.start": 0,
           "internal.run_id": "01KSATQNAXG41FHKV0QH5N1QGC",
           "thread.start.current_node": "toolchain",
@@ -562,6 +622,10 @@
           "outcome": "succeeded"
         },
         "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
           "toolchain": {
             "status": "succeeded",
             "context_updates": {
@@ -570,13 +634,18 @@
             "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
             "usage": null
           },
-          "start": {
+          "preflight_compile": {
             "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
             "usage": null
           }
         },
-        "next_node_id": "preflight_compile",
+        "next_node_id": "preflight_lint",
         "node_visits": {
+          "preflight_compile": 1,
           "start": 1,
           "toolchain": 1
         }
@@ -605,22 +674,22 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
-    "toolchain@1": {
-      "first_event_seq": 20,
+    "preflight_compile@1": {
+      "first_event_seq": 30,
       "prompt": null,
       "response": null,
       "completion": null,
       "provider_used": null,
       "diff": null,
       "script_invocation": {
-        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
-        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "script": "cargo check -q --workspace 2>&1",
+        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
         "language": "shell"
       },
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-23T16:30:02.614994Z",
+      "started_at": "2026-05-23T16:30:07.684069Z",
       "handler": "command",
       "usage": {
         "input_tokens": 0,
@@ -631,6 +700,54 @@
         "cache_write_tokens": 0
       },
       "state": "running"
+    },
+    "toolchain@1": {
+      "first_event_seq": 20,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-23T16:30:04.088028Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": {
+        "output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+        "exit_code": 0,
+        "duration_ms": 1464,
+        "termination": "exited",
+        "output_bytes": 36,
+        "live_streaming": true
+      },
+      "parallel_results": null,
+      "output": null,
+      "output_bytes": 36,
+      "live_streaming": true,
+      "termination": "exited",
+      "started_at": "2026-05-23T16:30:02.614994Z",
+      "handler": "command",
+      "timing": {
+        "wall_time_ms": 1472,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
     },
     "start@1": {
       "first_event_seq": 16,
