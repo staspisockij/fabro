@@ -27,6 +27,7 @@ use fabro_types::{
     WorkflowSettings, fixtures,
 };
 use fabro_util::check_report::CheckStatus;
+use fabro_workflow::records::CheckpointExt;
 use httpmock::Method::{GET, POST};
 use httpmock::MockServer;
 use serde_json::json;
@@ -9540,6 +9541,82 @@ async fn start_run_conflict_when_not_submitted() {
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     assert_status!(response, StatusCode::CONFLICT).await;
+}
+
+#[tokio::test]
+async fn resume_cancelled_run_with_checkpoint_transitions_to_runnable() {
+    let state = test_app_state_with_isolated_storage();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = RunId::new();
+    let checkpoint = Checkpoint::from_context(
+        &fabro_workflow::context::Context::new(),
+        "start",
+        vec!["start".to_string()],
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+        Some("exit".to_string()),
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+        std::collections::HashMap::new(),
+    );
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunRunnable {
+            source: fabro_types::RunRunnableSource::StartRequested,
+            actor:  None,
+        },
+        workflow_event::Event::RunStarting,
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::CheckpointCompleted {
+            node_id: checkpoint.current_node.clone(),
+            status: "succeeded".to_string(),
+            current_node: checkpoint.current_node.clone(),
+            completed_nodes: checkpoint.completed_nodes.clone(),
+            node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+            context_values: checkpoint.context_values.clone().into_iter().collect(),
+            node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+            next_node_id: checkpoint.next_node_id.clone(),
+            git_commit_sha: checkpoint.git_commit_sha.clone(),
+            loop_failure_signatures: std::collections::BTreeMap::new(),
+            restart_failure_signatures: std::collections::BTreeMap::new(),
+            node_visits: std::collections::BTreeMap::new(),
+            diff: None,
+            diff_summary: None,
+        },
+        workflow_event::Event::workflow_run_failed_from_error(
+            &WorkflowError::Cancelled,
+            fabro_types::RunTiming::wall_only(10),
+            FailureReason::Cancelled,
+            None,
+            None,
+            None,
+            None,
+        ),
+    ])
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(api(&format!("/runs/{run_id}/start")))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "resume": true }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
+
+    let state = state
+        .store
+        .open_run_reader(&run_id)
+        .await
+        .unwrap()
+        .state()
+        .await
+        .unwrap();
+    assert_eq!(state.status, RunStatus::Runnable);
 }
 
 #[tokio::test]
