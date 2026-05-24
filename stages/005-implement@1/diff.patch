@@ -1,0 +1,1693 @@
+diff --git a/apps/fabro-web/app/lib/run-actions.test.ts b/apps/fabro-web/app/lib/run-actions.test.ts
+index 1f61f41a1..f092bc7b1 100644
+--- a/apps/fabro-web/app/lib/run-actions.test.ts
++++ b/apps/fabro-web/app/lib/run-actions.test.ts
+@@ -1,9 +1,10 @@
+ import { afterEach, describe, expect, test } from "bun:test";
+ import type { AxiosAdapter } from "axios";
+-import type { Run, RunStatus } from "@qltysh/fabro-api-client";
++import type { BatchRunLifecycleResponse, Run, RunStatus } from "@qltysh/fabro-api-client";
+ 
+ import {
+   archiveRun,
++  archiveRuns,
+   canArchive,
+   canApprove,
+   canCancel,
+@@ -14,6 +15,7 @@ import {
+   mapError,
+   retryRun,
+   unarchiveRun,
++  unarchiveRuns,
+ } from "./run-actions";
+ import { generatedAxios } from "./api-client";
+ 
+@@ -23,6 +25,12 @@ type StubResponseInit = {
+   statusText?: string;
+ };
+ 
++type CapturedRequest = {
++  url?: string;
++  method?: string;
++  data?: unknown;
++};
++
+ const originalAdapter = generatedAxios.defaults.adapter;
+ 
+ function makeRun(status: RunStatus, archived = false): Run {
+@@ -65,8 +73,14 @@ function makeRun(status: RunStatus, archived = false): Run {
+   };
+ }
+ 
+-function stubGeneratedAxiosOnce(init: StubResponseInit) {
++function stubGeneratedAxiosOnce(init: StubResponseInit): { requests: CapturedRequest[] } {
++  const requests: CapturedRequest[] = [];
+   generatedAxios.defaults.adapter = (async (config) => {
++    requests.push({
++      url: config.url,
++      method: config.method,
++      data: config.data,
++    });
+     if (init.status >= 400) {
+       throw {
+         isAxiosError: true,
+@@ -87,6 +101,25 @@ function stubGeneratedAxiosOnce(init: StubResponseInit) {
+       config,
+     };
+   }) as AxiosAdapter;
++  return { requests };
++}
++
++function batchResponse(
++  results: BatchRunLifecycleResponse["results"],
++): BatchRunLifecycleResponse {
++  const succeeded = results.filter((result) => result.ok).length;
++  return {
++    results,
++    summary: {
++      requested: results.length,
++      succeeded,
++      failed: results.length - succeeded,
++    },
++  };
++}
++
++function requestJsonBody(request: CapturedRequest): unknown {
++  return typeof request.data === "string" ? JSON.parse(request.data) : request.data;
+ }
+ 
+ async function expectLifecycleError(
+@@ -141,6 +174,76 @@ describe("run lifecycle actions", () => {
+     expect(result.lifecycle.archived).toBe(false);
+   });
+ 
++  test("archiveRuns sends one batch request and parses results", async () => {
++    const stub = stubGeneratedAxiosOnce({
++      status: 200,
++      body: batchResponse([
++        {
++          run_id: "run-1",
++          ok: true,
++          outcome: "archived",
++          run: { ...makeRun({ kind: "succeeded", reason: "completed" }, true), id: "run-1" },
++        },
++        {
++          run_id: "run-2",
++          ok: true,
++          outcome: "already_archived",
++          run: { ...makeRun({ kind: "succeeded", reason: "completed" }, true), id: "run-2" },
++        },
++      ]),
++    });
++
++    const result = await archiveRuns(["run-1", "run-2"]);
++
++    expect(stub.requests).toHaveLength(1);
++    expect(stub.requests[0]?.method?.toUpperCase()).toBe("POST");
++    expect(stub.requests[0]?.url).toBe("/api/v1/runs/archive");
++    expect(requestJsonBody(stub.requests[0]!)).toEqual({ run_ids: ["run-1", "run-2"] });
++    expect(result.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
++    expect(result.results.map((entry) => entry.outcome)).toEqual(["archived", "already_archived"]);
++  });
++
++  test("unarchiveRuns resolves mixed per-item results without throwing", async () => {
++    stubGeneratedAxiosOnce({
++      status: 200,
++      body: batchResponse([
++        {
++          run_id: "run-1",
++          ok: true,
++          outcome: "unarchived",
++          run: { ...makeRun({ kind: "succeeded", reason: "completed" }), id: "run-1" },
++        },
++        {
++          run_id: "run-missing",
++          ok: false,
++          outcome: "not_found",
++          error: { status: "404", title: "Not Found", detail: "Run not found." },
++        },
++      ]),
++    });
++
++    const result = await unarchiveRuns(["run-1", "run-missing"]);
++
++    expect(result.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
++    expect(result.results[1]?.ok).toBe(false);
++    expect(result.results[1]?.error?.status).toBe("404");
++  });
++
++  test("batch lifecycle helpers preserve request-level error envelopes", async () => {
++    stubGeneratedAxiosOnce({
++      status: 400,
++      body: {
++        errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
++      },
++    });
++
++    const error = await expectLifecycleError(archiveRuns([]));
++    expect(error).toEqual({
++      status: 400,
++      errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
++    });
++  });
++
+   test("retryRun parses a 201 response", async () => {
+     stubGeneratedAxiosOnce({
+       status: 201,
+diff --git a/apps/fabro-web/app/lib/run-actions.ts b/apps/fabro-web/app/lib/run-actions.ts
+index a785feafa..819ec29de 100644
+--- a/apps/fabro-web/app/lib/run-actions.ts
++++ b/apps/fabro-web/app/lib/run-actions.ts
+@@ -1,4 +1,9 @@
+-import type { ErrorResponseEntry, Run } from "@qltysh/fabro-api-client";
++import type {
++  BatchRunLifecycleRequest,
++  BatchRunLifecycleResponse,
++  ErrorResponseEntry,
++  Run,
++} from "@qltysh/fabro-api-client";
+ 
+ import {
+   ApiError,
+@@ -58,6 +63,20 @@ export async function unarchiveRun(id: string, request?: Request): Promise<Run>
+   return runLifecycleAction(id, "unarchive", request);
+ }
+ 
++export async function archiveRuns(
++  runIds: string[],
++  request?: Request,
++): Promise<BatchRunLifecycleResponse> {
++  return batchRunLifecycleAction(runIds, "archive", request);
++}
++
++export async function unarchiveRuns(
++  runIds: string[],
++  request?: Request,
++): Promise<BatchRunLifecycleResponse> {
++  return batchRunLifecycleAction(runIds, "unarchive", request);
++}
++
+ export async function retryRun(id: string, request?: Request): Promise<Run> {
+   return runLifecycleAction(id, "retry", request);
+ }
+@@ -182,6 +201,27 @@ async function runLifecycleAction(
+   }
+ }
+ 
++async function batchRunLifecycleAction(
++  runIds: string[],
++  action: "archive" | "unarchive",
++  request?: Request,
++): Promise<BatchRunLifecycleResponse> {
++  try {
++    // openapi-generator's TypeScript client represents `uniqueItems` arrays as
++    // Set<T>, but the HTTP wire contract is still a JSON array. Keep an array
++    // here so Axios serializes the request body correctly.
++    const body = { run_ids: runIds } as unknown as BatchRunLifecycleRequest;
++    switch (action) {
++      case "archive":
++        return await apiData(() => runsApi.batchArchiveRuns(body, requestSignalOptions(request)));
++      case "unarchive":
++        return await apiData(() => runsApi.batchUnarchiveRuns(body, requestSignalOptions(request)));
++    }
++  } catch (error) {
++    throw lifecycleActionErrorFromError(error);
++  }
++}
++
+ function lifecycleActionErrorFromError(error: unknown): LifecycleActionError {
+   if (!(error instanceof ApiError)) throw error;
+   return {
+diff --git a/apps/fabro-web/app/routes/runs.test.tsx b/apps/fabro-web/app/routes/runs.test.tsx
+index c56e56e1e..4c6c85370 100644
+--- a/apps/fabro-web/app/routes/runs.test.tsx
++++ b/apps/fabro-web/app/routes/runs.test.tsx
+@@ -9,6 +9,7 @@ import {
+   RUNS_PREFERENCES_STORAGE_KEY,
+   runsQuickStartCommands,
+   shouldRefreshBoardForEvent,
++  summarizeBatchLifecycleAction,
+ } from "./runs";
+ 
+ function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
+@@ -173,6 +174,36 @@ describe("runs route board mapping", () => {
+       "fabro run hello",
+     ]);
+   });
++
++  test("summarizes successful batch archive and unarchive actions", () => {
++    expect(
++      summarizeBatchLifecycleAction("Archive", 2, { succeeded: 2, failed: 0 }),
++    ).toEqual({
++      toast:        { message: "Archived 2 runs." },
++      allSucceeded: true,
++    });
++    expect(
++      summarizeBatchLifecycleAction("Unarchive", 1, { succeeded: 1, failed: 0 }),
++    ).toEqual({
++      toast:        { message: "Unarchived 1 run." },
++      allSucceeded: true,
++    });
++  });
++
++  test("summarizes partial and failed batch lifecycle actions", () => {
++    expect(
++      summarizeBatchLifecycleAction("Archive", 3, { succeeded: 2, failed: 1 }),
++    ).toEqual({
++      toast:        { message: "Archived 2 of 3 runs. 1 failed.", tone: "error" },
++      allSucceeded: false,
++    });
++    expect(
++      summarizeBatchLifecycleAction("Unarchive", 2, { succeeded: 0, failed: 2 }),
++    ).toEqual({
++      toast:        { message: "Couldn't unarchive 2 runs. Try again.", tone: "error" },
++      allSucceeded: false,
++    });
++  });
+ });
+ 
+ describe("runs route workspace preferences", () => {
+diff --git a/apps/fabro-web/app/routes/runs.tsx b/apps/fabro-web/app/routes/runs.tsx
+index 2388a8859..b0d7d3456 100644
+--- a/apps/fabro-web/app/routes/runs.tsx
++++ b/apps/fabro-web/app/routes/runs.tsx
+@@ -31,8 +31,10 @@ import { useToast } from "../components/toast";
+ import { mutateRunListCaches } from "../lib/board-cache";
+ import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
+ import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
+-import { archiveRun, canArchive, canUnarchive, unarchiveRun } from "../lib/run-actions";
++import { archiveRuns, canArchive, canUnarchive, unarchiveRuns } from "../lib/run-actions";
+ import type {
++  BatchRunLifecycleResponse,
++  BatchRunLifecycleSummary,
+   BoardColumn,
+   ListRunsDirectionEnum,
+   ListRunsSortEnum,
+@@ -65,6 +67,51 @@ const columnStyles: Record<BoardColumn, ColumnStyle> = {
+ const defaultColumnStyle: ColumnStyle = { actions: [] };
+ const defaultColumnColors = { label: "", dot: "bg-fg-muted", text: "text-fg-muted" };
+ 
++function runWord(n: number) {
++  return n === 1 ? "run" : "runs";
++}
++
++type BatchLifecycleLabel = "Archive" | "Unarchive";
++
++interface BatchLifecycleToastSummary {
++  toast: {
++    message: string;
++    tone?: "error";
++  };
++  allSucceeded: boolean;
++}
++
++export function summarizeBatchLifecycleAction(
++  label: BatchLifecycleLabel,
++  total: number,
++  summary: Pick<BatchRunLifecycleSummary, "succeeded" | "failed">,
++): BatchLifecycleToastSummary {
++  const succeeded = summary.succeeded;
++  const failed = summary.failed;
++  if (failed === 0) {
++    return {
++      toast: { message: `${label}d ${succeeded} ${runWord(succeeded)}.` },
++      allSucceeded: true,
++    };
++  }
++  if (succeeded === 0) {
++    return {
++      toast: {
++        message: `Couldn't ${label.toLowerCase()} ${total} ${runWord(total)}. Try again.`,
++        tone: "error",
++      },
++      allSucceeded: false,
++    };
++  }
++  return {
++    toast: {
++      message: `${label}d ${succeeded} of ${total} ${runWord(total)}. ${failed} failed.`,
++      tone: "error",
++    },
++    allSucceeded: false,
++  };
++}
++
+ interface BoardRunsResponse {
+   data: Run[];
+ }
+@@ -463,25 +510,15 @@ function ColumnActionsMenu({ column }: { column: Column }) {
+     setPending(true);
+     const total = archivable.length;
+     try {
+-      const results = await Promise.allSettled(
+-        archivable.map((item) => archiveRun(item.id)),
++      const response = await archiveRuns(archivable.map((item) => item.id));
++      push(summarizeBatchLifecycleAction("Archive", total, response.summary).toast);
++    } catch {
++      push(
++        summarizeBatchLifecycleAction("Archive", total, {
++          succeeded: 0,
++          failed:    total,
++        }).toast,
+       );
+-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+-      const failed = total - succeeded;
+-      const runWord = (n: number) => (n === 1 ? "run" : "runs");
+-      if (failed === 0) {
+-        push({ message: `Archived ${total} ${runWord(total)}.` });
+-      } else if (succeeded === 0) {
+-        push({
+-          message: `Couldn't archive ${total} ${runWord(total)}. Try again.`,
+-          tone: "error",
+-        });
+-      } else {
+-        push({
+-          message: `Archived ${succeeded} of ${total} runs. ${failed} failed.`,
+-          tone: "error",
+-        });
+-      }
+     } finally {
+       setPending(false);
+       mutateRunListCaches(mutate);
+@@ -1408,12 +1445,10 @@ function BulkActionToolbar({
+ 
+   if (count === 0) return null;
+ 
+-  const runWord = (n: number) => (n === 1 ? "run" : "runs");
+-
+   async function runBulk(
+     label: "Archive" | "Unarchive",
+     eligible: RunWithStatus[],
+-    action: (id: string) => Promise<unknown>,
++    action: (ids: string[]) => Promise<BatchRunLifecycleResponse>,
+   ) {
+     if (pending) return;
+     if (eligible.length === 0) {
+@@ -1422,23 +1457,19 @@ function BulkActionToolbar({
+     }
+     setPending(true);
+     try {
+-      const results = await Promise.allSettled(eligible.map((r) => action(r.id)));
+-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+-      const failed = eligible.length - succeeded;
+-      if (failed === 0) {
+-        push({ message: `${label}d ${succeeded} ${runWord(succeeded)}.` });
++      const response = await action(eligible.map((r) => r.id));
++      const summary = summarizeBatchLifecycleAction(label, eligible.length, response.summary);
++      push(summary.toast);
++      if (summary.allSucceeded) {
+         onClear();
+-      } else if (succeeded === 0) {
+-        push({
+-          message: `Couldn't ${label.toLowerCase()} ${eligible.length} ${runWord(eligible.length)}. Try again.`,
+-          tone: "error",
+-        });
+-      } else {
+-        push({
+-          message: `${label}d ${succeeded} of ${eligible.length} ${runWord(eligible.length)}. ${failed} failed.`,
+-          tone: "error",
+-        });
+       }
++    } catch {
++      push(
++        summarizeBatchLifecycleAction(label, eligible.length, {
++          succeeded: 0,
++          failed:    eligible.length,
++        }).toast,
++      );
+     } finally {
+       setPending(false);
+       mutateRunListCaches(mutate);
+@@ -1459,14 +1490,14 @@ function BulkActionToolbar({
+         <BulkActionButton
+           label="Archive"
+           icon={<ArchiveBoxIcon className="size-4" aria-hidden="true" />}
+-          disabled={pending || archivable.length === 0}
+-          onClick={() => runBulk("Archive", archivable, archiveRun)}
++          disabled={pending}
++          onClick={() => runBulk("Archive", archivable, archiveRuns)}
+         />
+         <BulkActionButton
+           label="Unarchive"
+           icon={<ArrowUturnLeftIcon className="size-4" aria-hidden="true" />}
+-          disabled={pending || unarchivable.length === 0}
+-          onClick={() => runBulk("Unarchive", unarchivable, unarchiveRun)}
++          disabled={pending}
++          onClick={() => runBulk("Unarchive", unarchivable, unarchiveRuns)}
+         />
+         <button
+           type="button"
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index 27ecbb9c1..de42de975 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -1143,6 +1143,112 @@ paths:
+               schema:
+                 $ref: "#/components/schemas/ErrorResponse"
+ 
++  /api/v1/runs/archive:
++    post:
++      operationId: batchArchiveRuns
++      tags: [Runs]
++      summary: Archive Runs
++      description: >
++        Marks up to 250 terminal runs as archived in one fail-soft,
++        non-transactional request. Each run is processed independently and
++        successful items emit the same per-run archive events as
++        `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even
++        when some items fail; inspect `results` and `summary` for per-run
++        outcomes. Invalid request bodies are rejected before mutating any run.
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema:
++              $ref: "#/components/schemas/BatchRunLifecycleRequest"
++      responses:
++        "200":
++          description: Batch processed
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/BatchRunLifecycleResponse"
++        "400":
++          description: Invalid batch request
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "401":
++          description: Not authenticated
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "500":
++          description: Request-level server error
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++
++  /api/v1/runs/unarchive:
++    post:
++      operationId: batchUnarchiveRuns
++      tags: [Runs]
++      summary: Unarchive Runs
++      description: >
++        Restores up to 250 archived runs in one fail-soft, non-transactional
++        request. Each run is processed independently and successful items emit
++        the same per-run unarchive events as
++        `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even
++        when some items fail; inspect `results` and `summary` for per-run
++        outcomes. Invalid request bodies are rejected before mutating any run.
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema:
++              $ref: "#/components/schemas/BatchRunLifecycleRequest"
++      responses:
++        "200":
++          description: Batch processed
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/BatchRunLifecycleResponse"
++        "400":
++          description: Invalid batch request
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "401":
++          description: Not authenticated
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "500":
++          description: Request-level server error
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++
+   /api/v1/runs/resolve:
+     get:
+       operationId: resolveRun
+@@ -5184,6 +5290,94 @@ components:
+         meta:
+           $ref: "#/components/schemas/PaginationMeta"
+ 
++    BatchRunLifecycleRequest:
++      description: Run IDs to archive or unarchive as one bounded fail-soft batch.
++      type: object
++      additionalProperties: false
++      required:
++        - run_ids
++      properties:
++        run_ids:
++          type: array
++          description: Run IDs to process, in result order.
++          minItems: 1
++          maxItems: 250
++          uniqueItems: true
++          items:
++            type: string
++            example: 01HZX6M29F1CD5YYMHT1F5D7WQ
++
++    BatchRunLifecycleResponse:
++      description: Per-run results for a fail-soft batch archive or unarchive request.
++      type: object
++      additionalProperties: false
++      required:
++        - results
++        - summary
++      properties:
++        results:
++          type: array
++          description: Results ordered exactly like the request `run_ids`.
++          items:
++            $ref: "#/components/schemas/BatchRunLifecycleResult"
++        summary:
++          $ref: "#/components/schemas/BatchRunLifecycleSummary"
++
++    BatchRunLifecycleResult:
++      description: Result for one run in a batch archive or unarchive request.
++      type: object
++      additionalProperties: false
++      required:
++        - run_id
++        - ok
++        - outcome
++      properties:
++        run_id:
++          type: string
++          description: Run ID from the request item.
++        ok:
++          type: boolean
++          description: Whether this item succeeded.
++        outcome:
++          type: string
++          enum:
++            - archived
++            - already_archived
++            - unarchived
++            - not_archived
++            - not_found
++            - conflict
++            - error
++          description: Machine-readable item outcome.
++        run:
++          $ref: "#/components/schemas/Run"
++          description: Decorated run summary for successful items when it can be loaded.
++        error:
++          $ref: "#/components/schemas/ErrorResponseEntry"
++          description: Structured item error for failed items.
++
++    BatchRunLifecycleSummary:
++      description: Aggregate counts for a batch archive or unarchive request.
++      type: object
++      additionalProperties: false
++      required:
++        - requested
++        - succeeded
++        - failed
++      properties:
++        requested:
++          type: integer
++          minimum: 0
++          description: Number of requested run IDs.
++        succeeded:
++          type: integer
++          minimum: 0
++          description: Number of item results with `ok=true`.
++        failed:
++          type: integer
++          minimum: 0
++          description: Number of item results with `ok=false`.
++
+     PairId:
+       type: string
+       description: Durable run pair identifier.
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index 179e6b8d3..996748775 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -23,23 +23,25 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+ use bytes::Bytes;
+ pub use fabro_api::types::{
+     AggregateBilling, AggregateBillingTotals, ApiQuestion, AppendEventResponse, ArtifactEntry,
+-    ArtifactListResponse, BillingByModel, BillingStageRef, CloseRunPullRequestResponse,
+-    CompletionContentPart, CompletionMessage, CompletionMessageRole, CompletionResponse,
+-    CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
+-    CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
+-    DeleteSecretRequest, DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow,
+-    ForkRequest, ForkResponse, LinkRunPullRequestRequest, MergeRunPullRequestRequest,
+-    MergeRunPullRequestResponse, ModelReference, PaginatedEventList, PaginatedRunList,
+-    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse, Provider,
+-    ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse, RenderWorkflowGraphDirection,
+-    RenderWorkflowGraphRequest, RewindRequest, RewindResponse, RunArtifactEntry,
+-    RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals, RunError, RunManifest,
+-    RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse, SandboxService,
+-    SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
+-    StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
+-    SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemMemoryResourceScope,
+-    SystemMemoryResources, SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse,
+-    SystemRunCounts, TimelineEntryResponse, VncPreviewResponse, WriteBlobResponse,
++    ArtifactListResponse, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
++    BatchRunLifecycleResult, BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary,
++    BillingByModel, BillingStageRef, CloseRunPullRequestResponse, CompletionContentPart,
++    CompletionMessage, CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode,
++    CompletionUsage, CreateCompletionRequest, CreateRunPullRequestRequest, CreateSecretRequest,
++    DeleteRunResponse, DeleteRunSandbox, DeleteSecretRequest, DenyRunRequest, DiskUsageResponse,
++    DiskUsageRunRow, DiskUsageSummaryRow, ErrorResponseEntry, ForkRequest, ForkResponse,
++    LinkRunPullRequestRequest, MergeRunPullRequestRequest, MergeRunPullRequestResponse,
++    ModelReference, PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse,
++    PreviewUrlRequest, PreviewUrlResponse, Provider, ProviderList, PruneRunEntry, PruneRunsRequest,
++    PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest,
++    RewindResponse, Run, RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage,
++    RunBillingTotals, RunError, RunManifest, RunStage, SandboxDetails, SandboxFileEntry,
++    SandboxFileListResponse, SandboxService, SandboxServiceListResponse, SshAccessRequest,
++    SshAccessResponse, StageHandler, StageState, StartRunRequest, SubmitAnswerRequest,
++    SystemCpuResourceScope, SystemCpuResources, SystemDiskResourceScope, SystemDiskResources,
++    SystemInfoResponse, SystemMemoryResourceScope, SystemMemoryResources, SystemRepairRunIssue,
++    SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts, TimelineEntryResponse,
++    VncPreviewResponse, WriteBlobResponse,
+ };
+ use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
+ #[cfg(test)]
+diff --git a/lib/crates/fabro-server/src/server/handler/lifecycle.rs b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+index b7aa26c8a..249b0d22e 100644
+--- a/lib/crates/fabro-server/src/server/handler/lifecycle.rs
++++ b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+@@ -1,11 +1,14 @@
++use std::collections::HashSet;
+ use std::sync::Arc;
+ 
+ use chrono::Utc;
+ 
+ use super::super::{
+-    ApiError, AppState, DenyRunRequest, FailureReason, ForkRequest, ForkResponse, HeaderMap,
++    ApiError, AppState, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
++    BatchRunLifecycleResult, BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary,
++    DenyRunRequest, ErrorResponseEntry, FailureReason, ForkRequest, ForkResponse, HeaderMap,
+     IntoResponse, Json, Path, PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser,
+-    Response, RewindRequest, RewindResponse, Router, RunAnswerTransport, RunControlAction,
++    Response, RewindRequest, RewindResponse, Router, Run, RunAnswerTransport, RunControlAction,
+     RunExecutionMode, RunId, RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode,
+     Storage, TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
+     clear_live_run_state, durable_run_status, get, load_pending_control, managed_run, operations,
+@@ -22,6 +25,8 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
+         .route("/runs/{id}/deny", post(deny_run))
+         .route("/runs/{id}/pause", post(pause_run))
+         .route("/runs/{id}/unpause", post(unpause_run))
++        .route("/runs/archive", post(batch_archive_runs))
++        .route("/runs/unarchive", post(batch_unarchive_runs))
+         .route("/runs/{id}/archive", post(archive_run))
+         .route("/runs/{id}/rewind", post(rewind_run))
+         .route("/runs/{id}/retry", post(retry_run))
+@@ -684,6 +689,34 @@ async fn unarchive_run(
+     run_archive_action(state, actor, id, ArchiveAction::Unarchive).await
+ }
+ 
++async fn batch_archive_runs(
++    RequiredUser(user): RequiredUser,
++    State(state): State<Arc<AppState>>,
++    Json(request): Json<BatchRunLifecycleRequest>,
++) -> Response {
++    batch_run_archive_action(
++        state,
++        Principal::User(user),
++        request,
++        ArchiveAction::Archive,
++    )
++    .await
++}
++
++async fn batch_unarchive_runs(
++    RequiredUser(user): RequiredUser,
++    State(state): State<Arc<AppState>>,
++    Json(request): Json<BatchRunLifecycleRequest>,
++) -> Response {
++    batch_run_archive_action(
++        state,
++        Principal::User(user),
++        request,
++        ArchiveAction::Unarchive,
++    )
++    .await
++}
++
+ async fn rewind_run(
+     subject: RequiredUser,
+     State(state): State<Arc<AppState>>,
+@@ -876,6 +909,175 @@ enum ArchiveAction {
+     Unarchive,
+ }
+ 
++const MAX_BATCH_RUN_LIFECYCLE_IDS: usize = 250;
++
++async fn batch_run_archive_action(
++    state: Arc<AppState>,
++    actor: Principal,
++    request: BatchRunLifecycleRequest,
++    action: ArchiveAction,
++) -> Response {
++    let ids = match validate_batch_run_ids(request) {
++        Ok(ids) => ids,
++        Err(err) => return err.into_response(),
++    };
++    let mut results = Vec::with_capacity(ids.len());
++
++    for id in ids {
++        results.push(batch_run_archive_item(state.as_ref(), actor.clone(), id, action).await);
++    }
++
++    let requested = results.len() as u64;
++    let succeeded = results.iter().filter(|result| result.ok).count() as u64;
++    (
++        StatusCode::OK,
++        Json(BatchRunLifecycleResponse {
++            results,
++            summary: BatchRunLifecycleSummary {
++                requested,
++                succeeded,
++                failed: requested - succeeded,
++            },
++        }),
++    )
++        .into_response()
++}
++
++fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId>, ApiError> {
++    if request.run_ids.is_empty() {
++        return Err(ApiError::bad_request(
++            "run_ids must contain at least one run ID.",
++        ));
++    }
++    if request.run_ids.len() > MAX_BATCH_RUN_LIFECYCLE_IDS {
++        return Err(ApiError::bad_request(format!(
++            "run_ids must contain no more than {MAX_BATCH_RUN_LIFECYCLE_IDS} run IDs.",
++        )));
++    }
++
++    let mut seen = HashSet::with_capacity(request.run_ids.len());
++    let mut ids = Vec::with_capacity(request.run_ids.len());
++    for raw in request.run_ids {
++        let id = raw.parse::<RunId>().map_err(|_| {
++            ApiError::bad_request(format!("run_ids contains invalid run ID: {raw}"))
++        })?;
++        if !seen.insert(id) {
++            return Err(ApiError::bad_request(
++                "run_ids must not contain duplicate IDs.",
++            ));
++        }
++        ids.push(id);
++    }
++    Ok(ids)
++}
++
++async fn batch_run_archive_item(
++    state: &AppState,
++    actor: Principal,
++    id: RunId,
++    action: ArchiveAction,
++) -> BatchRunLifecycleResult {
++    let result = match action {
++        ArchiveAction::Archive => operations::archive(&state.store, &id, Some(actor))
++            .await
++            .map(|outcome| match outcome {
++                operations::ArchiveOutcome::Archived { .. } => {
++                    BatchRunLifecycleResultOutcome::Archived
++                }
++                operations::ArchiveOutcome::AlreadyArchived => {
++                    BatchRunLifecycleResultOutcome::AlreadyArchived
++                }
++            }),
++        ArchiveAction::Unarchive => operations::unarchive(&state.store, &id, Some(actor))
++            .await
++            .map(|outcome| match outcome {
++                operations::UnarchiveOutcome::Unarchived { .. } => {
++                    BatchRunLifecycleResultOutcome::Unarchived
++                }
++                operations::UnarchiveOutcome::NotArchived { .. } => {
++                    BatchRunLifecycleResultOutcome::NotArchived
++                }
++            }),
++    };
++
++    match result {
++        Ok(outcome) => match load_decorated_run_after_lifecycle_action(state, id).await {
++            Ok(run) => batch_success_result(id, outcome, run),
++            Err(error) => batch_failure_result(id, BatchRunLifecycleResultOutcome::Error, error),
++        },
++        Err(WorkflowError::Precondition(message)) => batch_failure_result(
++            id,
++            BatchRunLifecycleResultOutcome::Conflict,
++            batch_error_entry(StatusCode::CONFLICT, message),
++        ),
++        Err(WorkflowError::RunNotFound(_)) => batch_failure_result(
++            id,
++            BatchRunLifecycleResultOutcome::NotFound,
++            batch_error_entry(StatusCode::NOT_FOUND, "Run not found."),
++        ),
++        Err(err) => batch_failure_result(
++            id,
++            BatchRunLifecycleResultOutcome::Error,
++            batch_error_entry(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
++        ),
++    }
++}
++
++async fn load_decorated_run_after_lifecycle_action(
++    state: &AppState,
++    id: RunId,
++) -> Result<Run, ErrorResponseEntry> {
++    match state.store.get_cached_summary(&id, Utc::now()).await {
++        Ok(Some(summary)) => Ok(state.decorate_run_summary(summary).await),
++        Ok(None) => Err(batch_error_entry(
++            StatusCode::INTERNAL_SERVER_ERROR,
++            "Failed to load run summary after lifecycle action.",
++        )),
++        Err(err) => Err(batch_error_entry(
++            StatusCode::INTERNAL_SERVER_ERROR,
++            err.to_string(),
++        )),
++    }
++}
++
++fn batch_success_result(
++    id: RunId,
++    outcome: BatchRunLifecycleResultOutcome,
++    run: Run,
++) -> BatchRunLifecycleResult {
++    BatchRunLifecycleResult {
++        run_id: id.to_string(),
++        ok: true,
++        outcome,
++        run: Some(run),
++        error: None,
++    }
++}
++
++fn batch_failure_result(
++    id: RunId,
++    outcome: BatchRunLifecycleResultOutcome,
++    error: ErrorResponseEntry,
++) -> BatchRunLifecycleResult {
++    BatchRunLifecycleResult {
++        run_id: id.to_string(),
++        ok: false,
++        outcome,
++        run: None,
++        error: Some(error),
++    }
++}
++
++fn batch_error_entry(status: StatusCode, detail: impl Into<String>) -> ErrorResponseEntry {
++    ErrorResponseEntry {
++        status:     status.as_u16().to_string(),
++        title:      status.canonical_reason().unwrap_or("Unknown").to_string(),
++        detail:     detail.into(),
++        code:       None,
++        request_id: None,
++    }
++}
++
+ async fn run_archive_action(
+     state: Arc<AppState>,
+     actor: Principal,
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index 47c7d94d2..bd17bee80 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -632,6 +632,15 @@ fn json_bearer_request(
+         .unwrap()
+ }
+ 
++fn json_request(method: Method, path: &str, body: &serde_json::Value) -> Request<Body> {
++    Request::builder()
++        .method(method)
++        .uri(api(path))
++        .header(header::CONTENT_TYPE, "application/json")
++        .body(Body::from(serde_json::to_vec(&body).unwrap()))
++        .unwrap()
++}
++
+ fn canonical_origin_settings(url: &str) -> ServerSettings {
+     server_settings_from_toml(&format!(
+         r#"
+@@ -10512,6 +10521,337 @@ async fn archive_and_unarchive_updates_listing_visibility() {
+     assert_eq!(run_json_status(restored_item)["reason"], "completed");
+ }
+ 
++fn run_submitted_event() -> workflow_event::Event {
++    workflow_event::Event::RunSubmitted {
++        definition_blob: None,
++    }
++}
++
++fn workflow_completed_event() -> workflow_event::Event {
++    workflow_event::Event::WorkflowRunCompleted {
++        timing:               fabro_types::RunTiming::wall_only(1000),
++        artifact_count:       0,
++        status:               "succeeded".to_string(),
++        reason:               SuccessReason::Completed,
++        total_usd_micros:     None,
++        final_git_commit_sha: None,
++        final_patch:          None,
++        diff_summary:         None,
++        billing:              None,
++    }
++}
++
++async fn create_succeeded_run(state: &Arc<AppState>, run_id: RunId) {
++    create_durable_run_with_events(state, run_id, &[
++        run_submitted_event(),
++        workflow_completed_event(),
++    ])
++    .await;
++}
++
++async fn create_running_run(state: &Arc<AppState>, run_id: RunId) {
++    create_durable_run_with_events(state, run_id, &[
++        run_submitted_event(),
++        workflow_event::Event::RunRunning,
++    ])
++    .await;
++}
++
++fn batch_lifecycle_body(run_ids: &[RunId]) -> serde_json::Value {
++    json!({
++        "run_ids": run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
++    })
++}
++
++fn assert_batch_result(result: &serde_json::Value, run_id: RunId, ok: bool, outcome: &str) {
++    assert_eq!(result["run_id"], run_id.to_string());
++    assert_eq!(result["ok"], ok);
++    assert_eq!(result["outcome"], outcome);
++    if ok {
++        assert!(
++            result["run"].is_object(),
++            "successful result should include run: {result}"
++        );
++        assert!(
++            result["error"].is_null(),
++            "successful result should omit error: {result}"
++        );
++    } else {
++        assert!(
++            result["error"].is_object(),
++            "failed result should include error: {result}"
++        );
++        assert!(
++            result["run"].is_null(),
++            "failed result should omit run: {result}"
++        );
++    }
++}
++
++#[tokio::test]
++async fn batch_archive_and_unarchive_updates_listing_visibility() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let first_id = RunId::new();
++    let second_id = RunId::new();
++    create_succeeded_run(&state, first_id).await;
++    create_succeeded_run(&state, second_id).await;
++
++    let archive_response = app
++        .clone()
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/archive",
++            &batch_lifecycle_body(&[first_id, second_id]),
++        ))
++        .await
++        .unwrap();
++    let archive_body = response_json!(archive_response, StatusCode::OK).await;
++    assert_eq!(archive_body["summary"]["requested"], 2);
++    assert_eq!(archive_body["summary"]["succeeded"], 2);
++    assert_eq!(archive_body["summary"]["failed"], 0);
++    let archive_results = archive_body["results"].as_array().unwrap();
++    assert_batch_result(&archive_results[0], first_id, true, "archived");
++    assert!(run_json_archived(&archive_results[0]["run"]));
++    assert_batch_result(&archive_results[1], second_id, true, "archived");
++    assert!(run_json_archived(&archive_results[1]["run"]));
++
++    let hidden_response = app
++        .clone()
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api("/runs"))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let hidden_body = response_json!(hidden_response, StatusCode::OK).await;
++    assert!(
++        hidden_body["data"].as_array().unwrap().iter().all(|item| {
++            let item_id = run_json_id(item);
++            item_id != Some(&first_id.to_string()) && item_id != Some(&second_id.to_string())
++        }),
++        "archived runs should be hidden from default listing"
++    );
++
++    let unarchive_response = app
++        .clone()
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/unarchive",
++            &batch_lifecycle_body(&[first_id, second_id]),
++        ))
++        .await
++        .unwrap();
++    let unarchive_body = response_json!(unarchive_response, StatusCode::OK).await;
++    assert_eq!(unarchive_body["summary"]["requested"], 2);
++    assert_eq!(unarchive_body["summary"]["succeeded"], 2);
++    assert_eq!(unarchive_body["summary"]["failed"], 0);
++    let unarchive_results = unarchive_body["results"].as_array().unwrap();
++    assert_batch_result(&unarchive_results[0], first_id, true, "unarchived");
++    assert!(!run_json_archived(&unarchive_results[0]["run"]));
++    assert_batch_result(&unarchive_results[1], second_id, true, "unarchived");
++    assert!(!run_json_archived(&unarchive_results[1]["run"]));
++
++    let restored_response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api("/runs"))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let restored_body = response_json!(restored_response, StatusCode::OK).await;
++    for run_id in [first_id, second_id] {
++        let restored_item = restored_body["data"]
++            .as_array()
++            .unwrap()
++            .iter()
++            .find(|item| run_json_id(item) == Some(&run_id.to_string()))
++            .expect("unarchived run should reappear in default listing");
++        assert_eq!(run_json_status(restored_item)["kind"], "succeeded");
++    }
++}
++
++#[tokio::test]
++async fn batch_archive_reports_ordered_mixed_results_without_rollback() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let already_archived_id = RunId::new();
++    let terminal_id = RunId::new();
++    let running_id = RunId::new();
++    let missing_id = RunId::new();
++    create_succeeded_run(&state, already_archived_id).await;
++    create_succeeded_run(&state, terminal_id).await;
++    create_running_run(&state, running_id).await;
++
++    let already_archived_response = app
++        .clone()
++        .oneshot(
++            Request::builder()
++                .method("POST")
++                .uri(api(&format!("/runs/{already_archived_id}/archive")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_status!(already_archived_response, StatusCode::OK).await;
++
++    let response = app
++        .clone()
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/archive",
++            &batch_lifecycle_body(&[already_archived_id, terminal_id, running_id, missing_id]),
++        ))
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(body["summary"]["requested"], 4);
++    assert_eq!(body["summary"]["succeeded"], 2);
++    assert_eq!(body["summary"]["failed"], 2);
++    let results = body["results"].as_array().unwrap();
++    assert_batch_result(&results[0], already_archived_id, true, "already_archived");
++    assert_batch_result(&results[1], terminal_id, true, "archived");
++    assert_batch_result(&results[2], running_id, false, "conflict");
++    assert_eq!(results[2]["error"]["status"], "409");
++    assert_batch_result(&results[3], missing_id, false, "not_found");
++    assert_eq!(results[3]["error"]["status"], "404");
++
++    let terminal_response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{terminal_id}")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let terminal_body = response_json!(terminal_response, StatusCode::OK).await;
++    assert!(run_json_archived(&terminal_body));
++}
++
++#[tokio::test]
++async fn batch_unarchive_treats_terminal_not_archived_as_success() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let archived_id = RunId::new();
++    let not_archived_id = RunId::new();
++    create_succeeded_run(&state, archived_id).await;
++    create_succeeded_run(&state, not_archived_id).await;
++
++    let archive_response = app
++        .clone()
++        .oneshot(
++            Request::builder()
++                .method("POST")
++                .uri(api(&format!("/runs/{archived_id}/archive")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_status!(archive_response, StatusCode::OK).await;
++
++    let response = app
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/unarchive",
++            &batch_lifecycle_body(&[archived_id, not_archived_id]),
++        ))
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(body["summary"]["requested"], 2);
++    assert_eq!(body["summary"]["succeeded"], 2);
++    assert_eq!(body["summary"]["failed"], 0);
++    let results = body["results"].as_array().unwrap();
++    assert_batch_result(&results[0], archived_id, true, "unarchived");
++    assert_batch_result(&results[1], not_archived_id, true, "not_archived");
++}
++
++#[tokio::test]
++async fn batch_lifecycle_rejects_invalid_requests_before_mutating_runs() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++    create_succeeded_run(&state, run_id).await;
++    let too_many_ids = (0..251)
++        .map(|_| RunId::new().to_string())
++        .collect::<Vec<_>>();
++    let invalid_requests = [
++        json!({ "run_ids": [] }),
++        json!({ "run_ids": [run_id.to_string(), run_id.to_string()] }),
++        json!({ "run_ids": ["not-a-run-id"] }),
++        json!({ "run_ids": too_many_ids }),
++    ];
++
++    for body in invalid_requests {
++        let response = app
++            .clone()
++            .oneshot(json_request(Method::POST, "/runs/archive", &body))
++            .await
++            .unwrap();
++        assert_status!(response, StatusCode::BAD_REQUEST).await;
++    }
++
++    let response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert!(!run_json_archived(&body));
++}
++
++#[tokio::test]
++async fn batch_lifecycle_requires_user_authentication() {
++    let (_state, app) = jwt_auth_app();
++    let user_jwt = issue_test_user_jwt();
++    let run_id = create_run_with_bearer(&app, &user_jwt).await;
++    let worker_token = issue_test_worker_token(&run_id);
++    let body = batch_lifecycle_body(&[run_id]);
++
++    let unauthenticated = app
++        .clone()
++        .oneshot(json_request(Method::POST, "/runs/archive", &body))
++        .await
++        .unwrap();
++    assert_status!(unauthenticated, StatusCode::UNAUTHORIZED).await;
++
++    for path in ["/runs/archive", "/runs/unarchive"] {
++        let worker_response = app
++            .clone()
++            .oneshot(json_bearer_request(
++                Method::POST,
++                path,
++                &worker_token,
++                &body,
++            ))
++            .await
++            .unwrap();
++        assert!(
++            matches!(
++                worker_response.status(),
++                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
++            ),
++            "{path} unexpectedly accepted worker token with status {}",
++            worker_response.status()
++        );
++    }
++}
++
+ #[tokio::test]
+ async fn archive_unknown_run_returns_not_found() {
+     let app = test_app_with();
+diff --git a/lib/packages/fabro-api-client/src/.openapi-generator/FILES b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+index 2f3ad178a..619940ff5 100644
+--- a/lib/packages/fabro-api-client/src/.openapi-generator/FILES
++++ b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+@@ -45,6 +45,10 @@ models/auth-session-user.ts
+ models/auth-session.ts
+ models/auth-sessions-response.ts
+ models/automation-ref.ts
++models/batch-run-lifecycle-request.ts
++models/batch-run-lifecycle-response.ts
++models/batch-run-lifecycle-result.ts
++models/batch-run-lifecycle-summary.ts
+ models/billed-token-counts.ts
+ models/billing-by-model.ts
+ models/billing-model-ref.ts
+diff --git a/lib/packages/fabro-api-client/src/api/runs-api.ts b/lib/packages/fabro-api-client/src/api/runs-api.ts
+index 9a9d2ad2e..327bd8611 100644
+--- a/lib/packages/fabro-api-client/src/api/runs-api.ts
++++ b/lib/packages/fabro-api-client/src/api/runs-api.ts
+@@ -22,6 +22,10 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
+ // @ts-ignore
+ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
+ // @ts-ignore
++import type { BatchRunLifecycleRequest } from '../models';
++// @ts-ignore
++import type { BatchRunLifecycleResponse } from '../models';
++// @ts-ignore
+ import type { BoardColumn } from '../models';
+ // @ts-ignore
+ import type { CloseRunPullRequestResponse } from '../models';
+@@ -156,6 +160,88 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
+                 options: localVarRequestOptions,
+             };
+         },
++        /**
++         * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Archive Runs
++         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        batchArchiveRuns: async (batchRunLifecycleRequest: BatchRunLifecycleRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
++            // verify required parameter 'batchRunLifecycleRequest' is not null or undefined
++            assertParamExists('batchArchiveRuns', 'batchRunLifecycleRequest', batchRunLifecycleRequest)
++            const localVarPath = `/api/v1/runs/archive`;
++            // use dummy base URL string because the URL constructor only accepts absolute URLs.
++            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
++            let baseOptions;
++            if (configuration) {
++                baseOptions = configuration.baseOptions;
++            }
++
++            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
++            const localVarHeaderParameter = {} as any;
++            const localVarQueryParameter = {} as any;
++
++            // authentication SessionCookie required
++
++            // authentication BearerAuth required
++            // http bearer authentication required
++            await setBearerAuthToObject(localVarHeaderParameter, configuration)
++
++            localVarHeaderParameter['Content-Type'] = 'application/json';
++            localVarHeaderParameter['Accept'] = 'application/json';
++
++            setSearchParams(localVarUrlObj, localVarQueryParameter);
++            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
++            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
++            localVarRequestOptions.data = serializeDataIfNeeded(batchRunLifecycleRequest, localVarRequestOptions, configuration)
++
++            return {
++                url: toPathString(localVarUrlObj),
++                options: localVarRequestOptions,
++            };
++        },
++        /**
++         * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Unarchive Runs
++         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        batchUnarchiveRuns: async (batchRunLifecycleRequest: BatchRunLifecycleRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
++            // verify required parameter 'batchRunLifecycleRequest' is not null or undefined
++            assertParamExists('batchUnarchiveRuns', 'batchRunLifecycleRequest', batchRunLifecycleRequest)
++            const localVarPath = `/api/v1/runs/unarchive`;
++            // use dummy base URL string because the URL constructor only accepts absolute URLs.
++            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
++            let baseOptions;
++            if (configuration) {
++                baseOptions = configuration.baseOptions;
++            }
++
++            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
++            const localVarHeaderParameter = {} as any;
++            const localVarQueryParameter = {} as any;
++
++            // authentication SessionCookie required
++
++            // authentication BearerAuth required
++            // http bearer authentication required
++            await setBearerAuthToObject(localVarHeaderParameter, configuration)
++
++            localVarHeaderParameter['Content-Type'] = 'application/json';
++            localVarHeaderParameter['Accept'] = 'application/json';
++
++            setSearchParams(localVarUrlObj, localVarQueryParameter);
++            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
++            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
++            localVarRequestOptions.data = serializeDataIfNeeded(batchRunLifecycleRequest, localVarRequestOptions, configuration)
++
++            return {
++                url: toPathString(localVarUrlObj),
++                options: localVarRequestOptions,
++            };
++        },
+         /**
+          * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
+          * @summary Cancel Run
+@@ -1436,6 +1522,32 @@ export const RunsApiFp = function(configuration?: Configuration) {
+             const localVarOperationServerBasePath = operationServerMap['RunsApi.archiveRun']?.[localVarOperationServerIndex]?.url;
+             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+         },
++        /**
++         * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Archive Runs
++         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        async batchArchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BatchRunLifecycleResponse>> {
++            const localVarAxiosArgs = await localVarAxiosParamCreator.batchArchiveRuns(batchRunLifecycleRequest, options);
++            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
++            const localVarOperationServerBasePath = operationServerMap['RunsApi.batchArchiveRuns']?.[localVarOperationServerIndex]?.url;
++            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
++        },
++        /**
++         * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Unarchive Runs
++         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        async batchUnarchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BatchRunLifecycleResponse>> {
++            const localVarAxiosArgs = await localVarAxiosParamCreator.batchUnarchiveRuns(batchRunLifecycleRequest, options);
++            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
++            const localVarOperationServerBasePath = operationServerMap['RunsApi.batchUnarchiveRuns']?.[localVarOperationServerIndex]?.url;
++            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
++        },
+         /**
+          * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
+          * @summary Cancel Run
+@@ -1859,6 +1971,26 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
+         archiveRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Run> {
+             return localVarFp.archiveRun(id, options).then((request) => request(axios, basePath));
+         },
++        /**
++         * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Archive Runs
++         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        batchArchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): AxiosPromise<BatchRunLifecycleResponse> {
++            return localVarFp.batchArchiveRuns(batchRunLifecycleRequest, options).then((request) => request(axios, basePath));
++        },
++        /**
++         * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Unarchive Runs
++         * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        batchUnarchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): AxiosPromise<BatchRunLifecycleResponse> {
++            return localVarFp.batchUnarchiveRuns(batchRunLifecycleRequest, options).then((request) => request(axios, basePath));
++        },
+         /**
+          * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
+          * @summary Cancel Run
+@@ -2195,6 +2327,28 @@ export class RunsApi extends BaseAPI {
+         return RunsApiFp(this.configuration).archiveRun(id, options).then((request) => request(this.axios, this.basePath));
+     }
+ 
++    /**
++     * Marks up to 250 terminal runs as archived in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run archive events as `POST /api/v1/runs/{id}/archive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++     * @summary Archive Runs
++     * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++     * @param {*} [options] Override http request option.
++     * @throws {RequiredError}
++     */
++    public batchArchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig) {
++        return RunsApiFp(this.configuration).batchArchiveRuns(batchRunLifecycleRequest, options).then((request) => request(this.axios, this.basePath));
++    }
++
++    /**
++     * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++     * @summary Unarchive Runs
++     * @param {BatchRunLifecycleRequest} batchRunLifecycleRequest
++     * @param {*} [options] Override http request option.
++     * @throws {RequiredError}
++     */
++    public batchUnarchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig) {
++        return RunsApiFp(this.configuration).batchUnarchiveRuns(batchRunLifecycleRequest, options).then((request) => request(this.axios, this.basePath));
++    }
++
+     /**
+      * Cancels a pending, runnable, or running run. Returns 409 if the run has already completed or been cancelled.
+      * @summary Cancel Run
+diff --git a/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-request.ts b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-request.ts
+new file mode 100644
+index 000000000..b9225f933
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-request.ts
+@@ -0,0 +1,25 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++
++/**
++ * Run IDs to archive or unarchive as one bounded fail-soft batch.
++ */
++export interface BatchRunLifecycleRequest {
++    /**
++     * Run IDs to process, in result order.
++     */
++    'run_ids': Set<string>;
++}
+diff --git a/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-response.ts b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-response.ts
+new file mode 100644
+index 000000000..8dc5a80dd
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-response.ts
+@@ -0,0 +1,32 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++// May contain unused imports in some cases
++// @ts-ignore
++import type { BatchRunLifecycleResult } from './batch-run-lifecycle-result';
++// May contain unused imports in some cases
++// @ts-ignore
++import type { BatchRunLifecycleSummary } from './batch-run-lifecycle-summary';
++
++/**
++ * Per-run results for a fail-soft batch archive or unarchive request.
++ */
++export interface BatchRunLifecycleResponse {
++    /**
++     * Results ordered exactly like the request `run_ids`.
++     */
++    'results': Array<BatchRunLifecycleResult>;
++    'summary': BatchRunLifecycleSummary;
++}
+diff --git a/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-result.ts b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-result.ts
+new file mode 100644
+index 000000000..d3559109f
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-result.ts
+@@ -0,0 +1,59 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++// May contain unused imports in some cases
++// @ts-ignore
++import type { ErrorResponseEntry } from './error-response-entry';
++// May contain unused imports in some cases
++// @ts-ignore
++import type { Run } from './run';
++
++/**
++ * Result for one run in a batch archive or unarchive request.
++ */
++export interface BatchRunLifecycleResult {
++    /**
++     * Run ID from the request item.
++     */
++    'run_id': string;
++    /**
++     * Whether this item succeeded.
++     */
++    'ok': boolean;
++    /**
++     * Machine-readable item outcome.
++     */
++    'outcome': BatchRunLifecycleResultOutcomeEnum;
++    /**
++     * Decorated run summary for successful items when it can be loaded.
++     */
++    'run'?: Run;
++    /**
++     * Structured item error for failed items.
++     */
++    'error'?: ErrorResponseEntry;
++}
++
++export const BatchRunLifecycleResultOutcomeEnum = {
++    ARCHIVED: 'archived',
++    ALREADY_ARCHIVED: 'already_archived',
++    UNARCHIVED: 'unarchived',
++    NOT_ARCHIVED: 'not_archived',
++    NOT_FOUND: 'not_found',
++    CONFLICT: 'conflict',
++    ERROR: 'error'
++} as const;
++
++export type BatchRunLifecycleResultOutcomeEnum = typeof BatchRunLifecycleResultOutcomeEnum[keyof typeof BatchRunLifecycleResultOutcomeEnum];
+diff --git a/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-summary.ts b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-summary.ts
+new file mode 100644
+index 000000000..e01f9815d
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-run-lifecycle-summary.ts
+@@ -0,0 +1,33 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++
++/**
++ * Aggregate counts for a batch archive or unarchive request.
++ */
++export interface BatchRunLifecycleSummary {
++    /**
++     * Number of requested run IDs.
++     */
++    'requested': number;
++    /**
++     * Number of item results with `ok=true`.
++     */
++    'succeeded': number;
++    /**
++     * Number of item results with `ok=false`.
++     */
++    'failed': number;
++}
+diff --git a/lib/packages/fabro-api-client/src/models/index.ts b/lib/packages/fabro-api-client/src/models/index.ts
+index b40104395..e70e4f2db 100644
+--- a/lib/packages/fabro-api-client/src/models/index.ts
++++ b/lib/packages/fabro-api-client/src/models/index.ts
+@@ -22,6 +22,10 @@ export * from './auth-session';
+ export * from './auth-session-user';
+ export * from './auth-sessions-response';
+ export * from './automation-ref';
++export * from './batch-run-lifecycle-request';
++export * from './batch-run-lifecycle-response';
++export * from './batch-run-lifecycle-result';
++export * from './batch-run-lifecycle-summary';
+ export * from './billed-token-counts';
+ export * from './billing-by-model';
+ export * from './billing-model-ref';
