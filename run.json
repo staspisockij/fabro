@@ -1,0 +1,514 @@
+{
+  "title": "---",
+  "spec": {
+    "run_id": "01KSDFNA5W8QN6Q9GJ078DDWA3",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "---\ntitle: \"feat: Give fabro_tools runs MCP tool parity\"\ntype: feat\nstatus: active\ndate: 2026-05-24\n---\n\n# feat: Give fabro_tools runs MCP tool parity\n\n## Overview\n\nWhen a workflow run opts in with `[run.agent] fabro_tools = true`, its agents\nshould see the same Fabro run-management tool catalog that a human MCP client\nsees: create, search, get, interact, gather, events, and pair.\n\nThis is MCP tool parity, not full user API parity. The implementation should\nsimplify the current permission model by replacing the ad hoc \"run tools\"\nextractor names with explicit run-management actor extractors. User/admin HTTP\nsurfaces that are not backed by Fabro MCP tools remain user-only.\n\nOne intentional exception to exact parity remains: workflow-agent\n`fabro_run_create` must keep today's forced-child behavior. Runs created from a\nworkflow agent are always parented to the current run.\n\n## Problem Frame\n\nToday there are two similar but different tool catalogs:\n\n- Human MCP clients get seven tools from `fabro-mcp-server`, including\n  `fabro_run_pair`.\n- Workflow agents with `fabro_tools = true` get six shared tool definitions\n  from `fabro_tool::tool_definitions()`, excluding `fabro_run_pair`.\n\nThe auth model also leaks implementation detail into handler names:\n`RequiredRunToolActor` and `RequireRunScopedOrRunTools` describe a historical\nscope shape rather than the product capability. The behavior we want is simpler:\nan authenticated human or an opted-in run-tools worker may perform\nrun-management actions exposed through the Fabro MCP tool surface.\n\n## Requirements\n\n- R1. Workflow agents with `fabro_tools = true` register `fabro_run_pair` in\n  addition to the existing six Fabro run-management tools.\n- R2. Workflow-agent `fabro_run_create` still forces the current run as parent\n  and rejects conflicting explicit `parent_id` values.\n- R3. The external Fabro MCP server tool list remains unchanged.\n- R4. Pair HTTP routes accept run-management actors, not only users, so\n  `fabro_run_pair` can work from workflow-agent tools.\n- R5. User-only APIs remain user-only. Do not make `RequiredUser` accept worker\n  principals.\n- R6. Permission code uses names that match the product concept:\n  run-management actor / target, not \"run scoped or run tools\".\n- R7. Ask Fabro remains read-only and run-scoped with only `fabro_run_get` and\n  `fabro_run_events`.\n\n## Scope Boundaries\n\nIn scope:\n\n- Shared Fabro tool catalog and workflow-agent tool registration.\n- `fabro_run_pair` dispatcher integration in `fabro-workflow`.\n- Server auth extractors for MCP-backed run-management endpoints.\n- Pair route auth migration to the new run-management extractor.\n- Docs updates for agent/MCP parity and the create-parent exception.\n\nOut of scope:\n\n- Treating worker tokens as generic user tokens.\n- Granting workers access to secrets, server/system settings, billing, models,\n  sandbox management, logs/files/artifacts, arbitrary event append, or other\n  user/admin HTTP APIs.\n- Changing Ask Fabro's read-only tool policy.\n- Changing the worker JWT scope string or minting flow beyond names/tests needed\n  for the run-management extractor cleanup.\n- Removing the forced-child behavior for workflow-agent `fabro_run_create`.\n\n## Technical Design\n\n### Shared Tool Catalog\n\n`lib/crates/fabro-tool/src/common.rs` should include\n`FABRO_RUN_PAIR_TOOL_NAME` in `TOOL_DEFINITIONS`, using\n`FabroRunPairParams` and the same description already used by\n`fabro-mcp-server`.\n\nThis makes `register_fabro_run_tools()` in `fabro-workflow` register all seven\ntools for workflow agents. `register_named_fabro_run_tools()` continues to\nfilter by name, so Ask Fabro remains restricted to its existing read-only list.\n\n### Workflow Agent Execution\n\n`lib/crates/fabro-workflow/src/handler/llm/api.rs` should add a\n`FABRO_RUN_PAIR_TOOL_NAME` match arm in `execute_fabro_run_tool`:\n\n- Parse `FabroRunPairParams`.\n- Validate with `ValidatedPairRun`.\n- Call `fabro_tool::pair_run`.\n- Render the normal summary and structured result.\n\nDo not change the `fabro_run_create` branch except for test updates caused by\nthe catalog growing. It must still call `ensure_current_run_parent` and pass\n`CreateRunOptions { forced_parent_id: Some(current_run_id) }`.\n\n### Run-Management Auth Model\n\nIn `lib/crates/fabro-server/src/principal_middleware.rs`, replace the current\nrun-tools-specific extractor names with product-level names:\n\n- `RequiredRunManagementActor(pub Principal)`\n- `RequireRunManagementTarget(pub RunId, pub Principal)`\n\nRecommended semantics:\n\n- `RequiredRunManagementActor` accepts a user principal or a worker principal\n  whose token has `agent:run_tools`. It rejects base worker tokens.\n- `RequireRunManagementTarget` accepts:\n  - any user principal,\n  - a same-run base worker principal,\n  - any worker principal with `agent:run_tools`, including cross-run targets.\n- Non-authenticated and invalid-token behavior should preserve the current\n  auth rejection status/code behavior.\n\nUse these names in route handlers that are directly backing the Fabro MCP\nrun-management tools. Remove or stop exporting the old\n`RequiredRunToolActor` and `RequireRunScopedOrRunTools` names once callers are\nmigrated.\n\n### Route Migrations\n\nMigrate these route groups to the new run-management actor names without\nchanging behavior:\n\n- Run collection/resolve/create endpoints used by `fabro_run_create` and\n  `fabro_run_search`.\n- Run parent link/unlink, run status, run state, questions, answer, start,\n  cancel, archive, unarchive, steer/message, and event-list endpoints used by\n  `fabro_run_get`, `fabro_run_interact`, and `fabro_run_events`.\n\nMigrate pair routes in `lib/crates/fabro-server/src/server/handler/pair.rs`:\n\n- `get_pair_status`, `get_pair`, and `get_transcript` use\n  `RequireRunManagementTarget`.\n- `start_pair`, `send_pair_message`, and `end_pair` also use\n  `RequireRunManagementTarget` and pass the returned `Principal` through to the\n  worker control transport.\n- Do not construct `Principal::User(auth.0)` in pair handlers after migration.\n\nDo not migrate endpoints whose behavior is not part of the Fabro MCP tool\nsurface. In particular, leave approve, deny, pause, unpause, retry, rewind,\nfork, delete, batch actions, timeline, settings, logs, files, artifacts,\nsecrets, server/system, models, sandbox, billing, and graph rendering on their\nexisting user or run-scoped auth rules unless they are already needed by the\ncurrent tool backend.\n\n### Documentation\n\nUpdate public docs where `fabro_tools` is described:\n\n- State that opted-in workflow agents get the same Fabro run-management MCP tool\n  catalog as human MCP clients.\n- Explicitly document the workflow-agent create exception: created runs are\n  children of the current run.\n- Keep the distinction from normal agent permissions and external MCP server\n  configuration.\n\n## Test Plan\n\n### `fabro-tool`\n\n- Update the shared tool-definition test coverage to expect seven tools,\n  including `fabro_run_pair`.\n- Assert the pair tool schema includes the expected action enum and stage/pair\n  fields.\n\n### `fabro-workflow`\n\n- Update `agent_run_tools_register_exact_shared_definitions` to expect\n  `fabro_run_pair`.\n- Add executor coverage for `fabro_run_pair` proving it dispatches to the\n  shared backend and renders the summary/result.\n- Keep or add coverage proving workflow-agent create still injects the current\n  run as parent and still rejects conflicting `parent_id`.\n- Confirm `register_named_fabro_run_tools` still registers only requested names\n  so Ask Fabro is unaffected.\n\n### `fabro-server`\n\n- Add/rename principal middleware tests:\n  - run-management actor accepts users and `agent:run_tools` workers.\n  - run-management actor rejects base worker tokens.\n  - run-management target accepts same-run base workers.\n  - run-management target accepts cross-run `agent:run_tools` workers.\n  - run-management target rejects cross-run base workers.\n- Extend existing run-tool worker API tests to cover the migrated extractor\n  names without broadening non-tool surfaces.\n- Add pair route auth tests:\n  - a run-tools worker can call pair status/transcript endpoints for another\n    run.\n  - a run-tools worker reaches pair command domain logic, such as\n    `worker_control_unavailable`, rather than failing auth.\n  - a cross-run base worker remains forbidden.\n- Add a negative test that a run-tools worker still cannot call at least one\n  user-only non-MCP endpoint, such as approve/deny or timeline.\n\n### `fabro-cli` / MCP Integration\n\n- Existing `stdio_server_initializes_and_lists_run_tools` should remain green\n  and continue to validate the external human MCP catalog.\n- Add or update integration coverage only if the shared catalog change affects\n  agent-visible tool listing snapshots or MCP schema parity tests.\n\n### Commands\n\nTargeted verification:\n\n```bash\ncargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli\n```\n\nFull verification before merge if the route migration touches broad auth code:\n\n```bash\ncargo nextest run --workspace\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\n## Implementation Notes\n\n- Prefer renaming and consolidating auth extractors over adding another layer of\n  compatibility aliases. The goal is to make handler signatures read like the\n  product policy.\n- Keep actor provenance as `Principal::Worker { run_id: <originating run> }`\n  when a workflow agent acts through `fabro_tools`; do not forge a user\n  principal.\n- Pair route behavior may return domain errors when no live worker control\n  channel exists. Tests should assert auth acceptance by expecting those domain\n  errors, not by requiring a fully active pair session unless a fixture already\n  supports it.\n- The external MCP server already registers `fabro_run_pair` directly. Avoid\n  duplicating tool catalogs there; use the shared `fabro-tool` definitions only\n  where workflow-agent registration needs them.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": [],
+          "controls": {
+            "reasoning_effort": null,
+            "speed": null
+          }
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt"
+        },
+        "checkpoint": {
+          "exclude_globs": [],
+          "skip_git_hooks": false
+        },
+        "clone": {
+          "enabled": true
+        },
+        "run_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "meta_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "environment": {
+          "id": "fabro-dev",
+          "provider": "daytona",
+          "image": {
+            "ref": "fabro-v12",
+            "dockerfile": {
+              "type": "inline",
+              "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        curl git ripgrep ca-certificates build-essential pkg-config libssl-dev unzip python3 \\\n        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \\\n        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install real Chromium (not the snap stub) via xtradeb PPA\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        software-properties-common curl gnupg \\\n    && add-apt-repository -y ppa:xtradeb/apps \\\n    && apt-get update \\\n    && apt-get install -y --no-install-recommends chromium \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Wrapper: Chromium needs --no-sandbox when running as root in a container,\n# and --disable-dev-shm-usage avoids crashes from small /dev/shm\nRUN printf '#!/bin/bash\\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage \"$@\"\\n' \\\n        > /usr/local/bin/chromium-wrapper \\\n    && chmod +x /usr/local/bin/chromium-wrapper\n\n# Make the wrapper the default in the system .desktop file and via alternatives\nRUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \\\n        /usr/share/applications/chromium.desktop \\\n    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \\\n        /usr/local/bin/chromium-wrapper 100\n\n# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)\nRUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \\\n    && printf 'WebBrowser=custom-WebBrowser\\n' > /etc/xdg/xfce4/helpers.rc \\\n    && printf '[Desktop Entry]\\n\\\nVersion=1.0\\n\\\nType=X-XFCE-Helper\\n\\\nName=Chromium\\n\\\nIcon=chromium\\n\\\nX-XFCE-Category=WebBrowser\\n\\\nX-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper \"%%s\"\\n\\\nX-XFCE-Commands=/usr/local/bin/chromium-wrapper\\n' \\\n        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\\n        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\\n    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" \\\n        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\\n    && apt-get update && apt-get install -y --no-install-recommends gh \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+            }
+          },
+          "resources": {
+            "cpu": 8,
+            "memory": "16GB",
+            "disk": "20GB"
+          },
+          "network": {
+            "mode": "allow_all",
+            "allow": []
+          },
+          "lifecycle": {
+            "preserve": false,
+            "stop_on_terminal": true,
+            "auto_stop": "30m"
+          },
+          "labels": {
+            "repo": "fabro-sh/fabro"
+          },
+          "volumes": [],
+          "env": {}
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null
+        },
+        "agent": {
+          "fabro_tools": false,
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        },
+        "integrations": {
+          "github": {
+            "permissions": {}
+          }
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "provider": {
+              "String": "openai"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "reasoning_effort": {
+              "String": "xhigh"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "label": {
+              "String": "Implement"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures."
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "provider": {
+              "String": "openai"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "shape": {
+              "String": "Msquare"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Start"
+            }
+          }
+        },
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "label": {
+              "String": "Fix Lints"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "script": {
+              "String": "git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "exit",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "goal": {
+          "String": "---\ntitle: \"feat: Give fabro_tools runs MCP tool parity\"\ntype: feat\nstatus: active\ndate: 2026-05-24\n---\n\n# feat: Give fabro_tools runs MCP tool parity\n\n## Overview\n\nWhen a workflow run opts in with `[run.agent] fabro_tools = true`, its agents\nshould see the same Fabro run-management tool catalog that a human MCP client\nsees: create, search, get, interact, gather, events, and pair.\n\nThis is MCP tool parity, not full user API parity. The implementation should\nsimplify the current permission model by replacing the ad hoc \"run tools\"\nextractor names with explicit run-management actor extractors. User/admin HTTP\nsurfaces that are not backed by Fabro MCP tools remain user-only.\n\nOne intentional exception to exact parity remains: workflow-agent\n`fabro_run_create` must keep today's forced-child behavior. Runs created from a\nworkflow agent are always parented to the current run.\n\n## Problem Frame\n\nToday there are two similar but different tool catalogs:\n\n- Human MCP clients get seven tools from `fabro-mcp-server`, including\n  `fabro_run_pair`.\n- Workflow agents with `fabro_tools = true` get six shared tool definitions\n  from `fabro_tool::tool_definitions()`, excluding `fabro_run_pair`.\n\nThe auth model also leaks implementation detail into handler names:\n`RequiredRunToolActor` and `RequireRunScopedOrRunTools` describe a historical\nscope shape rather than the product capability. The behavior we want is simpler:\nan authenticated human or an opted-in run-tools worker may perform\nrun-management actions exposed through the Fabro MCP tool surface.\n\n## Requirements\n\n- R1. Workflow agents with `fabro_tools = true` register `fabro_run_pair` in\n  addition to the existing six Fabro run-management tools.\n- R2. Workflow-agent `fabro_run_create` still forces the current run as parent\n  and rejects conflicting explicit `parent_id` values.\n- R3. The external Fabro MCP server tool list remains unchanged.\n- R4. Pair HTTP routes accept run-management actors, not only users, so\n  `fabro_run_pair` can work from workflow-agent tools.\n- R5. User-only APIs remain user-only. Do not make `RequiredUser` accept worker\n  principals.\n- R6. Permission code uses names that match the product concept:\n  run-management actor / target, not \"run scoped or run tools\".\n- R7. Ask Fabro remains read-only and run-scoped with only `fabro_run_get` and\n  `fabro_run_events`.\n\n## Scope Boundaries\n\nIn scope:\n\n- Shared Fabro tool catalog and workflow-agent tool registration.\n- `fabro_run_pair` dispatcher integration in `fabro-workflow`.\n- Server auth extractors for MCP-backed run-management endpoints.\n- Pair route auth migration to the new run-management extractor.\n- Docs updates for agent/MCP parity and the create-parent exception.\n\nOut of scope:\n\n- Treating worker tokens as generic user tokens.\n- Granting workers access to secrets, server/system settings, billing, models,\n  sandbox management, logs/files/artifacts, arbitrary event append, or other\n  user/admin HTTP APIs.\n- Changing Ask Fabro's read-only tool policy.\n- Changing the worker JWT scope string or minting flow beyond names/tests needed\n  for the run-management extractor cleanup.\n- Removing the forced-child behavior for workflow-agent `fabro_run_create`.\n\n## Technical Design\n\n### Shared Tool Catalog\n\n`lib/crates/fabro-tool/src/common.rs` should include\n`FABRO_RUN_PAIR_TOOL_NAME` in `TOOL_DEFINITIONS`, using\n`FabroRunPairParams` and the same description already used by\n`fabro-mcp-server`.\n\nThis makes `register_fabro_run_tools()` in `fabro-workflow` register all seven\ntools for workflow agents. `register_named_fabro_run_tools()` continues to\nfilter by name, so Ask Fabro remains restricted to its existing read-only list.\n\n### Workflow Agent Execution\n\n`lib/crates/fabro-workflow/src/handler/llm/api.rs` should add a\n`FABRO_RUN_PAIR_TOOL_NAME` match arm in `execute_fabro_run_tool`:\n\n- Parse `FabroRunPairParams`.\n- Validate with `ValidatedPairRun`.\n- Call `fabro_tool::pair_run`.\n- Render the normal summary and structured result.\n\nDo not change the `fabro_run_create` branch except for test updates caused by\nthe catalog growing. It must still call `ensure_current_run_parent` and pass\n`CreateRunOptions { forced_parent_id: Some(current_run_id) }`.\n\n### Run-Management Auth Model\n\nIn `lib/crates/fabro-server/src/principal_middleware.rs`, replace the current\nrun-tools-specific extractor names with product-level names:\n\n- `RequiredRunManagementActor(pub Principal)`\n- `RequireRunManagementTarget(pub RunId, pub Principal)`\n\nRecommended semantics:\n\n- `RequiredRunManagementActor` accepts a user principal or a worker principal\n  whose token has `agent:run_tools`. It rejects base worker tokens.\n- `RequireRunManagementTarget` accepts:\n  - any user principal,\n  - a same-run base worker principal,\n  - any worker principal with `agent:run_tools`, including cross-run targets.\n- Non-authenticated and invalid-token behavior should preserve the current\n  auth rejection status/code behavior.\n\nUse these names in route handlers that are directly backing the Fabro MCP\nrun-management tools. Remove or stop exporting the old\n`RequiredRunToolActor` and `RequireRunScopedOrRunTools` names once callers are\nmigrated.\n\n### Route Migrations\n\nMigrate these route groups to the new run-management actor names without\nchanging behavior:\n\n- Run collection/resolve/create endpoints used by `fabro_run_create` and\n  `fabro_run_search`.\n- Run parent link/unlink, run status, run state, questions, answer, start,\n  cancel, archive, unarchive, steer/message, and event-list endpoints used by\n  `fabro_run_get`, `fabro_run_interact`, and `fabro_run_events`.\n\nMigrate pair routes in `lib/crates/fabro-server/src/server/handler/pair.rs`:\n\n- `get_pair_status`, `get_pair`, and `get_transcript` use\n  `RequireRunManagementTarget`.\n- `start_pair`, `send_pair_message`, and `end_pair` also use\n  `RequireRunManagementTarget` and pass the returned `Principal` through to the\n  worker control transport.\n- Do not construct `Principal::User(auth.0)` in pair handlers after migration.\n\nDo not migrate endpoints whose behavior is not part of the Fabro MCP tool\nsurface. In particular, leave approve, deny, pause, unpause, retry, rewind,\nfork, delete, batch actions, timeline, settings, logs, files, artifacts,\nsecrets, server/system, models, sandbox, billing, and graph rendering on their\nexisting user or run-scoped auth rules unless they are already needed by the\ncurrent tool backend.\n\n### Documentation\n\nUpdate public docs where `fabro_tools` is described:\n\n- State that opted-in workflow agents get the same Fabro run-management MCP tool\n  catalog as human MCP clients.\n- Explicitly document the workflow-agent create exception: created runs are\n  children of the current run.\n- Keep the distinction from normal agent permissions and external MCP server\n  configuration.\n\n## Test Plan\n\n### `fabro-tool`\n\n- Update the shared tool-definition test coverage to expect seven tools,\n  including `fabro_run_pair`.\n- Assert the pair tool schema includes the expected action enum and stage/pair\n  fields.\n\n### `fabro-workflow`\n\n- Update `agent_run_tools_register_exact_shared_definitions` to expect\n  `fabro_run_pair`.\n- Add executor coverage for `fabro_run_pair` proving it dispatches to the\n  shared backend and renders the summary/result.\n- Keep or add coverage proving workflow-agent create still injects the current\n  run as parent and still rejects conflicting `parent_id`.\n- Confirm `register_named_fabro_run_tools` still registers only requested names\n  so Ask Fabro is unaffected.\n\n### `fabro-server`\n\n- Add/rename principal middleware tests:\n  - run-management actor accepts users and `agent:run_tools` workers.\n  - run-management actor rejects base worker tokens.\n  - run-management target accepts same-run base workers.\n  - run-management target accepts cross-run `agent:run_tools` workers.\n  - run-management target rejects cross-run base workers.\n- Extend existing run-tool worker API tests to cover the migrated extractor\n  names without broadening non-tool surfaces.\n- Add pair route auth tests:\n  - a run-tools worker can call pair status/transcript endpoints for another\n    run.\n  - a run-tools worker reaches pair command domain logic, such as\n    `worker_control_unavailable`, rather than failing auth.\n  - a cross-run base worker remains forbidden.\n- Add a negative test that a run-tools worker still cannot call at least one\n  user-only non-MCP endpoint, such as approve/deny or timeline.\n\n### `fabro-cli` / MCP Integration\n\n- Existing `stdio_server_initializes_and_lists_run_tools` should remain green\n  and continue to validate the external human MCP catalog.\n- Add or update integration coverage only if the shared catalog change affects\n  agent-visible tool listing snapshots or MCP schema parity tests.\n\n### Commands\n\nTargeted verification:\n\n```bash\ncargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli\n```\n\nFull verification before merge if the route migration touches broad auth code:\n\n```bash\ncargo nextest run --workspace\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\n## Implementation Notes\n\n- Prefer renaming and consolidating auth extractors over adding another layer of\n  compatibility aliases. The goal is to make handler signatures read like the\n  product policy.\n- Keep actor provenance as `Principal::Worker { run_id: <originating run> }`\n  when a workflow agent acts through `fabro_tools`; do not forge a user\n  principal.\n- Pair route behavior may return domain errors when no live worker control\n  channel exists. Tests should assert auth acceptance by expecting those domain\n  errors, not by requiring a fully active pair session unless a fixture already\n  supports it.\n- The external MCP server already registers `fabro_run_pair` directly. Avoid\n  duplicating tool catalogs there; use the shared `fabro-tool` definitions only\n  where workflow-agent registration needs them.\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        }
+      }
+    },
+    "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\", model=\"gpt-55\", reasoning_effort=\"xhigh\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\\\"disabled\\\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures.\", max_visits=3]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> exit  [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n}\n",
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.243.0-nightly.1"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.243.0-nightly.1",
+        "name": "fabro-cli",
+        "version": "0.243.0-nightly.1"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19?v=4"
+      }
+    },
+    "manifest_blob": "e6abb035b6e9e0fe71a4022e2f1564132a1b1a7402eee537f4691cad4bba2aa2",
+    "definition_blob": "f13f100f4f1f386c63f22b375c331077f1c1b3bd2df0dd17388b26786f23b9a6",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "6a23014f0bec59628a311b92ef6ad02c5e3b7bc3",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    }
+  },
+  "web_url": "http://127.0.0.1:32276/runs/01KSDFNA5W8QN6Q9GJ078DDWA3",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-24T17:13:57.239354Z",
+  "last_event_at": "2026-05-24T17:14:12.966882Z",
+  "pending_control": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "sandbox": {
+    "provider": "daytona",
+    "snapshot": "fabro-v12",
+    "runtime": {
+      "id": "fabro-01KSDFNA5W8QN6Q9GJ078DDWA3",
+      "working_directory": "/home/daytona/workspace/fabro",
+      "repo_cloned": true,
+      "clone_origin_url": "https://github.com/fabro-sh/fabro",
+      "clone_branch": "main",
+      "workspace_root": "/home/daytona/workspace",
+      "repos_root": "/home/daytona/repos",
+      "primary_repo_path": "/home/daytona/repos/fabro-sh/fabro",
+      "primary_repo_link": "/home/daytona/workspace/fabro"
+    }
+  },
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
