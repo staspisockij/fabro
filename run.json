@@ -1,0 +1,514 @@
+{
+  "title": "---",
+  "spec": {
+    "run_id": "01KSC297ZD500B2S64J9JQ08MF",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "---\ntitle: feat: Batch run archive actions\ntype: feat\nstatus: active\ndate: 2026-05-24\n---\n\n# feat: Batch Run Archive Actions\n\n## Overview\n\nAdd API support for archiving and unarchiving multiple runs in one request, then update the web list and board multi-run actions to use the new batch endpoints. The existing single-run archive and unarchive endpoints remain unchanged for run-scoped callers and direct lifecycle actions.\n\n## Problem Frame\n\nThe web UI currently performs multi-run archive/unarchive actions by issuing one lifecycle request per selected run. That works, but it puts batch orchestration in the browser, repeats request overhead, and leaves API/CLI/MCP consumers without a first-class batch contract. A bounded fail-soft batch endpoint gives the server ownership of the multi-run operation while preserving the independent event stream semantics of each run.\n\n## Requirements Trace\n\n- R1. Provide public API endpoints that archive and unarchive many runs in one request.\n- R2. Preserve existing single-run archive/unarchive behavior, including eligibility, idempotency, and emitted events.\n- R3. Return per-run results so mixed-success batches can be reported without rolling back successful items.\n- R4. Update web bulk actions to make one request per batch action instead of one request per run.\n- R5. Keep cache invalidation and toast behavior equivalent to the current UI.\n\n## Scope Boundaries\n\n- Do not make batch archive/unarchive transactional; each run remains an independent event stream.\n- Do not add new workflow event variants; successful batch items emit the same run archive/unarchive events as single-run actions.\n- Do not change the existing `POST /api/v1/runs/{id}/archive` or `POST /api/v1/runs/{id}/unarchive` contracts.\n- Do not add CLI commands in this change; this plan is limited to HTTP API and web UI usage.\n\n## Context & Research\n\n### Relevant Code and Patterns\n\n- OpenAPI is the source of truth for HTTP contracts in `docs/public/api-reference/fabro-api.yaml`.\n- Server lifecycle routes live in `lib/crates/fabro-server/src/server/handler/lifecycle.rs`; single-run archive/unarchive already funnel through `operations::archive` and `operations::unarchive`.\n- Batch routes that are not tied to one path run ID should use `RequiredUser`, not `RequireRunScopedOrRunTools`, because a run-scoped worker token cannot safely authorize mutation of arbitrary run IDs from a request body.\n- Web lifecycle helpers live in `apps/fabro-web/app/lib/run-actions.ts`; list and board multi-run archive behavior lives in `apps/fabro-web/app/routes/runs.tsx`.\n- Run-list cache invalidation already uses `mutateRunListCaches` in `apps/fabro-web/app/lib/board-cache.ts`.\n\n### Strategy Docs\n\n- `docs/internal/testing-strategy.md`: server tests should assert public HTTP contracts and prefer structured assertions.\n- `docs/internal/error-handling-strategy.md`: preserve structured errors internally and return curated API messages at HTTP boundaries.\n- `docs/internal/events-strategy.md`: no new events are needed because existing per-run lifecycle events already represent the durable state transition.\n\n## Key Technical Decisions\n\n- Add collection action endpoints `POST /api/v1/runs/archive` and `POST /api/v1/runs/unarchive`. These avoid changing single-run URLs and keep generated client methods clear (`batchArchiveRuns`, `batchUnarchiveRuns`).\n- Use fail-soft HTTP `200` responses for valid batch requests, even when individual items fail. Per-item failures carry structured result entries; request-level validation failures still return normal `400` errors.\n- Validate `run_ids` at the request boundary: non-empty, maximum 250 IDs, no duplicates, and every value parseable as a `RunId`. Invalid request bodies must not mutate any runs.\n- Process eligible IDs sequentially in server code. The batch is bounded, lifecycle operations append events, and sequential processing avoids adding lock-order or concurrency behavior that the feature does not need.\n- Treat idempotent single-run outcomes as successful batch outcomes: already archived counts as success for archive; terminal not-archived counts as success for unarchive.\n\n## API Contract\n\nAdd these OpenAPI operations:\n\n- `POST /api/v1/runs/archive`\n  - operationId: `batchArchiveRuns`\n  - request: `BatchRunLifecycleRequest`\n  - response: `BatchRunLifecycleResponse`\n- `POST /api/v1/runs/unarchive`\n  - operationId: `batchUnarchiveRuns`\n  - request: `BatchRunLifecycleRequest`\n  - response: `BatchRunLifecycleResponse`\n\nAdd schemas:\n\n- `BatchRunLifecycleRequest`\n  - required `run_ids`\n  - `run_ids`: array of strings, `minItems: 1`, `maxItems: 250`, `uniqueItems: true`\n- `BatchRunLifecycleResponse`\n  - required `results`, `summary`\n  - `results`: array of `BatchRunLifecycleResult`, ordered exactly like the request `run_ids`\n  - `summary`: `BatchRunLifecycleSummary`\n- `BatchRunLifecycleResult`\n  - required `run_id`, `ok`, `outcome`\n  - `run_id`: string\n  - `ok`: boolean\n  - `outcome`: enum covering `archived`, `already_archived`, `unarchived`, `not_archived`, `not_found`, `conflict`, `error`\n  - optional `run`: `Run`, present for successful items when a decorated summary can be loaded\n  - optional `error`: `ErrorResponseEntry`, present for failed items\n- `BatchRunLifecycleSummary`\n  - required `requested`, `succeeded`, `failed`\n  - all integer counts\n\n## Implementation Units\n\n- [ ] **Unit 1: OpenAPI batch lifecycle contract**\n\n**Goal:** Add the public API contract and generated clients for batch archive/unarchive.\n\n**Requirements:** R1, R3\n\n**Dependencies:** None\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Generated by build/codegen: `lib/crates/fabro-api/src/generated.rs`\n- Generated by codegen: `lib/packages/fabro-api-client/src/api/runs-api.ts`\n- Generated by codegen: `lib/packages/fabro-api-client/src/models/*`\n\n**Approach:**\n- Add the two collection action paths and the four batch lifecycle schemas described in the API Contract section.\n- Keep response status simple: `200` for a valid processed batch; `400`, `401`, and `500` for request-level failures.\n- Run Rust generation through `cargo build -p fabro-api`.\n- Run TypeScript generation through `cd lib/packages/fabro-api-client && bun run generate`.\n\n**Patterns to follow:**\n- Existing single-run archive/unarchive path docs in the same OpenAPI file.\n- Existing generated client workflow described in `AGENTS.md`.\n\n**Test scenarios:**\n- Happy path: generated Rust and TypeScript clients expose `batchArchiveRuns` and `batchUnarchiveRuns`.\n- Contract: request schema enforces `run_ids` as the only required input.\n- Contract: result entries can represent both a successful decorated `Run` and a failed `ErrorResponseEntry`.\n\n**Verification:**\n- API generation completes without hand-edited generated files.\n\n- [ ] **Unit 2: Server batch lifecycle handlers**\n\n**Goal:** Implement the two new endpoints in the server using existing archive/unarchive operations.\n\n**Requirements:** R1, R2, R3\n\n**Dependencies:** Unit 1\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server/handler/lifecycle.rs`\n- Test: `lib/crates/fabro-server/src/server/tests.rs`\n\n**Approach:**\n- Register `POST /runs/archive` and `POST /runs/unarchive` in the lifecycle route set.\n- Use `RequiredUser` for both handlers and convert the user into `Principal::User` for per-run operation calls.\n- Add a small shared batch helper that accepts the parsed request, the action, and the actor, then returns `BatchRunLifecycleResponse`.\n- Before processing any item, validate the entire request for empty list, over-limit list, duplicate IDs, and invalid IDs. Return a normal `400` API error if validation fails.\n- For each valid ID, call `operations::archive` or `operations::unarchive`; map success outcomes to item-level success results and map `RunNotFound`/`Precondition` to item-level `not_found`/`conflict` failures.\n- For successful items, load and decorate the current run summary the same way single-run lifecycle responses do. If summary loading fails after the operation succeeds, record that item as `error` rather than hiding the failure.\n\n**Patterns to follow:**\n- `run_archive_action` for operation mapping and existing error semantics.\n- `run_response` / `state.decorate_run_summary` for response shape.\n- Existing server tests around `archive_and_unarchive_updates_listing_visibility`.\n\n**Test scenarios:**\n- Happy path: two terminal runs archived in one request return two successful result entries, summary `requested=2/succeeded=2/failed=0`, and both runs are hidden from default `GET /api/v1/runs`.\n- Happy path: two archived runs unarchived in one request return successful entries and both runs reappear in default listing.\n- Idempotency: archiving an already archived run returns `ok=true` with `already_archived`; unarchiving a terminal non-archived run returns `ok=true` with `not_archived`.\n- Mixed result: a batch containing one terminal run, one running run, and one missing run returns ordered results with one success, one `conflict`, and one `not_found`; the terminal run is still archived.\n- Error path: empty `run_ids`, duplicate IDs, invalid IDs, and more than 250 IDs return request-level `400` and mutate no runs.\n- Auth path: unauthenticated requests are rejected; run-scoped worker authentication is not accepted for batch endpoints.\n\n**Verification:**\n- Existing single-run archive/unarchive tests pass unchanged.\n- New endpoint tests prove both API contract and run-list visibility effects.\n\n- [ ] **Unit 3: Frontend lifecycle helpers**\n\n**Goal:** Add typed web helpers for batch archive/unarchive.\n\n**Requirements:** R3, R4, R5\n\n**Dependencies:** Unit 1\n\n**Files:**\n- Modify: `apps/fabro-web/app/lib/run-actions.ts`\n- Test: `apps/fabro-web/app/lib/run-actions.test.ts`\n\n**Approach:**\n- Add `archiveRuns(runIds: string[])` and `unarchiveRuns(runIds: string[])` wrappers around the generated client methods.\n- Keep existing `archiveRun` and `unarchiveRun` helpers unchanged.\n- Preserve existing `LifecycleActionError` behavior for single-run actions. Batch helpers should return the generated batch response for valid mixed results and throw only for request-level API failures.\n\n**Patterns to follow:**\n- Existing lifecycle action helpers in `run-actions.ts`.\n- Axios adapter tests in `run-actions.test.ts`.\n\n**Test scenarios:**\n- Happy path: `archiveRuns([\"run-1\", \"run-2\"])` sends one generated-client request and returns parsed batch results.\n- Mixed result: helper resolves a response containing one success and one per-item failure without throwing.\n- Request error: helper throws parsed `ApiError`/lifecycle-style data when the server returns a request-level `400`.\n- Regression: existing `archiveRun`, `unarchiveRun`, `canArchive`, and `canUnarchive` tests continue to pass.\n\n**Verification:**\n- Web unit tests cover the new helper contract without changing single-run behavior.\n\n- [ ] **Unit 4: Web bulk-action integration**\n\n**Goal:** Replace multi-request UI orchestration with one batch request per bulk action.\n\n**Requirements:** R4, R5\n\n**Dependencies:** Units 1 and 3\n\n**Files:**\n- Modify: `apps/fabro-web/app/routes/runs.tsx`\n- Test: `apps/fabro-web/app/routes/runs.test.tsx`\n\n**Approach:**\n- Update `BulkActionToolbar` to call `archiveRuns` or `unarchiveRuns` once with eligible selected IDs.\n- Add a small pure batch-summary helper in `runs.tsx`, export it for route tests, and use it to compute toast messages from the batch response summary rather than `Promise.allSettled`.\n- Keep current eligibility filtering: archive only selected runs whose lifecycle status is archivable, unarchive only selected archived runs.\n- Clear selection only when all eligible items succeed, matching the current all-success behavior.\n- Call `mutateRunListCaches` once after the batch settles.\n- Update the kanban column archive-all action to call `archiveRuns` once with the column’s eligible IDs and reuse the same success/partial/failure toast behavior where practical.\n\n**Patterns to follow:**\n- Current `BulkActionToolbar` pending state, clear-selection behavior, and toast wording.\n- Current `ColumnActionsMenu` archive-all action and cache invalidation.\n\n**Test scenarios:**\n- Happy path: selecting multiple archived rows and clicking Unarchive calls the batch helper once and clears selection after all items succeed.\n- Happy path: selecting multiple terminal rows and clicking Archive calls the batch helper once and invalidates run-list caches once.\n- Mixed result: partial failure keeps selection and shows an error-tone partial-success toast with succeeded/failed counts.\n- Ineligible selection: selecting only non-archivable runs still shows the existing “No selected runs can be archived” style error without making an API request.\n- Board action: archive-all for a column calls the batch helper once with all eligible IDs.\n\n**Verification:**\n- UI behavior remains equivalent from the user’s perspective, but network behavior becomes one request per bulk action.\n\n## System-Wide Impact\n\n- **Auth:** Batch endpoints are user-only. This intentionally avoids giving a worker token with one run scope the ability to mutate arbitrary run IDs from a request body.\n- **Events:** No new event names or payloads. Each successful item appends the existing per-run archive/unarchive event.\n- **Caching:** Frontend run-list caches are still invalidated after lifecycle changes. The batch path should reduce invalidation churn from once per selected run to once per user action.\n- **Generated clients:** Both Rust and TypeScript generated clients change because OpenAPI is the source of truth.\n- **Compatibility:** Single-run endpoints and existing generated methods remain available and unchanged.\n\n## Risks & Mitigations\n\n| Risk | Mitigation |\n|------|------------|\n| Route ambiguity with `/runs/{id}` paths | Use static collection action paths and add server tests that call the exact batch routes. |\n| Partial mutation surprises | Use explicit fail-soft result entries and summarize succeeded/failed counts. |\n| Worker token privilege expansion | Require `RequiredUser` for batch endpoints. |\n| Duplicate IDs producing confusing results | Reject duplicates at request validation before any mutation. |\n| UI toast regressions | Cover all-success, all-failure, partial-failure, and ineligible-selection behavior in frontend tests. |\n\n## Documentation / Operational Notes\n\n- The OpenAPI descriptions should explicitly state that batch actions are fail-soft and not transactional.\n- No migration, feature flag, or rollout sequencing is required.\n- No new public docs are required unless API reference publishing is part of the release process.\n\n## Sources & References\n\n- OpenAPI source: `docs/public/api-reference/fabro-api.yaml`\n- Server lifecycle handlers: `lib/crates/fabro-server/src/server/handler/lifecycle.rs`\n- Workflow archive operations: `lib/crates/fabro-workflow/src/operations/archive.rs`\n- Web lifecycle helpers: `apps/fabro-web/app/lib/run-actions.ts`\n- Web runs route: `apps/fabro-web/app/routes/runs.tsx`\n- Testing guidance: `docs/internal/testing-strategy.md`\n- Error handling guidance: `docs/internal/error-handling-strategy.md`\n- Event guidance: `docs/internal/events-strategy.md`\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": [],
+          "controls": {
+            "reasoning_effort": null,
+            "speed": null
+          }
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt"
+        },
+        "checkpoint": {
+          "exclude_globs": [],
+          "skip_git_hooks": false
+        },
+        "clone": {
+          "enabled": true
+        },
+        "run_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "meta_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "environment": {
+          "id": "fabro-dev",
+          "provider": "daytona",
+          "image": {
+            "ref": "fabro-v12",
+            "dockerfile": {
+              "type": "inline",
+              "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        curl git ripgrep ca-certificates build-essential pkg-config libssl-dev unzip python3 \\\n        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \\\n        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install real Chromium (not the snap stub) via xtradeb PPA\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        software-properties-common curl gnupg \\\n    && add-apt-repository -y ppa:xtradeb/apps \\\n    && apt-get update \\\n    && apt-get install -y --no-install-recommends chromium \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Wrapper: Chromium needs --no-sandbox when running as root in a container,\n# and --disable-dev-shm-usage avoids crashes from small /dev/shm\nRUN printf '#!/bin/bash\\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage \"$@\"\\n' \\\n        > /usr/local/bin/chromium-wrapper \\\n    && chmod +x /usr/local/bin/chromium-wrapper\n\n# Make the wrapper the default in the system .desktop file and via alternatives\nRUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \\\n        /usr/share/applications/chromium.desktop \\\n    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \\\n        /usr/local/bin/chromium-wrapper 100\n\n# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)\nRUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \\\n    && printf 'WebBrowser=custom-WebBrowser\\n' > /etc/xdg/xfce4/helpers.rc \\\n    && printf '[Desktop Entry]\\n\\\nVersion=1.0\\n\\\nType=X-XFCE-Helper\\n\\\nName=Chromium\\n\\\nIcon=chromium\\n\\\nX-XFCE-Category=WebBrowser\\n\\\nX-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper \"%%s\"\\n\\\nX-XFCE-Commands=/usr/local/bin/chromium-wrapper\\n' \\\n        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\\n        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\\n    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" \\\n        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\\n    && apt-get update && apt-get install -y --no-install-recommends gh \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+            }
+          },
+          "resources": {
+            "cpu": 8,
+            "memory": "16GB",
+            "disk": "20GB"
+          },
+          "network": {
+            "mode": "allow_all",
+            "allow": []
+          },
+          "lifecycle": {
+            "preserve": false,
+            "stop_on_terminal": true,
+            "auto_stop": "30m"
+          },
+          "labels": {
+            "repo": "fabro-sh/fabro"
+          },
+          "volumes": [],
+          "env": {}
+        },
+        "notifications": {},
+        "interviews": {
+          "provider": null,
+          "slack": null
+        },
+        "agent": {
+          "fabro_tools": false,
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        },
+        "integrations": {
+          "github": {
+            "permissions": {}
+          }
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "max_visits": {
+              "Integer": 3
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "label": {
+              "String": "Implement"
+            },
+            "reasoning_effort": {
+              "String": "xhigh"
+            },
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "provider": {
+              "String": "openai"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Toolchain"
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "model": {
+              "String": "gpt-5.5"
+            },
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "shape": {
+              "String": "Mdiamond"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Start"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "script": {
+              "String": "git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "goal_gate": {
+              "Boolean": true
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Fixup"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_visits": {
+              "Integer": 3
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "label": {
+              "String": "Exit"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "shape": {
+              "String": "Msquare"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "exit",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "goal": {
+          "String": "---\ntitle: feat: Batch run archive actions\ntype: feat\nstatus: active\ndate: 2026-05-24\n---\n\n# feat: Batch Run Archive Actions\n\n## Overview\n\nAdd API support for archiving and unarchiving multiple runs in one request, then update the web list and board multi-run actions to use the new batch endpoints. The existing single-run archive and unarchive endpoints remain unchanged for run-scoped callers and direct lifecycle actions.\n\n## Problem Frame\n\nThe web UI currently performs multi-run archive/unarchive actions by issuing one lifecycle request per selected run. That works, but it puts batch orchestration in the browser, repeats request overhead, and leaves API/CLI/MCP consumers without a first-class batch contract. A bounded fail-soft batch endpoint gives the server ownership of the multi-run operation while preserving the independent event stream semantics of each run.\n\n## Requirements Trace\n\n- R1. Provide public API endpoints that archive and unarchive many runs in one request.\n- R2. Preserve existing single-run archive/unarchive behavior, including eligibility, idempotency, and emitted events.\n- R3. Return per-run results so mixed-success batches can be reported without rolling back successful items.\n- R4. Update web bulk actions to make one request per batch action instead of one request per run.\n- R5. Keep cache invalidation and toast behavior equivalent to the current UI.\n\n## Scope Boundaries\n\n- Do not make batch archive/unarchive transactional; each run remains an independent event stream.\n- Do not add new workflow event variants; successful batch items emit the same run archive/unarchive events as single-run actions.\n- Do not change the existing `POST /api/v1/runs/{id}/archive` or `POST /api/v1/runs/{id}/unarchive` contracts.\n- Do not add CLI commands in this change; this plan is limited to HTTP API and web UI usage.\n\n## Context & Research\n\n### Relevant Code and Patterns\n\n- OpenAPI is the source of truth for HTTP contracts in `docs/public/api-reference/fabro-api.yaml`.\n- Server lifecycle routes live in `lib/crates/fabro-server/src/server/handler/lifecycle.rs`; single-run archive/unarchive already funnel through `operations::archive` and `operations::unarchive`.\n- Batch routes that are not tied to one path run ID should use `RequiredUser`, not `RequireRunScopedOrRunTools`, because a run-scoped worker token cannot safely authorize mutation of arbitrary run IDs from a request body.\n- Web lifecycle helpers live in `apps/fabro-web/app/lib/run-actions.ts`; list and board multi-run archive behavior lives in `apps/fabro-web/app/routes/runs.tsx`.\n- Run-list cache invalidation already uses `mutateRunListCaches` in `apps/fabro-web/app/lib/board-cache.ts`.\n\n### Strategy Docs\n\n- `docs/internal/testing-strategy.md`: server tests should assert public HTTP contracts and prefer structured assertions.\n- `docs/internal/error-handling-strategy.md`: preserve structured errors internally and return curated API messages at HTTP boundaries.\n- `docs/internal/events-strategy.md`: no new events are needed because existing per-run lifecycle events already represent the durable state transition.\n\n## Key Technical Decisions\n\n- Add collection action endpoints `POST /api/v1/runs/archive` and `POST /api/v1/runs/unarchive`. These avoid changing single-run URLs and keep generated client methods clear (`batchArchiveRuns`, `batchUnarchiveRuns`).\n- Use fail-soft HTTP `200` responses for valid batch requests, even when individual items fail. Per-item failures carry structured result entries; request-level validation failures still return normal `400` errors.\n- Validate `run_ids` at the request boundary: non-empty, maximum 250 IDs, no duplicates, and every value parseable as a `RunId`. Invalid request bodies must not mutate any runs.\n- Process eligible IDs sequentially in server code. The batch is bounded, lifecycle operations append events, and sequential processing avoids adding lock-order or concurrency behavior that the feature does not need.\n- Treat idempotent single-run outcomes as successful batch outcomes: already archived counts as success for archive; terminal not-archived counts as success for unarchive.\n\n## API Contract\n\nAdd these OpenAPI operations:\n\n- `POST /api/v1/runs/archive`\n  - operationId: `batchArchiveRuns`\n  - request: `BatchRunLifecycleRequest`\n  - response: `BatchRunLifecycleResponse`\n- `POST /api/v1/runs/unarchive`\n  - operationId: `batchUnarchiveRuns`\n  - request: `BatchRunLifecycleRequest`\n  - response: `BatchRunLifecycleResponse`\n\nAdd schemas:\n\n- `BatchRunLifecycleRequest`\n  - required `run_ids`\n  - `run_ids`: array of strings, `minItems: 1`, `maxItems: 250`, `uniqueItems: true`\n- `BatchRunLifecycleResponse`\n  - required `results`, `summary`\n  - `results`: array of `BatchRunLifecycleResult`, ordered exactly like the request `run_ids`\n  - `summary`: `BatchRunLifecycleSummary`\n- `BatchRunLifecycleResult`\n  - required `run_id`, `ok`, `outcome`\n  - `run_id`: string\n  - `ok`: boolean\n  - `outcome`: enum covering `archived`, `already_archived`, `unarchived`, `not_archived`, `not_found`, `conflict`, `error`\n  - optional `run`: `Run`, present for successful items when a decorated summary can be loaded\n  - optional `error`: `ErrorResponseEntry`, present for failed items\n- `BatchRunLifecycleSummary`\n  - required `requested`, `succeeded`, `failed`\n  - all integer counts\n\n## Implementation Units\n\n- [ ] **Unit 1: OpenAPI batch lifecycle contract**\n\n**Goal:** Add the public API contract and generated clients for batch archive/unarchive.\n\n**Requirements:** R1, R3\n\n**Dependencies:** None\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Generated by build/codegen: `lib/crates/fabro-api/src/generated.rs`\n- Generated by codegen: `lib/packages/fabro-api-client/src/api/runs-api.ts`\n- Generated by codegen: `lib/packages/fabro-api-client/src/models/*`\n\n**Approach:**\n- Add the two collection action paths and the four batch lifecycle schemas described in the API Contract section.\n- Keep response status simple: `200` for a valid processed batch; `400`, `401`, and `500` for request-level failures.\n- Run Rust generation through `cargo build -p fabro-api`.\n- Run TypeScript generation through `cd lib/packages/fabro-api-client && bun run generate`.\n\n**Patterns to follow:**\n- Existing single-run archive/unarchive path docs in the same OpenAPI file.\n- Existing generated client workflow described in `AGENTS.md`.\n\n**Test scenarios:**\n- Happy path: generated Rust and TypeScript clients expose `batchArchiveRuns` and `batchUnarchiveRuns`.\n- Contract: request schema enforces `run_ids` as the only required input.\n- Contract: result entries can represent both a successful decorated `Run` and a failed `ErrorResponseEntry`.\n\n**Verification:**\n- API generation completes without hand-edited generated files.\n\n- [ ] **Unit 2: Server batch lifecycle handlers**\n\n**Goal:** Implement the two new endpoints in the server using existing archive/unarchive operations.\n\n**Requirements:** R1, R2, R3\n\n**Dependencies:** Unit 1\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server/handler/lifecycle.rs`\n- Test: `lib/crates/fabro-server/src/server/tests.rs`\n\n**Approach:**\n- Register `POST /runs/archive` and `POST /runs/unarchive` in the lifecycle route set.\n- Use `RequiredUser` for both handlers and convert the user into `Principal::User` for per-run operation calls.\n- Add a small shared batch helper that accepts the parsed request, the action, and the actor, then returns `BatchRunLifecycleResponse`.\n- Before processing any item, validate the entire request for empty list, over-limit list, duplicate IDs, and invalid IDs. Return a normal `400` API error if validation fails.\n- For each valid ID, call `operations::archive` or `operations::unarchive`; map success outcomes to item-level success results and map `RunNotFound`/`Precondition` to item-level `not_found`/`conflict` failures.\n- For successful items, load and decorate the current run summary the same way single-run lifecycle responses do. If summary loading fails after the operation succeeds, record that item as `error` rather than hiding the failure.\n\n**Patterns to follow:**\n- `run_archive_action` for operation mapping and existing error semantics.\n- `run_response` / `state.decorate_run_summary` for response shape.\n- Existing server tests around `archive_and_unarchive_updates_listing_visibility`.\n\n**Test scenarios:**\n- Happy path: two terminal runs archived in one request return two successful result entries, summary `requested=2/succeeded=2/failed=0`, and both runs are hidden from default `GET /api/v1/runs`.\n- Happy path: two archived runs unarchived in one request return successful entries and both runs reappear in default listing.\n- Idempotency: archiving an already archived run returns `ok=true` with `already_archived`; unarchiving a terminal non-archived run returns `ok=true` with `not_archived`.\n- Mixed result: a batch containing one terminal run, one running run, and one missing run returns ordered results with one success, one `conflict`, and one `not_found`; the terminal run is still archived.\n- Error path: empty `run_ids`, duplicate IDs, invalid IDs, and more than 250 IDs return request-level `400` and mutate no runs.\n- Auth path: unauthenticated requests are rejected; run-scoped worker authentication is not accepted for batch endpoints.\n\n**Verification:**\n- Existing single-run archive/unarchive tests pass unchanged.\n- New endpoint tests prove both API contract and run-list visibility effects.\n\n- [ ] **Unit 3: Frontend lifecycle helpers**\n\n**Goal:** Add typed web helpers for batch archive/unarchive.\n\n**Requirements:** R3, R4, R5\n\n**Dependencies:** Unit 1\n\n**Files:**\n- Modify: `apps/fabro-web/app/lib/run-actions.ts`\n- Test: `apps/fabro-web/app/lib/run-actions.test.ts`\n\n**Approach:**\n- Add `archiveRuns(runIds: string[])` and `unarchiveRuns(runIds: string[])` wrappers around the generated client methods.\n- Keep existing `archiveRun` and `unarchiveRun` helpers unchanged.\n- Preserve existing `LifecycleActionError` behavior for single-run actions. Batch helpers should return the generated batch response for valid mixed results and throw only for request-level API failures.\n\n**Patterns to follow:**\n- Existing lifecycle action helpers in `run-actions.ts`.\n- Axios adapter tests in `run-actions.test.ts`.\n\n**Test scenarios:**\n- Happy path: `archiveRuns([\"run-1\", \"run-2\"])` sends one generated-client request and returns parsed batch results.\n- Mixed result: helper resolves a response containing one success and one per-item failure without throwing.\n- Request error: helper throws parsed `ApiError`/lifecycle-style data when the server returns a request-level `400`.\n- Regression: existing `archiveRun`, `unarchiveRun`, `canArchive`, and `canUnarchive` tests continue to pass.\n\n**Verification:**\n- Web unit tests cover the new helper contract without changing single-run behavior.\n\n- [ ] **Unit 4: Web bulk-action integration**\n\n**Goal:** Replace multi-request UI orchestration with one batch request per bulk action.\n\n**Requirements:** R4, R5\n\n**Dependencies:** Units 1 and 3\n\n**Files:**\n- Modify: `apps/fabro-web/app/routes/runs.tsx`\n- Test: `apps/fabro-web/app/routes/runs.test.tsx`\n\n**Approach:**\n- Update `BulkActionToolbar` to call `archiveRuns` or `unarchiveRuns` once with eligible selected IDs.\n- Add a small pure batch-summary helper in `runs.tsx`, export it for route tests, and use it to compute toast messages from the batch response summary rather than `Promise.allSettled`.\n- Keep current eligibility filtering: archive only selected runs whose lifecycle status is archivable, unarchive only selected archived runs.\n- Clear selection only when all eligible items succeed, matching the current all-success behavior.\n- Call `mutateRunListCaches` once after the batch settles.\n- Update the kanban column archive-all action to call `archiveRuns` once with the column’s eligible IDs and reuse the same success/partial/failure toast behavior where practical.\n\n**Patterns to follow:**\n- Current `BulkActionToolbar` pending state, clear-selection behavior, and toast wording.\n- Current `ColumnActionsMenu` archive-all action and cache invalidation.\n\n**Test scenarios:**\n- Happy path: selecting multiple archived rows and clicking Unarchive calls the batch helper once and clears selection after all items succeed.\n- Happy path: selecting multiple terminal rows and clicking Archive calls the batch helper once and invalidates run-list caches once.\n- Mixed result: partial failure keeps selection and shows an error-tone partial-success toast with succeeded/failed counts.\n- Ineligible selection: selecting only non-archivable runs still shows the existing “No selected runs can be archived” style error without making an API request.\n- Board action: archive-all for a column calls the batch helper once with all eligible IDs.\n\n**Verification:**\n- UI behavior remains equivalent from the user’s perspective, but network behavior becomes one request per bulk action.\n\n## System-Wide Impact\n\n- **Auth:** Batch endpoints are user-only. This intentionally avoids giving a worker token with one run scope the ability to mutate arbitrary run IDs from a request body.\n- **Events:** No new event names or payloads. Each successful item appends the existing per-run archive/unarchive event.\n- **Caching:** Frontend run-list caches are still invalidated after lifecycle changes. The batch path should reduce invalidation churn from once per selected run to once per user action.\n- **Generated clients:** Both Rust and TypeScript generated clients change because OpenAPI is the source of truth.\n- **Compatibility:** Single-run endpoints and existing generated methods remain available and unchanged.\n\n## Risks & Mitigations\n\n| Risk | Mitigation |\n|------|------------|\n| Route ambiguity with `/runs/{id}` paths | Use static collection action paths and add server tests that call the exact batch routes. |\n| Partial mutation surprises | Use explicit fail-soft result entries and summarize succeeded/failed counts. |\n| Worker token privilege expansion | Require `RequiredUser` for batch endpoints. |\n| Duplicate IDs producing confusing results | Reject duplicates at request validation before any mutation. |\n| UI toast regressions | Cover all-success, all-failure, partial-failure, and ineligible-selection behavior in frontend tests. |\n\n## Documentation / Operational Notes\n\n- The OpenAPI descriptions should explicitly state that batch actions are fail-soft and not transactional.\n- No migration, feature flag, or rollout sequencing is required.\n- No new public docs are required unless API reference publishing is part of the release process.\n\n## Sources & References\n\n- OpenAPI source: `docs/public/api-reference/fabro-api.yaml`\n- Server lifecycle handlers: `lib/crates/fabro-server/src/server/handler/lifecycle.rs`\n- Workflow archive operations: `lib/crates/fabro-workflow/src/operations/archive.rs`\n- Web lifecycle helpers: `apps/fabro-web/app/lib/run-actions.ts`\n- Web runs route: `apps/fabro-web/app/routes/runs.tsx`\n- Testing guidance: `docs/internal/testing-strategy.md`\n- Error handling guidance: `docs/internal/error-handling-strategy.md`\n- Event guidance: `docs/internal/events-strategy.md`\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "rankdir": {
+          "String": "LR"
+        }
+      }
+    },
+    "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\", model=\"gpt-55\", reasoning_effort=\"xhigh\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\\\"disabled\\\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures.\", max_visits=3]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> exit  [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n}\n",
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.242.0-nightly.1"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.242.0-nightly.1",
+        "name": "fabro-cli",
+        "version": "0.242.0-nightly.1"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19?v=4"
+      }
+    },
+    "manifest_blob": "698aa1eb93250fded95068c680a418554f559b2f9fd1dbc3bca30001573dbbf8",
+    "definition_blob": "f13f100f4f1f386c63f22b375c331077f1c1b3bd2df0dd17388b26786f23b9a6",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "846d1e91af83ceff177d88ab8d53e0ad9392eee2",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "not_attempted"
+      }
+    }
+  },
+  "web_url": "http://127.0.0.1:32276/runs/01KSC297ZD500B2S64J9JQ08MF",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-24T04:00:55.858978Z",
+  "last_event_at": "2026-05-24T04:01:11.712089Z",
+  "pending_control": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "sandbox": {
+    "provider": "daytona",
+    "snapshot": "fabro-v12",
+    "runtime": {
+      "id": "fabro-01KSC297ZD500B2S64J9JQ08MF",
+      "working_directory": "/home/daytona/workspace/fabro",
+      "repo_cloned": true,
+      "clone_origin_url": "https://github.com/fabro-sh/fabro",
+      "clone_branch": "main",
+      "workspace_root": "/home/daytona/workspace",
+      "repos_root": "/home/daytona/repos",
+      "primary_repo_path": "/home/daytona/repos/fabro-sh/fabro",
+      "primary_repo_link": "/home/daytona/workspace/fabro"
+    }
+  },
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
