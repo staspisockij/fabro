@@ -1,0 +1,1432 @@
+diff --git a/apps/fabro-web/app/lib/run-actions.test.ts b/apps/fabro-web/app/lib/run-actions.test.ts
+index f092bc7b1..6b2682e91 100644
+--- a/apps/fabro-web/app/lib/run-actions.test.ts
++++ b/apps/fabro-web/app/lib/run-actions.test.ts
+@@ -1,6 +1,11 @@
+ import { afterEach, describe, expect, test } from "bun:test";
+ import type { AxiosAdapter } from "axios";
+-import type { BatchRunLifecycleResponse, Run, RunStatus } from "@qltysh/fabro-api-client";
++import type {
++  BatchDeleteRunsResponse,
++  BatchRunLifecycleResponse,
++  Run,
++  RunStatus,
++} from "@qltysh/fabro-api-client";
+ 
+ import {
+   archiveRun,
+@@ -11,6 +16,7 @@ import {
+   canRetry,
+   canUnarchive,
+   cancelRun,
++  deleteRuns,
+   isTerminalCancelledRun,
+   mapError,
+   retryRun,
+@@ -118,6 +124,20 @@ function batchResponse(
+   };
+ }
+ 
++function batchDeleteResponse(
++  results: BatchDeleteRunsResponse["results"],
++): BatchDeleteRunsResponse {
++  const succeeded = results.filter((result) => result.ok).length;
++  return {
++    results,
++    summary: {
++      requested: results.length,
++      succeeded,
++      failed: results.length - succeeded,
++    },
++  };
++}
++
+ function requestJsonBody(request: CapturedRequest): unknown {
+   return typeof request.data === "string" ? JSON.parse(request.data) : request.data;
+ }
+@@ -229,6 +249,72 @@ describe("run lifecycle actions", () => {
+     expect(result.results[1]?.error?.status).toBe("404");
+   });
+ 
++  test("deleteRuns sends one batch request and parses results", async () => {
++    const stub = stubGeneratedAxiosOnce({
++      status: 200,
++      body: batchDeleteResponse([
++        {
++          run_id: "run-1",
++          ok: true,
++          outcome: "deleted",
++        },
++        {
++          run_id: "run-missing",
++          ok: true,
++          outcome: "already_absent",
++        },
++      ]),
++    });
++
++    const result = await deleteRuns(["run-1", "run-missing"]);
++
++    expect(stub.requests).toHaveLength(1);
++    expect(stub.requests[0]?.method?.toUpperCase()).toBe("POST");
++    expect(stub.requests[0]?.url).toBe("/api/v1/runs/delete");
++    expect(requestJsonBody(stub.requests[0]!)).toEqual({
++      run_ids: ["run-1", "run-missing"],
++      force: false,
++    });
++    expect(result.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
++    expect(result.results.map((entry) => entry.outcome)).toEqual(["deleted", "already_absent"]);
++  });
++
++  test("deleteRuns sends force when requested", async () => {
++    const stub = stubGeneratedAxiosOnce({
++      status: 200,
++      body: batchDeleteResponse([
++        {
++          run_id: "run-1",
++          ok: true,
++          outcome: "deleted",
++        },
++      ]),
++    });
++
++    await deleteRuns(["run-1"], true);
++
++    expect(stub.requests).toHaveLength(1);
++    expect(requestJsonBody(stub.requests[0]!)).toEqual({
++      run_ids: ["run-1"],
++      force: true,
++    });
++  });
++
++  test("deleteRuns preserves request-level error envelopes", async () => {
++    stubGeneratedAxiosOnce({
++      status: 400,
++      body: {
++        errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
++      },
++    });
++
++    const error = await expectLifecycleError(deleteRuns([]));
++    expect(error).toEqual({
++      status: 400,
++      errors: [{ status: "400", title: "Bad Request", detail: "run_ids must contain at least one run ID." }],
++    });
++  });
++
+   test("batch lifecycle helpers preserve request-level error envelopes", async () => {
+     stubGeneratedAxiosOnce({
+       status: 400,
+diff --git a/apps/fabro-web/app/lib/run-actions.ts b/apps/fabro-web/app/lib/run-actions.ts
+index 819ec29de..4dfea7175 100644
+--- a/apps/fabro-web/app/lib/run-actions.ts
++++ b/apps/fabro-web/app/lib/run-actions.ts
+@@ -1,4 +1,6 @@
+ import type {
++  BatchDeleteRunsRequest,
++  BatchDeleteRunsResponse,
+   BatchRunLifecycleRequest,
+   BatchRunLifecycleResponse,
+   ErrorResponseEntry,
+@@ -77,6 +79,19 @@ export async function unarchiveRuns(
+   return batchRunLifecycleAction(runIds, "unarchive", request);
+ }
+ 
++export async function deleteRuns(
++  runIds: string[],
++  force = false,
++  request?: Request,
++): Promise<BatchDeleteRunsResponse> {
++  try {
++    const body = { run_ids: runIds, force } as unknown as BatchDeleteRunsRequest;
++    return await apiData(() => runsApi.batchDeleteRuns(body, requestSignalOptions(request)));
++  } catch (error) {
++    throw lifecycleActionErrorFromError(error);
++  }
++}
++
+ export async function retryRun(id: string, request?: Request): Promise<Run> {
+   return runLifecycleAction(id, "retry", request);
+ }
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index 629fc3bf6..91f812041 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -1196,6 +1196,57 @@ paths:
+               schema:
+                 $ref: "#/components/schemas/ErrorResponse"
+ 
++  /api/v1/runs/delete:
++    post:
++      operationId: batchDeleteRuns
++      tags: [Runs]
++      summary: Delete Runs
++      description: >
++        Deletes up to 250 runs in one fail-soft, non-transactional request.
++        Each run is processed independently. A valid batch returns `200` even
++        when some items fail; inspect `results` and `summary` for per-run
++        outcomes. Invalid request bodies are rejected before mutating any run.
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema:
++              $ref: "#/components/schemas/BatchDeleteRunsRequest"
++      responses:
++        "200":
++          description: Batch processed
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/BatchDeleteRunsResponse"
++        "400":
++          description: Invalid batch request
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "401":
++          description: Not authenticated
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++        "500":
++          description: Request-level server error
++          headers:
++            x-request-id:
++              $ref: "#/components/headers/XRequestId"
++          content:
++            application/json:
++              schema:
++                $ref: "#/components/schemas/ErrorResponse"
++
+   /api/v1/runs/unarchive:
+     post:
+       operationId: batchUnarchiveRuns
+@@ -5378,6 +5429,96 @@ components:
+           minimum: 0
+           description: Number of item results with `ok=false`.
+ 
++    BatchDeleteRunsRequest:
++      description: Run IDs to delete as one bounded fail-soft batch.
++      type: object
++      additionalProperties: false
++      required:
++        - run_ids
++      properties:
++        run_ids:
++          type: array
++          description: Run IDs to process, in result order.
++          minItems: 1
++          maxItems: 250
++          uniqueItems: true
++          items:
++            type: string
++            example: 01HZX6M29F1CD5YYMHT1F5D7WQ
++        force:
++          type: boolean
++          description: Whether to force deletion of active runs. Defaults to `false`.
++          default: false
++
++    BatchDeleteRunsResponse:
++      description: Per-run results for a fail-soft batch delete request.
++      type: object
++      additionalProperties: false
++      required:
++        - results
++        - summary
++      properties:
++        results:
++          type: array
++          description: Results ordered exactly like the request `run_ids`.
++          items:
++            $ref: "#/components/schemas/BatchDeleteRunsResult"
++        summary:
++          $ref: "#/components/schemas/BatchDeleteRunsSummary"
++
++    BatchDeleteRunsResult:
++      description: Result for one run in a batch delete request.
++      type: object
++      additionalProperties: false
++      required:
++        - run_id
++        - ok
++        - outcome
++      properties:
++        run_id:
++          type: string
++          description: Run ID from the request item.
++        ok:
++          type: boolean
++          description: Whether this item succeeded.
++        outcome:
++          type: string
++          enum:
++            - deleted
++            - already_absent
++            - sandbox_preserved
++            - conflict
++            - error
++          description: Machine-readable item outcome.
++        sandbox:
++          $ref: "#/components/schemas/DeleteRunSandbox"
++          description: Sandbox handoff details when `outcome` is `sandbox_preserved`.
++        error:
++          $ref: "#/components/schemas/ErrorResponseEntry"
++          description: Structured item error for failed items.
++
++    BatchDeleteRunsSummary:
++      description: Aggregate counts for a batch delete request.
++      type: object
++      additionalProperties: false
++      required:
++        - requested
++        - succeeded
++        - failed
++      properties:
++        requested:
++          type: integer
++          minimum: 0
++          description: Number of requested run IDs.
++        succeeded:
++          type: integer
++          minimum: 0
++          description: Number of item results with `ok=true`.
++        failed:
++          type: integer
++          minimum: 0
++          description: Number of item results with `ok=false`.
++
+     PairId:
+       type: string
+       description: Durable run pair identifier.
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index fa7b06f0d..5c60cd35e 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -23,25 +23,26 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+ use bytes::Bytes;
+ pub use fabro_api::types::{
+     AggregateBilling, AggregateBillingTotals, ApiQuestion, AppendEventResponse, ArtifactEntry,
+-    ArtifactListResponse, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
+-    BatchRunLifecycleResult, BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary,
+-    BillingByModel, BillingStageRef, CloseRunPullRequestResponse, CompletionContentPart,
+-    CompletionMessage, CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode,
+-    CompletionUsage, CreateCompletionRequest, CreateRunPullRequestRequest, CreateSecretRequest,
+-    DeleteRunResponse, DeleteRunSandbox, DeleteSecretRequest, DenyRunRequest, DiskUsageResponse,
+-    DiskUsageRunRow, DiskUsageSummaryRow, ErrorResponseEntry, ForkRequest, ForkResponse,
+-    LinkRunPullRequestRequest, MergeRunPullRequestRequest, MergeRunPullRequestResponse,
+-    ModelReference, PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse,
+-    PreviewUrlRequest, PreviewUrlResponse, Provider, ProviderList, PruneRunEntry, PruneRunsRequest,
+-    PruneRunsResponse, RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest,
+-    RewindResponse, Run, RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage,
+-    RunBillingTotals, RunError, RunManifest, RunStage, SandboxDetails, SandboxFileEntry,
+-    SandboxFileListResponse, SandboxService, SandboxServiceListResponse, SshAccessRequest,
+-    SshAccessResponse, StageHandler, StageState, StartRunRequest, SubmitAnswerRequest,
+-    SystemCpuResourceScope, SystemCpuResources, SystemDiskResourceScope, SystemDiskResources,
+-    SystemInfoResponse, SystemMemoryResourceScope, SystemMemoryResources, SystemRepairRunIssue,
+-    SystemRepairRunsResponse, SystemResourcesResponse, SystemRunCounts, TimelineEntryResponse,
+-    VncPreviewResponse, WriteBlobResponse,
++    ArtifactListResponse, BatchDeleteRunsRequest, BatchDeleteRunsResponse, BatchDeleteRunsResult,
++    BatchDeleteRunsResultOutcome, BatchDeleteRunsSummary, BatchRunLifecycleRequest,
++    BatchRunLifecycleResponse, BatchRunLifecycleResult, BatchRunLifecycleResultOutcome,
++    BatchRunLifecycleSummary, BillingByModel, BillingStageRef, CloseRunPullRequestResponse,
++    CompletionContentPart, CompletionMessage, CompletionMessageRole, CompletionResponse,
++    CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
++    CreateRunPullRequestRequest, CreateSecretRequest, DeleteRunResponse, DeleteRunSandbox,
++    DeleteSecretRequest, DenyRunRequest, DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow,
++    ErrorResponseEntry, ForkRequest, ForkResponse, LinkRunPullRequestRequest,
++    MergeRunPullRequestRequest, MergeRunPullRequestResponse, ModelReference, PaginatedEventList,
++    PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
++    Provider, ProviderList, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
++    RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest, RewindResponse, Run,
++    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
++    RunError, RunManifest, RunStage, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
++    SandboxService, SandboxServiceListResponse, SshAccessRequest, SshAccessResponse, StageHandler,
++    StageState, StartRunRequest, SubmitAnswerRequest, SystemCpuResourceScope, SystemCpuResources,
++    SystemDiskResourceScope, SystemDiskResources, SystemInfoResponse, SystemMemoryResourceScope,
++    SystemMemoryResources, SystemRepairRunIssue, SystemRepairRunsResponse, SystemResourcesResponse,
++    SystemRunCounts, TimelineEntryResponse, VncPreviewResponse, WriteBlobResponse,
+ };
+ use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
+ #[cfg(test)]
+@@ -2175,7 +2176,8 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+ const MAX_PAGE_OFFSET: u32 = 1_000_000;
+ 
+ enum DeleteRunOutcome {
+-    NoContent,
++    Deleted,
++    AlreadyAbsent,
+     Preserved(DeleteRunResponse),
+ }
+ 
+@@ -2183,7 +2185,7 @@ async fn delete_run_internal(
+     state: &Arc<AppState>,
+     id: RunId,
+     force: bool,
+-) -> Result<DeleteRunOutcome, Response> {
++) -> Result<DeleteRunOutcome, ApiError> {
+     if !force {
+         reject_active_delete_without_force(state.as_ref(), &id).await?;
+     }
+@@ -2193,6 +2195,8 @@ async fn delete_run_internal(
+     } else {
+         None
+     };
++    let had_managed_run = managed_run.is_some();
++    let durable_run_exists = state.store.open_run(&id).await.is_ok();
+     let durable_status = if managed_run.is_some() {
+         load_durable_run_status(state.as_ref(), &id).await
+     } else {
+@@ -2232,29 +2236,36 @@ async fn delete_run_internal(
+ 
+     if let Some(mut managed_run) = managed_run {
+         if let Some(run_dir) = managed_run.run_dir.take() {
+-            remove_run_dir(&run_dir).map_err(|err| {
+-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+-            })?;
++            remove_run_dir(&run_dir)
++                .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+         }
+     } else {
+         let storage = Storage::new(state.server_storage_dir());
+         let run_dir = storage.run_scratch(&id).root().to_path_buf();
+-        remove_run_dir(&run_dir).map_err(|err| {
+-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+-        })?;
++        remove_run_dir(&run_dir)
++            .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+     }
+ 
+-    state.store.delete_run(&id).await.map_err(|err| {
+-        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+-    })?;
++    state
++        .store
++        .delete_run(&id)
++        .await
++        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+     state
+         .artifact_store
+         .delete_for_run(&id)
+         .await
+-        .map_err(|err| {
+-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+-        })?;
+-    Ok(delete_outcome)
++        .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
++    match delete_outcome {
++        DeleteRunOutcome::Preserved(response) => Ok(DeleteRunOutcome::Preserved(response)),
++        DeleteRunOutcome::Deleted | DeleteRunOutcome::AlreadyAbsent => {
++            if had_managed_run || durable_run_exists {
++                Ok(DeleteRunOutcome::Deleted)
++            } else {
++                Ok(DeleteRunOutcome::AlreadyAbsent)
++            }
++        }
++    }
+ }
+ 
+ async fn load_durable_run_status(state: &AppState, id: &RunId) -> Option<RunStatus> {
+@@ -2267,9 +2278,9 @@ async fn delete_run_sandbox_resource(
+     state: &Arc<AppState>,
+     id: RunId,
+     force: bool,
+-) -> Result<DeleteRunOutcome, Response> {
++) -> Result<DeleteRunOutcome, ApiError> {
+     let Ok(run_store) = state.store.open_run(&id).await else {
+-        return Ok(DeleteRunOutcome::NoContent);
++        return Ok(DeleteRunOutcome::AlreadyAbsent);
+     };
+     let projection = match run_store.state().await {
+         Ok(projection) => projection,
+@@ -2279,12 +2290,13 @@ async fn delete_run_sandbox_resource(
+                 error = %render_with_causes(&err.to_string(), &collect_causes(&err)),
+                 "Skipping sandbox provider delete because run projection cannot be loaded"
+             );
+-            return Ok(DeleteRunOutcome::NoContent);
++            return Ok(DeleteRunOutcome::Deleted);
+         }
+         Err(err) => {
+-            return Err(
+-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+-            );
++            return Err(ApiError::new(
++                StatusCode::INTERNAL_SERVER_ERROR,
++                err.to_string(),
++            ));
+         }
+     };
+     let delete_started = matches!(projection.status, RunStatus::Removing);
+@@ -2292,9 +2304,7 @@ async fn delete_run_sandbox_resource(
+     if !delete_started && can_mark_removing {
+         workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunRemoving)
+             .await
+-            .map_err(|err| {
+-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+-            })?;
++            .map_err(|err| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+     }
+ 
+     let preserve = projection
+@@ -2305,7 +2315,10 @@ async fn delete_run_sandbox_resource(
+         .lifecycle
+         .preserve;
+     let Some(record) = projection.sandbox else {
+-        return Ok(DeleteRunOutcome::NoContent);
++        return Ok(DeleteRunOutcome::Deleted);
++    };
++    let Some(runtime) = record.runtime.as_ref() else {
++        return Ok(DeleteRunOutcome::Deleted);
+     };
+     if preserve {
+         return Ok(DeleteRunOutcome::Preserved(DeleteRunResponse {
+@@ -2313,11 +2326,7 @@ async fn delete_run_sandbox_resource(
+             sandbox_preserved: true,
+             sandbox:           DeleteRunSandbox {
+                 provider: record.provider,
+-                id:       record
+-                    .runtime
+-                    .as_ref()
+-                    .map(|runtime| runtime.id.clone())
+-                    .unwrap_or_default(),
++                id:       runtime.id.clone(),
+             },
+         }));
+     }
+@@ -2331,11 +2340,11 @@ async fn delete_run_sandbox_resource(
+                 error = %render_with_causes(&err.to_string(), &collect_causes(err.as_ref())),
+                 "Skipping sandbox provider delete during run deletion"
+             );
+-            return Ok(DeleteRunOutcome::NoContent);
++            return Ok(DeleteRunOutcome::Deleted);
+         }
+         Err(err) => {
+             let detail = render_with_causes(&err.to_string(), &collect_causes(err.as_ref()));
+-            return Err(ApiError::new(StatusCode::CONFLICT, detail).into_response());
++            return Err(ApiError::new(StatusCode::CONFLICT, detail));
+         }
+     };
+     if let Err(err) = sandbox.delete().await {
+@@ -2345,18 +2354,21 @@ async fn delete_run_sandbox_resource(
+                 error = %err.display_with_causes(),
+                 "Skipping failed sandbox provider delete during run deletion"
+             );
+-            return Ok(DeleteRunOutcome::NoContent);
++            return Ok(DeleteRunOutcome::Deleted);
+         }
+-        return Err(ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response());
++        return Err(ApiError::new(
++            StatusCode::CONFLICT,
++            err.display_with_causes(),
++        ));
+     }
+ 
+-    Ok(DeleteRunOutcome::NoContent)
++    Ok(DeleteRunOutcome::Deleted)
+ }
+ 
+ async fn reject_active_delete_without_force(
+     state: &AppState,
+     run_id: &RunId,
+-) -> Result<(), Response> {
++) -> Result<(), ApiError> {
+     let managed_status = state
+         .runs
+         .lock()
+@@ -2367,8 +2379,7 @@ async fn reject_active_delete_without_force(
+             return Err(ApiError::new(
+                 StatusCode::CONFLICT,
+                 active_run_delete_message(*run_id, status),
+-            )
+-            .into_response());
++            ));
+         }
+         return Ok(());
+     }
+@@ -2378,13 +2389,13 @@ async fn reject_active_delete_without_force(
+             Err(ApiError::new(
+                 StatusCode::CONFLICT,
+                 active_run_delete_message(*run_id, summary.lifecycle.status),
+-            )
+-            .into_response())
++            ))
+         }
+         Ok(_) => Ok(()),
+-        Err(err) => {
+-            Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())
+-        }
++        Err(err) => Err(ApiError::new(
++            StatusCode::INTERNAL_SERVER_ERROR,
++            err.to_string(),
++        )),
+     }
+ }
+ 
+diff --git a/lib/crates/fabro-server/src/server/handler/lifecycle.rs b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+index 8fe867a55..0b67d8d3e 100644
+--- a/lib/crates/fabro-server/src/server/handler/lifecycle.rs
++++ b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+@@ -4,16 +4,18 @@ use std::sync::Arc;
+ use chrono::Utc;
+ 
+ use super::super::{
+-    ApiError, AppState, AskFabroReadiness, BatchRunLifecycleRequest, BatchRunLifecycleResponse,
+-    BatchRunLifecycleResult, BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary,
++    ApiError, AppState, AskFabroReadiness, BatchDeleteRunsRequest, BatchDeleteRunsResponse,
++    BatchDeleteRunsResult, BatchDeleteRunsResultOutcome, BatchDeleteRunsSummary,
++    BatchRunLifecycleRequest, BatchRunLifecycleResponse, BatchRunLifecycleResult,
++    BatchRunLifecycleResultOutcome, BatchRunLifecycleSummary, DeleteRunOutcome, DeleteRunSandbox,
+     DenyRunRequest, FailureReason, ForkRequest, ForkResponse, HeaderMap, IntoResponse, Json, Path,
+     PendingReason, Principal, RequireRunScopedOrRunTools, RequiredUser, Response, RewindRequest,
+     RewindResponse, Router, RunAnswerTransport, RunControlAction, RunExecutionMode, RunId,
+     RunRunnableSource, RunStatus, StartRunRequest, State, StatusCode, Storage,
+     TimelineEntryResponse, WORKER_CANCEL_GRACE, WorkflowError, append_control_request,
+-    clear_live_run_state, durable_run_status, get, load_pending_control, managed_run, operations,
+-    parse_run_id_path, persist_cancelled_run_status, post, reject_if_archived, sleep,
+-    update_live_run_from_event, workflow_event,
++    clear_live_run_state, delete_run_internal, durable_run_status, get, load_pending_control,
++    managed_run, operations, parse_run_id_path, persist_cancelled_run_status, post,
++    reject_if_archived, sleep, update_live_run_from_event, workflow_event,
+ };
+ use super::runs::run_provenance;
+ 
+@@ -26,6 +28,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
+         .route("/runs/{id}/pause", post(pause_run))
+         .route("/runs/{id}/unpause", post(unpause_run))
+         .route("/runs/archive", post(batch_archive_runs))
++        .route("/runs/delete", post(batch_delete_runs))
+         .route("/runs/unarchive", post(batch_unarchive_runs))
+         .route("/runs/{id}/archive", post(archive_run))
+         .route("/runs/{id}/rewind", post(rewind_run))
+@@ -717,6 +720,38 @@ async fn batch_unarchive_runs(
+     .await
+ }
+ 
++async fn batch_delete_runs(
++    _auth: RequiredUser,
++    State(state): State<Arc<AppState>>,
++    Json(request): Json<BatchDeleteRunsRequest>,
++) -> Response {
++    let force = request.force;
++    let ids = match validate_batch_run_id_strings(request.run_ids) {
++        Ok(ids) => ids,
++        Err(err) => return err.into_response(),
++    };
++
++    let mut results = Vec::with_capacity(ids.len());
++    for id in ids {
++        results.push(batch_delete_run_item(&state, id, force).await);
++    }
++
++    let requested = results.len() as u64;
++    let succeeded = results.iter().filter(|result| result.ok).count() as u64;
++    (
++        StatusCode::OK,
++        Json(BatchDeleteRunsResponse {
++            results,
++            summary: BatchDeleteRunsSummary {
++                requested,
++                succeeded,
++                failed: requested - succeeded,
++            },
++        }),
++    )
++        .into_response()
++}
++
+ async fn rewind_run(
+     subject: RequiredUser,
+     State(state): State<Arc<AppState>>,
+@@ -950,20 +985,24 @@ async fn batch_run_archive_action(
+ }
+ 
+ fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId>, ApiError> {
+-    if request.run_ids.is_empty() {
++    validate_batch_run_id_strings(request.run_ids)
++}
++
++fn validate_batch_run_id_strings(run_ids: Vec<String>) -> Result<Vec<RunId>, ApiError> {
++    if run_ids.is_empty() {
+         return Err(ApiError::bad_request(
+             "run_ids must contain at least one run ID.",
+         ));
+     }
+-    if request.run_ids.len() > MAX_BATCH_RUN_LIFECYCLE_IDS {
++    if run_ids.len() > MAX_BATCH_RUN_LIFECYCLE_IDS {
+         return Err(ApiError::bad_request(format!(
+             "run_ids must contain no more than {MAX_BATCH_RUN_LIFECYCLE_IDS} run IDs.",
+         )));
+     }
+ 
+-    let mut seen = HashSet::with_capacity(request.run_ids.len());
+-    let mut ids = Vec::with_capacity(request.run_ids.len());
+-    for raw in request.run_ids {
++    let mut seen = HashSet::with_capacity(run_ids.len());
++    let mut ids = Vec::with_capacity(run_ids.len());
++    for raw in run_ids {
+         let id = raw.parse::<RunId>().map_err(|_| {
+             ApiError::bad_request(format!("run_ids contains invalid run ID: {raw}"))
+         })?;
+@@ -977,6 +1016,53 @@ fn validate_batch_run_ids(request: BatchRunLifecycleRequest) -> Result<Vec<RunId
+     Ok(ids)
+ }
+ 
++async fn batch_delete_run_item(
++    state: &Arc<AppState>,
++    id: RunId,
++    force: bool,
++) -> BatchDeleteRunsResult {
++    match delete_run_internal(state, id, force).await {
++        Ok(DeleteRunOutcome::Deleted) => {
++            batch_delete_success(id, BatchDeleteRunsResultOutcome::Deleted, None)
++        }
++        Ok(DeleteRunOutcome::AlreadyAbsent) => {
++            batch_delete_success(id, BatchDeleteRunsResultOutcome::AlreadyAbsent, None)
++        }
++        Ok(DeleteRunOutcome::Preserved(response)) => batch_delete_success(
++            id,
++            BatchDeleteRunsResultOutcome::SandboxPreserved,
++            Some(response.sandbox),
++        ),
++        Err(error) => {
++            let outcome = match error.status() {
++                StatusCode::CONFLICT => BatchDeleteRunsResultOutcome::Conflict,
++                _ => BatchDeleteRunsResultOutcome::Error,
++            };
++            BatchDeleteRunsResult {
++                run_id: id.to_string(),
++                ok: false,
++                outcome,
++                sandbox: None,
++                error: Some(error.into_response_entry()),
++            }
++        }
++    }
++}
++
++fn batch_delete_success(
++    id: RunId,
++    outcome: BatchDeleteRunsResultOutcome,
++    sandbox: Option<DeleteRunSandbox>,
++) -> BatchDeleteRunsResult {
++    BatchDeleteRunsResult {
++        run_id: id.to_string(),
++        ok: true,
++        outcome,
++        sandbox,
++        error: None,
++    }
++}
++
+ async fn batch_run_archive_item(
+     state: &AppState,
+     readiness: &AskFabroReadiness,
+diff --git a/lib/crates/fabro-server/src/server/handler/runs.rs b/lib/crates/fabro-server/src/server/handler/runs.rs
+index 1b34ca888..50894a68c 100644
+--- a/lib/crates/fabro-server/src/server/handler/runs.rs
++++ b/lib/crates/fabro-server/src/server/handler/runs.rs
+@@ -509,11 +509,13 @@ async fn delete_run(
+     };
+ 
+     match delete_run_internal(&state, id, query.force).await {
+-        Ok(super::super::DeleteRunOutcome::NoContent) => StatusCode::NO_CONTENT.into_response(),
++        Ok(
++            super::super::DeleteRunOutcome::Deleted | super::super::DeleteRunOutcome::AlreadyAbsent,
++        ) => StatusCode::NO_CONTENT.into_response(),
+         Ok(super::super::DeleteRunOutcome::Preserved(response)) => {
+             (StatusCode::OK, Json(response)).into_response()
+         }
+-        Err(response) => response,
++        Err(error) => error.into_response(),
+     }
+ }
+ 
+diff --git a/lib/crates/fabro-server/src/server/handler/system.rs b/lib/crates/fabro-server/src/server/handler/system.rs
+index 17293917a..37e48ea4f 100644
+--- a/lib/crates/fabro-server/src/server/handler/system.rs
++++ b/lib/crates/fabro-server/src/server/handler/system.rs
+@@ -207,8 +207,8 @@ async fn prune_runs(
+     }
+ 
+     for run_id in &prune_plan.run_ids {
+-        if let Err(response) = delete_run_internal(&state, *run_id, true).await {
+-            return response;
++        if let Err(error) = delete_run_internal(&state, *run_id, true).await {
++            return error.into_response();
+         }
+     }
+ 
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index bd17bee80..6d7322f11 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -10557,12 +10557,64 @@ async fn create_running_run(state: &Arc<AppState>, run_id: RunId) {
+     .await;
+ }
+ 
++async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId) {
++    let mut settings = fabro_types::WorkflowSettings::default();
++    settings.run.environment.lifecycle.preserve = true;
++    let graph = Graph::new("test");
++
++    create_durable_run_with_events(state, run_id, &[
++        workflow_event::Event::RunCreated {
++            run_id,
++            title: None,
++            settings: serde_json::to_value(settings).unwrap(),
++            graph: serde_json::to_value(graph).unwrap(),
++            workflow_source: None,
++            workflow_config: None,
++            labels: std::collections::BTreeMap::default(),
++            run_dir: "/tmp/fabro-run".to_string(),
++            source_directory: Some("/tmp/fabro-run".to_string()),
++            workflow_slug: Some("test".to_string()),
++            db_prefix: None,
++            provenance: None,
++            manifest_blob: None,
++            git: None,
++            fork_source_ref: None,
++            retried_from: None,
++            parent_id: None,
++            web_url: None,
++        },
++        workflow_event::Event::RunSubmitted {
++            definition_blob: None,
++        },
++        workflow_event::Event::SandboxInitialized {
++            provider:          SandboxProvider::Local,
++            id:                "sandbox-preserve-1".to_string(),
++            working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
++            repo_cloned:       None,
++            clone_origin_url:  None,
++            clone_branch:      None,
++            workspace_root:    None,
++            repos_root:        None,
++            primary_repo_path: None,
++            primary_repo_link: None,
++        },
++    ])
++    .await;
++}
++
+ fn batch_lifecycle_body(run_ids: &[RunId]) -> serde_json::Value {
+     json!({
+         "run_ids": run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
+     })
+ }
+ 
++fn batch_delete_body(run_ids: &[RunId], force: bool) -> serde_json::Value {
++    json!({
++        "run_ids": run_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
++        "force": force,
++    })
++}
++
+ fn assert_batch_result(result: &serde_json::Value, run_id: RunId, ok: bool, outcome: &str) {
+     assert_eq!(result["run_id"], run_id.to_string());
+     assert_eq!(result["ok"], ok);
+@@ -10588,6 +10640,23 @@ fn assert_batch_result(result: &serde_json::Value, run_id: RunId, ok: bool, outc
+     }
+ }
+ 
++fn assert_batch_delete_result(result: &serde_json::Value, run_id: RunId, ok: bool, outcome: &str) {
++    assert_eq!(result["run_id"], run_id.to_string());
++    assert_eq!(result["ok"], ok);
++    assert_eq!(result["outcome"], outcome);
++    if ok {
++        assert!(
++            result["error"].is_null(),
++            "successful delete result should omit error: {result}"
++        );
++    } else {
++        assert!(
++            result["error"].is_object(),
++            "failed delete result should include error: {result}"
++        );
++    }
++}
++
+ #[tokio::test]
+ async fn batch_archive_and_unarchive_updates_listing_visibility() {
+     let state = test_app_state();
+@@ -10852,6 +10921,249 @@ async fn batch_lifecycle_requires_user_authentication() {
+     }
+ }
+ 
++#[tokio::test]
++async fn batch_delete_removes_runs_and_reports_ordered_results() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let first_id = RunId::new();
++    let second_id = RunId::new();
++    create_succeeded_run(&state, first_id).await;
++    create_succeeded_run(&state, second_id).await;
++
++    let response = app
++        .clone()
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/delete",
++            &batch_delete_body(&[first_id, second_id], false),
++        ))
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(body["summary"]["requested"], 2);
++    assert_eq!(body["summary"]["succeeded"], 2);
++    assert_eq!(body["summary"]["failed"], 0);
++    let results = body["results"].as_array().unwrap();
++    assert_batch_delete_result(&results[0], first_id, true, "deleted");
++    assert_batch_delete_result(&results[1], second_id, true, "deleted");
++
++    for run_id in [first_id, second_id] {
++        let response = app
++            .clone()
++            .oneshot(
++                Request::builder()
++                    .method("GET")
++                    .uri(api(&format!("/runs/{run_id}")))
++                    .body(Body::empty())
++                    .unwrap(),
++            )
++            .await
++            .unwrap();
++        assert_status!(response, StatusCode::NOT_FOUND).await;
++    }
++}
++
++#[tokio::test]
++async fn batch_delete_reports_mixed_results_without_rollback() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let terminal_id = RunId::new();
++    let running_id = RunId::new();
++    let missing_id = RunId::new();
++    create_succeeded_run(&state, terminal_id).await;
++    create_running_run(&state, running_id).await;
++
++    let response = app
++        .clone()
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/delete",
++            &batch_delete_body(&[terminal_id, running_id, missing_id], false),
++        ))
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(body["summary"]["requested"], 3);
++    assert_eq!(body["summary"]["succeeded"], 2);
++    assert_eq!(body["summary"]["failed"], 1);
++    let results = body["results"].as_array().unwrap();
++    assert_batch_delete_result(&results[0], terminal_id, true, "deleted");
++    assert_batch_delete_result(&results[1], running_id, false, "conflict");
++    assert_eq!(results[1]["error"]["status"], "409");
++    assert_batch_delete_result(&results[2], missing_id, true, "already_absent");
++
++    let deleted_response = app
++        .clone()
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{terminal_id}")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_status!(deleted_response, StatusCode::NOT_FOUND).await;
++
++    let running_response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{running_id}")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_status!(running_response, StatusCode::OK).await;
++}
++
++#[tokio::test]
++async fn batch_delete_force_removes_active_runs() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++    create_running_run(&state, run_id).await;
++
++    let response = app
++        .clone()
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/delete",
++            &batch_delete_body(&[run_id], true),
++        ))
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(body["summary"]["requested"], 1);
++    assert_eq!(body["summary"]["succeeded"], 1);
++    assert_eq!(body["summary"]["failed"], 0);
++    let results = body["results"].as_array().unwrap();
++    assert_batch_delete_result(&results[0], run_id, true, "deleted");
++
++    let response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_status!(response, StatusCode::NOT_FOUND).await;
++}
++
++#[tokio::test]
++async fn batch_delete_with_preserved_sandbox_returns_handoff() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++    create_preserved_local_sandbox_run(&state, run_id).await;
++
++    let response = app
++        .clone()
++        .oneshot(json_request(
++            Method::POST,
++            "/runs/delete",
++            &batch_delete_body(&[run_id], true),
++        ))
++        .await
++        .unwrap();
++    let body = response_json!(response, StatusCode::OK).await;
++    assert_eq!(body["summary"]["requested"], 1);
++    assert_eq!(body["summary"]["succeeded"], 1);
++    assert_eq!(body["summary"]["failed"], 0);
++    let results = body["results"].as_array().unwrap();
++    assert_batch_delete_result(&results[0], run_id, true, "sandbox_preserved");
++    assert_eq!(results[0]["sandbox"]["provider"], "local");
++    assert_eq!(results[0]["sandbox"]["id"], "sandbox-preserve-1");
++
++    let response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_status!(response, StatusCode::NOT_FOUND).await;
++}
++
++#[tokio::test]
++async fn batch_delete_rejects_invalid_requests_before_mutating_runs() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = RunId::new();
++    create_succeeded_run(&state, run_id).await;
++    let too_many_ids = (0..251)
++        .map(|_| RunId::new().to_string())
++        .collect::<Vec<_>>();
++    let invalid_requests = [
++        json!({ "run_ids": [], "force": false }),
++        json!({ "run_ids": [run_id.to_string(), run_id.to_string()], "force": false }),
++        json!({ "run_ids": ["not-a-run-id"], "force": false }),
++        json!({ "run_ids": too_many_ids, "force": false }),
++    ];
++
++    for body in invalid_requests {
++        let response = app
++            .clone()
++            .oneshot(json_request(Method::POST, "/runs/delete", &body))
++            .await
++            .unwrap();
++        assert_status!(response, StatusCode::BAD_REQUEST).await;
++    }
++
++    let response = app
++        .oneshot(
++            Request::builder()
++                .method("GET")
++                .uri(api(&format!("/runs/{run_id}")))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    assert_status!(response, StatusCode::OK).await;
++}
++
++#[tokio::test]
++async fn batch_delete_requires_user_authentication() {
++    let (_state, app) = jwt_auth_app();
++    let user_jwt = issue_test_user_jwt();
++    let run_id = create_run_with_bearer(&app, &user_jwt).await;
++    let worker_token = issue_test_worker_token(&run_id);
++    let body = batch_delete_body(&[run_id], false);
++
++    let unauthenticated = app
++        .clone()
++        .oneshot(json_request(Method::POST, "/runs/delete", &body))
++        .await
++        .unwrap();
++    assert_status!(unauthenticated, StatusCode::UNAUTHORIZED).await;
++
++    let worker_response = app
++        .oneshot(json_bearer_request(
++            Method::POST,
++            "/runs/delete",
++            &worker_token,
++            &body,
++        ))
++        .await
++        .unwrap();
++    assert!(
++        matches!(
++            worker_response.status(),
++            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
++        ),
++        "/runs/delete unexpectedly accepted worker token with status {}",
++        worker_response.status()
++    );
++}
++
+ #[tokio::test]
+ async fn archive_unknown_run_returns_not_found() {
+     let app = test_app_with();
+diff --git a/lib/packages/fabro-api-client/src/.openapi-generator/FILES b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+index 619940ff5..f8d333e14 100644
+--- a/lib/packages/fabro-api-client/src/.openapi-generator/FILES
++++ b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+@@ -45,6 +45,10 @@ models/auth-session-user.ts
+ models/auth-session.ts
+ models/auth-sessions-response.ts
+ models/automation-ref.ts
++models/batch-delete-runs-request.ts
++models/batch-delete-runs-response.ts
++models/batch-delete-runs-result.ts
++models/batch-delete-runs-summary.ts
+ models/batch-run-lifecycle-request.ts
+ models/batch-run-lifecycle-response.ts
+ models/batch-run-lifecycle-result.ts
+diff --git a/lib/packages/fabro-api-client/src/api/runs-api.ts b/lib/packages/fabro-api-client/src/api/runs-api.ts
+index 327bd8611..9a074ce61 100644
+--- a/lib/packages/fabro-api-client/src/api/runs-api.ts
++++ b/lib/packages/fabro-api-client/src/api/runs-api.ts
+@@ -22,6 +22,10 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
+ // @ts-ignore
+ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
+ // @ts-ignore
++import type { BatchDeleteRunsRequest } from '../models';
++// @ts-ignore
++import type { BatchDeleteRunsResponse } from '../models';
++// @ts-ignore
+ import type { BatchRunLifecycleRequest } from '../models';
+ // @ts-ignore
+ import type { BatchRunLifecycleResponse } from '../models';
+@@ -201,6 +205,47 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
+                 options: localVarRequestOptions,
+             };
+         },
++        /**
++         * Deletes up to 250 runs in one fail-soft, non-transactional request. Each run is processed independently. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Delete Runs
++         * @param {BatchDeleteRunsRequest} batchDeleteRunsRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        batchDeleteRuns: async (batchDeleteRunsRequest: BatchDeleteRunsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
++            // verify required parameter 'batchDeleteRunsRequest' is not null or undefined
++            assertParamExists('batchDeleteRuns', 'batchDeleteRunsRequest', batchDeleteRunsRequest)
++            const localVarPath = `/api/v1/runs/delete`;
++            // use dummy base URL string because the URL constructor only accepts absolute URLs.
++            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
++            let baseOptions;
++            if (configuration) {
++                baseOptions = configuration.baseOptions;
++            }
++
++            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
++            const localVarHeaderParameter = {} as any;
++            const localVarQueryParameter = {} as any;
++
++            // authentication SessionCookie required
++
++            // authentication BearerAuth required
++            // http bearer authentication required
++            await setBearerAuthToObject(localVarHeaderParameter, configuration)
++
++            localVarHeaderParameter['Content-Type'] = 'application/json';
++            localVarHeaderParameter['Accept'] = 'application/json';
++
++            setSearchParams(localVarUrlObj, localVarQueryParameter);
++            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
++            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
++            localVarRequestOptions.data = serializeDataIfNeeded(batchDeleteRunsRequest, localVarRequestOptions, configuration)
++
++            return {
++                url: toPathString(localVarUrlObj),
++                options: localVarRequestOptions,
++            };
++        },
+         /**
+          * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+          * @summary Unarchive Runs
+@@ -1535,6 +1580,19 @@ export const RunsApiFp = function(configuration?: Configuration) {
+             const localVarOperationServerBasePath = operationServerMap['RunsApi.batchArchiveRuns']?.[localVarOperationServerIndex]?.url;
+             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+         },
++        /**
++         * Deletes up to 250 runs in one fail-soft, non-transactional request. Each run is processed independently. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Delete Runs
++         * @param {BatchDeleteRunsRequest} batchDeleteRunsRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        async batchDeleteRuns(batchDeleteRunsRequest: BatchDeleteRunsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BatchDeleteRunsResponse>> {
++            const localVarAxiosArgs = await localVarAxiosParamCreator.batchDeleteRuns(batchDeleteRunsRequest, options);
++            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
++            const localVarOperationServerBasePath = operationServerMap['RunsApi.batchDeleteRuns']?.[localVarOperationServerIndex]?.url;
++            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
++        },
+         /**
+          * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+          * @summary Unarchive Runs
+@@ -1981,6 +2039,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
+         batchArchiveRuns(batchRunLifecycleRequest: BatchRunLifecycleRequest, options?: RawAxiosRequestConfig): AxiosPromise<BatchRunLifecycleResponse> {
+             return localVarFp.batchArchiveRuns(batchRunLifecycleRequest, options).then((request) => request(axios, basePath));
+         },
++        /**
++         * Deletes up to 250 runs in one fail-soft, non-transactional request. Each run is processed independently. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++         * @summary Delete Runs
++         * @param {BatchDeleteRunsRequest} batchDeleteRunsRequest
++         * @param {*} [options] Override http request option.
++         * @throws {RequiredError}
++         */
++        batchDeleteRuns(batchDeleteRunsRequest: BatchDeleteRunsRequest, options?: RawAxiosRequestConfig): AxiosPromise<BatchDeleteRunsResponse> {
++            return localVarFp.batchDeleteRuns(batchDeleteRunsRequest, options).then((request) => request(axios, basePath));
++        },
+         /**
+          * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+          * @summary Unarchive Runs
+@@ -2338,6 +2406,17 @@ export class RunsApi extends BaseAPI {
+         return RunsApiFp(this.configuration).batchArchiveRuns(batchRunLifecycleRequest, options).then((request) => request(this.axios, this.basePath));
+     }
+ 
++    /**
++     * Deletes up to 250 runs in one fail-soft, non-transactional request. Each run is processed independently. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
++     * @summary Delete Runs
++     * @param {BatchDeleteRunsRequest} batchDeleteRunsRequest
++     * @param {*} [options] Override http request option.
++     * @throws {RequiredError}
++     */
++    public batchDeleteRuns(batchDeleteRunsRequest: BatchDeleteRunsRequest, options?: RawAxiosRequestConfig) {
++        return RunsApiFp(this.configuration).batchDeleteRuns(batchDeleteRunsRequest, options).then((request) => request(this.axios, this.basePath));
++    }
++
+     /**
+      * Restores up to 250 archived runs in one fail-soft, non-transactional request. Each run is processed independently and successful items emit the same per-run unarchive events as `POST /api/v1/runs/{id}/unarchive`. A valid batch returns `200` even when some items fail; inspect `results` and `summary` for per-run outcomes. Invalid request bodies are rejected before mutating any run.
+      * @summary Unarchive Runs
+diff --git a/lib/packages/fabro-api-client/src/models/batch-delete-runs-request.ts b/lib/packages/fabro-api-client/src/models/batch-delete-runs-request.ts
+new file mode 100644
+index 000000000..938a9514e
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-delete-runs-request.ts
+@@ -0,0 +1,29 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++
++/**
++ * Run IDs to delete as one bounded fail-soft batch.
++ */
++export interface BatchDeleteRunsRequest {
++    /**
++     * Run IDs to process, in result order.
++     */
++    'run_ids': Set<string>;
++    /**
++     * Whether to force deletion of active runs. Defaults to `false`.
++     */
++    'force'?: boolean;
++}
+diff --git a/lib/packages/fabro-api-client/src/models/batch-delete-runs-response.ts b/lib/packages/fabro-api-client/src/models/batch-delete-runs-response.ts
+new file mode 100644
+index 000000000..cdc96e05f
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-delete-runs-response.ts
+@@ -0,0 +1,32 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++// May contain unused imports in some cases
++// @ts-ignore
++import type { BatchDeleteRunsResult } from './batch-delete-runs-result';
++// May contain unused imports in some cases
++// @ts-ignore
++import type { BatchDeleteRunsSummary } from './batch-delete-runs-summary';
++
++/**
++ * Per-run results for a fail-soft batch delete request.
++ */
++export interface BatchDeleteRunsResponse {
++    /**
++     * Results ordered exactly like the request `run_ids`.
++     */
++    'results': Array<BatchDeleteRunsResult>;
++    'summary': BatchDeleteRunsSummary;
++}
+diff --git a/lib/packages/fabro-api-client/src/models/batch-delete-runs-result.ts b/lib/packages/fabro-api-client/src/models/batch-delete-runs-result.ts
+new file mode 100644
+index 000000000..e55be5fe5
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-delete-runs-result.ts
+@@ -0,0 +1,57 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++// May contain unused imports in some cases
++// @ts-ignore
++import type { DeleteRunSandbox } from './delete-run-sandbox';
++// May contain unused imports in some cases
++// @ts-ignore
++import type { ErrorResponseEntry } from './error-response-entry';
++
++/**
++ * Result for one run in a batch delete request.
++ */
++export interface BatchDeleteRunsResult {
++    /**
++     * Run ID from the request item.
++     */
++    'run_id': string;
++    /**
++     * Whether this item succeeded.
++     */
++    'ok': boolean;
++    /**
++     * Machine-readable item outcome.
++     */
++    'outcome': BatchDeleteRunsResultOutcomeEnum;
++    /**
++     * Sandbox handoff details when `outcome` is `sandbox_preserved`.
++     */
++    'sandbox'?: DeleteRunSandbox;
++    /**
++     * Structured item error for failed items.
++     */
++    'error'?: ErrorResponseEntry;
++}
++
++export const BatchDeleteRunsResultOutcomeEnum = {
++    DELETED: 'deleted',
++    ALREADY_ABSENT: 'already_absent',
++    SANDBOX_PRESERVED: 'sandbox_preserved',
++    CONFLICT: 'conflict',
++    ERROR: 'error'
++} as const;
++
++export type BatchDeleteRunsResultOutcomeEnum = typeof BatchDeleteRunsResultOutcomeEnum[keyof typeof BatchDeleteRunsResultOutcomeEnum];
+diff --git a/lib/packages/fabro-api-client/src/models/batch-delete-runs-summary.ts b/lib/packages/fabro-api-client/src/models/batch-delete-runs-summary.ts
+new file mode 100644
+index 000000000..a335230b2
+--- /dev/null
++++ b/lib/packages/fabro-api-client/src/models/batch-delete-runs-summary.ts
+@@ -0,0 +1,33 @@
++/* tslint:disable */
++/* eslint-disable */
++/**
++ * Fabro Run API
++ * HTTP API for managing Fabro workflow run executions.
++ *
++ * The version of the OpenAPI document: 0.1.0
++ *
++ *
++ * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
++ * https://openapi-generator.tech
++ * Do not edit the class manually.
++ */
++
++
++
++/**
++ * Aggregate counts for a batch delete request.
++ */
++export interface BatchDeleteRunsSummary {
++    /**
++     * Number of requested run IDs.
++     */
++    'requested': number;
++    /**
++     * Number of item results with `ok=true`.
++     */
++    'succeeded': number;
++    /**
++     * Number of item results with `ok=false`.
++     */
++    'failed': number;
++}
+diff --git a/lib/packages/fabro-api-client/src/models/index.ts b/lib/packages/fabro-api-client/src/models/index.ts
+index e70e4f2db..78d106d70 100644
+--- a/lib/packages/fabro-api-client/src/models/index.ts
++++ b/lib/packages/fabro-api-client/src/models/index.ts
+@@ -22,6 +22,10 @@ export * from './auth-session';
+ export * from './auth-session-user';
+ export * from './auth-sessions-response';
+ export * from './automation-ref';
++export * from './batch-delete-runs-request';
++export * from './batch-delete-runs-response';
++export * from './batch-delete-runs-result';
++export * from './batch-delete-runs-summary';
+ export * from './batch-run-lifecycle-request';
+ export * from './batch-run-lifecycle-response';
+ export * from './batch-run-lifecycle-result';
