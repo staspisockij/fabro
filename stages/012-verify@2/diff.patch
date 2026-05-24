@@ -1,0 +1,344 @@
+diff --git a/.claude/skills/changelog/watermark b/.claude/skills/changelog/watermark
+index f3d8860d3..dc7fea578 100644
+--- a/.claude/skills/changelog/watermark
++++ b/.claude/skills/changelog/watermark
+@@ -1 +1 @@
+-df6f62db6a285ae76fdeead26f6081f8f79cdb9d
++6544e2c589cf436de4b18b70755177183b10c7d9
+diff --git a/apps/fabro-web/app/routes/run-stages.tsx b/apps/fabro-web/app/routes/run-stages.tsx
+index 7503f0c3a..ae7b2ad14 100644
+--- a/apps/fabro-web/app/routes/run-stages.tsx
++++ b/apps/fabro-web/app/routes/run-stages.tsx
+@@ -1416,12 +1416,9 @@ function EventsToolbar({
+           <span className="font-mono">{modelUsageLabel}</span>
+         </HoverCard>
+       )}
+-      <EventExportActions
+-        events={events}
+-        runId={runId}
+-        stageId={stageId}
+-        className={!showFilters && !modelUsageLabel ? "ml-auto" : ""}
+-      />
++      {tab === "debug" && (
++        <EventExportActions events={events} runId={runId} stageId={stageId} />
++      )}
+       {tab === "primary" && renderer === "command" && commandTurn && (
+         <CommandStatus turn={commandTurn} />
+       )}
+diff --git a/apps/fabro-web/app/routes/runs.tsx b/apps/fabro-web/app/routes/runs.tsx
+index 1b40333fd..7d5878b86 100644
+--- a/apps/fabro-web/app/routes/runs.tsx
++++ b/apps/fabro-web/app/routes/runs.tsx
+@@ -175,10 +175,11 @@ function boardLifecycleStatusLabel(run: Pick<RunItem, "column" | "lifecycleStatu
+   return run.lifecycleStatusLabel;
+ }
+ 
+-function listLifecycleStatusLabel(run: Pick<RunWithStatus, "statusLabel" | "lifecycleStatusLabel">): string | null {
++function listLifecycleStatusLabel(run: Pick<RunWithStatus, "status" | "statusLabel" | "lifecycleStatusLabel">): string | null {
+   if (run.lifecycleStatusLabel == null || run.lifecycleStatusLabel === run.statusLabel) {
+     return null;
+   }
++  if (run.status === "initializing") return null;
+   return run.lifecycleStatusLabel;
+ }
+ 
+diff --git a/docs/public/changelog/2026-05-22.mdx b/docs/public/changelog/2026-05-22.mdx
+index e44e76201..e91fd29af 100644
+--- a/docs/public/changelog/2026-05-22.mdx
++++ b/docs/public/changelog/2026-05-22.mdx
+@@ -49,6 +49,8 @@ This gives Fabro a durable view of agent task state instead of treating todo upd
+ <Accordion title="Workflows">
+ - `fabro_run_create` now supports `goal_file` and preserves it as a file-backed run goal
+ - `fabro_run_create` now accepts the advertised workflow-string shorthand in MCP clients
++- New `fabro_run_get` tool provides read-only run inspection without mutating workflow state
++- `run.checkpoint.skip_git_hooks` can bypass Git hooks during checkpoint commits
+ - Pair user and system messages now appear in the stage Thread tab and activity timeline
+ </Accordion>
+ 
+@@ -57,11 +59,15 @@ This gives Fabro a durable view of agent task state instead of treating todo upd
+ - Fixed Ask Fabro markdown spacing and heading sizes in narrow panels
+ - Fixed reasoning deltas leaking into Ask Fabro output
+ - Fixed archived run board updates not refreshing active and archived queries consistently
++- Fixed retryable mid-stream LLM failures being treated as terminal agent errors
++- Fixed agent edit operations by reading raw sandbox file contents before applying patches
+ </Accordion>
+ 
+ <Accordion title="Improvements">
+ - The run stage sidebar can now collapse to an icon rail while preserving status indicators
+ - Ask Fabro example prompts now use fuller, action-oriented text
++- Agent context observability now records memory, activated skills, and MCP tools as run events
++- Anthropic agent sessions now support task lookup and task reminders
+ - Run board archived columns now stay in a predictable order after archive and unarchive actions
+ - OpenAI `apply_patch` handling is now compatible with Codex-style patch grammar
+ </Accordion>
+diff --git a/docs/public/changelog/2026-05-23.mdx b/docs/public/changelog/2026-05-23.mdx
+index a5c1843ad..6ce319ff0 100644
+--- a/docs/public/changelog/2026-05-23.mdx
++++ b/docs/public/changelog/2026-05-23.mdx
+@@ -1,8 +1,69 @@
+ ---
+-title: "Legacy sandbox config migration"
++title: "Runs list, Slack notifications, and structured outputs"
+ date: "2026-05-23"
+ ---
+ 
+-## Legacy sandbox config auto-migration
++<Warning>
++**Run lifecycle status values changed for API and CLI consumers.** The old `queued` state is now split into `pending` and `runnable`, and approval state is represented explicitly.
+ 
+-Fabro now temporarily rewrites confidently migratable pre-v1.0 `[run.sandbox]` config files to the named environment syntax. A backup is written next to the original file before rewriting. Ambiguous or unsupported legacy keys fail with a targeted migration message instead of the generic TOML unknown-field error.
++To migrate:
++1. Update clients that switch on `queued` to handle `pending` and `runnable`.
++2. Use the approval fields on run summaries and projections when deciding whether a run is waiting for human action.
++</Warning>
++
++## Runs are easier to scan, sort, and recover
++
++The runs list now uses a denser table layout with server-side sorting, pagination, and a redesigned toolbar. You can sort by repo, title, workflow, and changes without waiting for the browser to process the full list.
++
++Failed and dead runs can now be retried from the run UI and API instead of being recreated by hand. The same run lifecycle work also separates pending runs from runnable runs, so approvals and blocked start conditions are clearer in the product and the API.
++
++## Batch run actions
++
++The runs list now supports multi-select archive and unarchive, with matching batch lifecycle endpoints for API clients. Workspace preferences remember the runs view choices you make, so list layout and filtering stay consistent across visits.
++
++Run size is now exposed on summaries and projections, which gives the UI and API a shared way to distinguish small, medium, and large runs. The web app uses that signal in the run header and list surfaces where scale matters for triage.
++
++## Agent stages expose more of what is happening
++
++Agent stage pages now include a stage insights sidebar, context-window snapshots, and richer stage projections for todos, subagents, skills, MCP tools, reasoning effort, speed, and model usage. This makes it easier to see why a stage is behaving a certain way without digging through raw events.
++
++Structured output validation is also stricter. Agent and prompt stages with `output_schema` now validate model output in the same context and ask the model to repair invalid responses before the workflow moves on.
++
++## Slack run lifecycle notifications
++
++Workflows can now send run lifecycle updates to Slack through `[run.notifications]`. Teams can keep a channel informed when a run starts, needs attention, finishes, or fails without wiring a separate webhook workflow.
++
++```toml
++[run.notifications]
++slack = true
++```
++
++## More
++
++<Accordion title="API">
++- New `POST /api/v1/runs/archive` and `POST /api/v1/runs/unarchive` endpoints apply lifecycle actions to multiple runs at once
++- Run summaries and projections now expose run size buckets
++- Stage projections now include agent todos, subagents, skills, MCP tools, context-window data, and model usage
++- `output_schema` validation errors now include structured repair context for agent and prompt stages
++</Accordion>
++
++<Accordion title="Workflows">
++- Named environments replace run-scoped sandbox config, with automatic migration for confidently supported legacy `[run.sandbox]` files
++- Legacy sandbox config migration writes a backup next to the original file before rewriting
++- Ambiguous legacy sandbox config now fails with a targeted migration message
++- Interview options now carry metadata through the API, console, Slack blocks, and agent question tools
++</Accordion>
++
++<Accordion title="Fixes">
++- Fixed the Quick Start screen flashing when navigating to `/runs` with archived preferences
++- Fixed implement-plan pull requests advancing before CI checks completed
++- Fixed an event append race covered by a regression test
++</Accordion>
++
++<Accordion title="Improvements">
++- Added a Waterfall view for run events with hover popovers and duration breakdowns
++- Added live timing overlays for in-flight runs
++- Generated run titles now use the lighter `small_default` model role asynchronously
++- Settings pages now show provider and integration logos, including upcoming Teams, Discord, and Jira integrations
++- Stage insights sidebar polish improved visit syntax, spacing, and quiet-state presentation
++</Accordion>
+diff --git a/docs/public/changelog/2026-05-24.mdx b/docs/public/changelog/2026-05-24.mdx
+new file mode 100644
+index 000000000..8a723cddc
+--- /dev/null
++++ b/docs/public/changelog/2026-05-24.mdx
+@@ -0,0 +1,39 @@
++---
++title: "Batch delete and richer stage details"
++date: "2026-05-24"
++---
++
++## Delete runs in batches
++
++The runs list bulk toolbar now includes Delete for selected runs. API clients can use the matching batch delete endpoint to remove multiple runs in one request and get per-run results back.
++
++```http
++POST /api/v1/runs/delete
++```
++
++## Stage details are closer at hand
++
++Stage status, model, and event details are now available from hover popovers across the run overview graph, stage sidebar, and stage events toolbar. You can inspect stage metadata without leaving the current run view.
++
++Loaded stage events also gained Copy and Download actions. That makes it easier to move event output into an issue, support thread, or local investigation without selecting text from the page.
++
++## More
++
++<Accordion title="API">
++- New `POST /api/v1/runs/delete` endpoint deletes multiple runs and returns per-run results plus a summary
++</Accordion>
++
++<Accordion title="Fixes">
++- Fixed unfinished stages being left open after a run failure
++- Removed a non-functional demo-mode Connect dropdown
++- Suppressed the redundant Starting pill on the runs list
++</Accordion>
++
++<Accordion title="Improvements">
++- Added a run size badge to the run header
++- Unconfigured provider rows now link directly to a prefilled secret form
++- Removed retired OpenAI models from the catalog
++- Improved muted stage status pill contrast
++- Collapsed the stage events search field behind an icon by default
++- Updated the Automations nav icon
++</Accordion>
+diff --git a/docs/public/core-concepts/models.mdx b/docs/public/core-concepts/models.mdx
+index 61b26419b..f545ff073 100644
+--- a/docs/public/core-concepts/models.mdx
++++ b/docs/public/core-concepts/models.mdx
+@@ -19,8 +19,6 @@ No single model is best at everything. Fabro lets you assign the right model to
+ | `claude-sonnet-4-5` | anthropic | | 200K | $3.00 / $15.00 | 50 tok/s |
+ | `claude-haiku-4-5` | anthropic | `haiku`, `claude-haiku` | 200K | $0.80 / $4.00 | 100 tok/s |
+ | `gpt-5.2` | openai | `gpt5` | 1M | $1.80 / $14.00 | 65 tok/s |
+-| `gpt-5-mini` | openai | `gpt5-mini` | 1M | $0.20 / $2.00 | 70 tok/s |
+-| `gpt-5.2-codex` | openai | | 1M | $1.80 / $14.00 | 100 tok/s |
+ | `gpt-5.3-codex` | openai | `codex` | 1M | $1.80 / $14.00 | 100 tok/s |
+ | `gpt-5.3-codex-spark` | openai | `codex-spark` | 128K | n/a | 1000 tok/s |
+ | `gpt-5.4` | openai | `gpt54` | 1M | $2.50 / $15.00 | 70 tok/s |
+diff --git a/docs/public/docs.json b/docs/public/docs.json
+index dd9a39999..89d8b4b43 100644
+--- a/docs/public/docs.json
++++ b/docs/public/docs.json
+@@ -252,6 +252,8 @@
+             "group": "May 2026",
+             "icon": "clock-rotate-left",
+             "pages": [
++              "changelog/2026-05-24",
++              "changelog/2026-05-23",
+               "changelog/2026-05-22",
+               "changelog/2026-05-21",
+               "changelog/2026-05-20",
+diff --git a/docs/public/examples/definition-of-done.mdx b/docs/public/examples/definition-of-done.mdx
+index 5832cad59..d96a81120 100644
+--- a/docs/public/examples/definition-of-done.mdx
++++ b/docs/public/examples/definition-of-done.mdx
+@@ -289,7 +289,7 @@ digraph SpecDoDMultiModel {
+             * { model: claude-opus-4-6;}
+             .opus   { model: claude-opus-4-6;reasoning_effort: high; }
+             .gpt    { model: gpt-5.2;        reasoning_effort: high; }
+-            .codex  { model: gpt-5.2-codex;  reasoning_effort: high; }
++            .codex  { model: gpt-5.3-codex;  reasoning_effort: high; }
+             .merge  { model: claude-opus-4-6; reasoning_effort: high; }
+         "
+     ]
+diff --git a/docs/public/reference/dot-language.mdx b/docs/public/reference/dot-language.mdx
+index 74a366632..1c56cfa3e 100644
+--- a/docs/public/reference/dot-language.mdx
++++ b/docs/public/reference/dot-language.mdx
+@@ -48,7 +48,7 @@ Attribute values in `[key=value]` blocks can be:
+ | Float | Digits with decimal point | `3.14`, `-0.5`, `.5` |
+ | Boolean | Keywords | `true`, `false` |
+ | Duration | Integer with unit suffix | `250ms`, `30s`, `15m`, `2h`, `1d` |
+-| Bare string | Identifier with hyphens/dots | `claude-sonnet-4-5`, `gpt-5.2-codex` |
++| Bare string | Identifier with hyphens/dots | `claude-sonnet-4-5`, `gpt-5.3-codex` |
+ | Identifier | Bare word | `LR`, `box`, `Mdiamond` |
+ 
+ **Escape sequences** in quoted strings: `\"`, `\\`, `\n`, `\t`.
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/model.rs b/lib/crates/fabro-cli/tests/it/cmd/model.rs
+index a94e8b243..5dcf9b7b5 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/model.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/model.rs
+@@ -120,7 +120,6 @@ fn list_query_aliases() {
+     exit_code: 0
+     ----- stdout -----
+     MODEL                PROVIDER  ALIASES      CONTEXT          COST       SPEED 
+-     gpt-5.2-codex        openai                      1m  $1.8 / $14.0   100 tok/s 
+      gpt-5.3-codex        openai    codex             1m  $1.8 / $14.0   100 tok/s 
+      gpt-5.3-codex-spark  openai    codex-spark     131k         - / -  1000 tok/s
+     ----- stderr -----
+diff --git a/lib/crates/fabro-model/src/catalog/providers/openai.toml b/lib/crates/fabro-model/src/catalog/providers/openai.toml
+index 3cdba296e..d9530972f 100644
+--- a/lib/crates/fabro-model/src/catalog/providers/openai.toml
++++ b/lib/crates/fabro-model/src/catalog/providers/openai.toml
+@@ -33,55 +33,6 @@ input_cost_per_mtok = 1.75
+ output_cost_per_mtok = 14.0
+ cache_input_cost_per_mtok = 0.175
+ 
+-[models."gpt-5-mini"]
+-provider = "openai"
+-api_id = "gpt-5-mini"
+-display_name = "GPT-5 Mini"
+-family = "gpt-5"
+-training = "2025-08-31"
+-knowledge_cutoff = "April 2025"
+-estimated_output_tps = 70
+-aliases = ["gpt5-mini"]
+-
+-[models."gpt-5-mini".limits]
+-context_window = 1047576
+-max_output = 128000
+-
+-[models."gpt-5-mini".features]
+-tools = true
+-vision = true
+-reasoning = true
+-reasoning_effort = "levels"
+-
+-[models."gpt-5-mini".costs]
+-input_cost_per_mtok = 0.25
+-output_cost_per_mtok = 2.0
+-cache_input_cost_per_mtok = 0.025
+-
+-[models."gpt-5.2-codex"]
+-provider = "openai"
+-api_id = "gpt-5.2-codex"
+-display_name = "GPT-5.2 Codex"
+-family = "gpt-5"
+-training = "2025-08-31"
+-knowledge_cutoff = "April 2025"
+-estimated_output_tps = 100
+-
+-[models."gpt-5.2-codex".limits]
+-context_window = 1047576
+-max_output = 128000
+-
+-[models."gpt-5.2-codex".features]
+-tools = true
+-vision = true
+-reasoning = true
+-reasoning_effort = "levels"
+-
+-[models."gpt-5.2-codex".costs]
+-input_cost_per_mtok = 1.75
+-output_cost_per_mtok = 14.0
+-cache_input_cost_per_mtok = 0.175
+-
+ [models."gpt-5.3-codex"]
+ provider = "openai"
+ api_id = "gpt-5.3-codex"
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index e1c8883ed..6488ab364 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -5280,7 +5280,6 @@ async fn list_models_filters_by_query_across_aliases() {
+         .map(|model| model["id"].as_str().unwrap().to_string())
+         .collect::<Vec<_>>();
+     assert_eq!(model_ids, vec![
+-        "gpt-5.2-codex".to_string(),
+         "gpt-5.3-codex".to_string(),
+         "gpt-5.3-codex-spark".to_string()
+     ]);
+diff --git a/test/docs/examples/definition-of-done/spec-dod-multimodel.fabro b/test/docs/examples/definition-of-done/spec-dod-multimodel.fabro
+index 0b7f30e24..a4c88659a 100644
+--- a/test/docs/examples/definition-of-done/spec-dod-multimodel.fabro
++++ b/test/docs/examples/definition-of-done/spec-dod-multimodel.fabro
+@@ -8,7 +8,7 @@ digraph SpecDoDMultiModel {
+             * { model: claude-opus-4-6;}
+             .opus   { model: claude-opus-4-6;reasoning_effort: high; }
+             .gpt    { model: gpt-5.2;        reasoning_effort: high; }
+-            .codex  { model: gpt-5.2-codex;  reasoning_effort: high; }
++            .codex  { model: gpt-5.3-codex;  reasoning_effort: high; }
+             .merge  { model: claude-opus-4-6; reasoning_effort: high; }
+         "
+     ]
