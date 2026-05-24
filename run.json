@@ -492,7 +492,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-24T17:14:13.435566Z",
-  "last_event_at": "2026-05-24T17:50:23.240366Z",
+  "last_event_at": "2026-05-24T17:58:24.157Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -1212,9 +1212,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 1533,
       "checkpoint": {
-        "timestamp": "2026-05-24T17:58:20.225545Z",
+        "timestamp": "2026-05-24T17:58:24.156665Z",
         "current_node": "verify",
         "completed_nodes": [
           "start",
@@ -1228,41 +1228,113 @@
         ],
         "node_retries": {},
         "context_values": {
-          "failure_signature": "",
-          "internal.retry_count.preflight_lint": 0,
-          "thread.implement.current_node": "simplify_opus",
-          "thread.start.current_node": "toolchain",
-          "internal.work_dir": "/home/daytona/workspace/fabro",
-          "internal.retry_count.simplify_gpt": 0,
-          "current_node": "verify",
-          "internal.node_visit_count": 1,
           "thread.preflight_lint.current_node": "implement",
+          "internal.retry_count.simplify_opus": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
           "response.simplify_opus": "Compiles clean.\n\n## Summary\n\nI ran three parallel review agents over the diff. Aggregated findings:\n\n**Code Reuse (Agent 1):**\n- MED: `pair_test_target()` duplicated an existing inline `PairTarget` literal at `tests.rs:2205` — **fixed**.\n- LOW: `test_user_principal()` could live in `test_support.rs`, recurring `(Method, path)` rejection loop could share a helper, hard-coded pair-id literal — all pre-existing patterns. Skipped.\n\n**Code Quality (Agent 2):**\n- Verified clean: no stale references to old names (`RequiredRunToolActor`, `RequireRunScopedOrRunTools`, etc.), tidy imports in `pair.rs`, no leftover `Principal::User(auth.0)` constructions.\n- MED: Double Path extraction in `pair.rs` handlers (`RequireRunManagementTarget` + `Path<(String, String)>`) — pre-existing convention also used by `submit_answer`. Refactoring requires a new extractor variant; not introduced by this diff. Skipped.\n- LOW: `Required…` vs `Require…` naming asymmetry is intentional and pre-existing. Skipped.\n\n**Efficiency (Agent 3):**\n- LOW: Same double Path extraction in pair/answer handlers — one extra serde deserialization per request on pair endpoints, cost is small. Skipped.\n- Everything else (auth check shape, LazyLock, trait defaults) is equivalent to or cleaner than before.\n\n**Fix applied:** Deduplicated the `PairTarget` literal at `tests.rs:2205` to call the new `pair_test_target()` helper. `cargo check -p fabro-server --tests` passes.\n\nThe remaining flagged items are pre-existing patterns rather than regressions introduced by this change.",
-          "thread.simplify_gpt.current_node": "verify",
+          "thread.start.current_node": "toolchain",
+          "internal.retry_count.simplify_gpt": 0,
+          "internal.retry_count.verify": 0,
+          "internal.thread_id": "simplify_gpt",
+          "graph.rankdir": "LR",
+          "internal.retry_count.preflight_compile": 0,
           "internal.retry_count.start": 0,
-          "command.output": "blob://sha256/cac568c1a9494d552af4eab122942a6384a46a00fa07cf9ec4db9885f4fce359",
-          "failure_class": "",
-          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
-          "thread.toolchain.current_node": "preflight_compile",
+          "outcome": "succeeded",
           "response.simplify_gpt": "Reviewed the branch against `origin/main`, launched the three requested parallel review agents, and did a direct focused pass over the changed auth/tool/pair code.\n\nFound and fixed one small code-reuse cleanup:\n\n- Consolidated repeated `fabro_run_pair is not available` default backend error construction in `lib/crates/fabro-tool/src/common.rs` into `pair_tool_unavailable_error()`.\n\nVerification run:\n\n- `cargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli` — passed before the cleanup.\n- `cargo nextest run -p fabro-tool` — passed after the cleanup.\n- `cargo +nightly-2026-04-14 fmt --check --all` — passed.\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-tool --all-targets -- -D warnings` — passed.\n\nOnly remaining working-tree change is the cleanup in `lib/crates/fabro-tool/src/common.rs`.",
-          "internal.run_id": "01KSDFNA5W8QN6Q9GJ078DDWA3",
-          "internal.retry_count.toolchain": 0,
-          "last_response": "Reviewed the branch against `origin/main`, launched the three requested parallel review agents, and did a direct focused pass over the changed auth/tool/pair code.\n\nFound and fixed one small code-reus",
+          "internal.node_visit_count": 1,
+          "failure_class": "",
+          "command.output": "blob://sha256/cac568c1a9494d552af4eab122942a6384a46a00fa07cf9ec4db9885f4fce359",
+          "thread.simplify_opus.current_node": "simplify_gpt",
+          "thread.toolchain.current_node": "preflight_compile",
+          "failure_signature": "",
+          "thread.implement.current_node": "simplify_opus",
           "graph.goal": "---\ntitle: \"feat: Give fabro_tools runs MCP tool parity\"\ntype: feat\nstatus: active\ndate: 2026-05-24\n---\n\n# feat: Give fabro_tools runs MCP tool parity\n\n## Overview\n\nWhen a workflow run opts in with `[run.agent] fabro_tools = true`, its agents\nshould see the same Fabro run-management tool catalog that a human MCP client\nsees: create, search, get, interact, gather, events, and pair.\n\nThis is MCP tool parity, not full user API parity. The implementation should\nsimplify the current permission model by replacing the ad hoc \"run tools\"\nextractor names with explicit run-management actor extractors. User/admin HTTP\nsurfaces that are not backed by Fabro MCP tools remain user-only.\n\nOne intentional exception to exact parity remains: workflow-agent\n`fabro_run_create` must keep today's forced-child behavior. Runs created from a\nworkflow agent are always parented to the current run.\n\n## Problem Frame\n\nToday there are two similar but different tool catalogs:\n\n- Human MCP clients get seven tools from `fabro-mcp-server`, including\n  `fabro_run_pair`.\n- Workflow agents with `fabro_tools = true` get six shared tool definitions\n  from `fabro_tool::tool_definitions()`, excluding `fabro_run_pair`.\n\nThe auth model also leaks implementation detail into handler names:\n`RequiredRunToolActor` and `RequireRunScopedOrRunTools` describe a historical\nscope shape rather than the product capability. The behavior we want is simpler:\nan authenticated human or an opted-in run-tools worker may perform\nrun-management actions exposed through the Fabro MCP tool surface.\n\n## Requirements\n\n- R1. Workflow agents with `fabro_tools = true` register `fabro_run_pair` in\n  addition to the existing six Fabro run-management tools.\n- R2. Workflow-agent `fabro_run_create` still forces the current run as parent\n  and rejects conflicting explicit `parent_id` values.\n- R3. The external Fabro MCP server tool list remains unchanged.\n- R4. Pair HTTP routes accept run-management actors, not only users, so\n  `fabro_run_pair` can work from workflow-agent tools.\n- R5. User-only APIs remain user-only. Do not make `RequiredUser` accept worker\n  principals.\n- R6. Permission code uses names that match the product concept:\n  run-management actor / target, not \"run scoped or run tools\".\n- R7. Ask Fabro remains read-only and run-scoped with only `fabro_run_get` and\n  `fabro_run_events`.\n\n## Scope Boundaries\n\nIn scope:\n\n- Shared Fabro tool catalog and workflow-agent tool registration.\n- `fabro_run_pair` dispatcher integration in `fabro-workflow`.\n- Server auth extractors for MCP-backed run-management endpoints.\n- Pair route auth migration to the new run-management extractor.\n- Docs updates for agent/MCP parity and the create-parent exception.\n\nOut of scope:\n\n- Treating worker tokens as generic user tokens.\n- Granting workers access to secrets, server/system settings, billing, models,\n  sandbox management, logs/files/artifacts, arbitrary event append, or other\n  user/admin HTTP APIs.\n- Changing Ask Fabro's read-only tool policy.\n- Changing the worker JWT scope string or minting flow beyond names/tests needed\n  for the run-management extractor cleanup.\n- Removing the forced-child behavior for workflow-agent `fabro_run_create`.\n\n## Technical Design\n\n### Shared Tool Catalog\n\n`lib/crates/fabro-tool/src/common.rs` should include\n`FABRO_RUN_PAIR_TOOL_NAME` in `TOOL_DEFINITIONS`, using\n`FabroRunPairParams` and the same description already used by\n`fabro-mcp-server`.\n\nThis makes `register_fabro_run_tools()` in `fabro-workflow` register all seven\ntools for workflow agents. `register_named_fabro_run_tools()` continues to\nfilter by name, so Ask Fabro remains restricted to its existing read-only list.\n\n### Workflow Agent Execution\n\n`lib/crates/fabro-workflow/src/handler/llm/api.rs` should add a\n`FABRO_RUN_PAIR_TOOL_NAME` match arm in `execute_fabro_run_tool`:\n\n- Parse `FabroRunPairParams`.\n- Validate with `ValidatedPairRun`.\n- Call `fabro_tool::pair_run`.\n- Render the normal summary and structured result.\n\nDo not change the `fabro_run_create` branch except for test updates caused by\nthe catalog growing. It must still call `ensure_current_run_parent` and pass\n`CreateRunOptions { forced_parent_id: Some(current_run_id) }`.\n\n### Run-Management Auth Model\n\nIn `lib/crates/fabro-server/src/principal_middleware.rs`, replace the current\nrun-tools-specific extractor names with product-level names:\n\n- `RequiredRunManagementActor(pub Principal)`\n- `RequireRunManagementTarget(pub RunId, pub Principal)`\n\nRecommended semantics:\n\n- `RequiredRunManagementActor` accepts a user principal or a worker principal\n  whose token has `agent:run_tools`. It rejects base worker tokens.\n- `RequireRunManagementTarget` accepts:\n  - any user principal,\n  - a same-run base worker principal,\n  - any worker principal with `agent:run_tools`, including cross-run targets.\n- Non-authenticated and invalid-token behavior should preserve the current\n  auth rejection status/code behavior.\n\nUse these names in route handlers that are directly backing the Fabro MCP\nrun-management tools. Remove or stop exporting the old\n`RequiredRunToolActor` and `RequireRunScopedOrRunTools` names once callers are\nmigrated.\n\n### Route Migrations\n\nMigrate these route groups to the new run-management actor names without\nchanging behavior:\n\n- Run collection/resolve/create endpoints used by `fabro_run_create` and\n  `fabro_run_search`.\n- Run parent link/unlink, run status, run state, questions, answer, start,\n  cancel, archive, unarchive, steer/message, and event-list endpoints used by\n  `fabro_run_get`, `fabro_run_interact`, and `fabro_run_events`.\n\nMigrate pair routes in `lib/crates/fabro-server/src/server/handler/pair.rs`:\n\n- `get_pair_status`, `get_pair`, and `get_transcript` use\n  `RequireRunManagementTarget`.\n- `start_pair`, `send_pair_message`, and `end_pair` also use\n  `RequireRunManagementTarget` and pass the returned `Principal` through to the\n  worker control transport.\n- Do not construct `Principal::User(auth.0)` in pair handlers after migration.\n\nDo not migrate endpoints whose behavior is not part of the Fabro MCP tool\nsurface. In particular, leave approve, deny, pause, unpause, retry, rewind,\nfork, delete, batch actions, timeline, settings, logs, files, artifacts,\nsecrets, server/system, models, sandbox, billing, and graph rendering on their\nexisting user or run-scoped auth rules unless they are already needed by the\ncurrent tool backend.\n\n### Documentation\n\nUpdate public docs where `fabro_tools` is described:\n\n- State that opted-in workflow agents get the same Fabro run-management MCP tool\n  catalog as human MCP clients.\n- Explicitly document the workflow-agent create exception: created runs are\n  children of the current run.\n- Keep the distinction from normal agent permissions and external MCP server\n  configuration.\n\n## Test Plan\n\n### `fabro-tool`\n\n- Update the shared tool-definition test coverage to expect seven tools,\n  including `fabro_run_pair`.\n- Assert the pair tool schema includes the expected action enum and stage/pair\n  fields.\n\n### `fabro-workflow`\n\n- Update `agent_run_tools_register_exact_shared_definitions` to expect\n  `fabro_run_pair`.\n- Add executor coverage for `fabro_run_pair` proving it dispatches to the\n  shared backend and renders the summary/result.\n- Keep or add coverage proving workflow-agent create still injects the current\n  run as parent and still rejects conflicting `parent_id`.\n- Confirm `register_named_fabro_run_tools` still registers only requested names\n  so Ask Fabro is unaffected.\n\n### `fabro-server`\n\n- Add/rename principal middleware tests:\n  - run-management actor accepts users and `agent:run_tools` workers.\n  - run-management actor rejects base worker tokens.\n  - run-management target accepts same-run base workers.\n  - run-management target accepts cross-run `agent:run_tools` workers.\n  - run-management target rejects cross-run base workers.\n- Extend existing run-tool worker API tests to cover the migrated extractor\n  names without broadening non-tool surfaces.\n- Add pair route auth tests:\n  - a run-tools worker can call pair status/transcript endpoints for another\n    run.\n  - a run-tools worker reaches pair command domain logic, such as\n    `worker_control_unavailable`, rather than failing auth.\n  - a cross-run base worker remains forbidden.\n- Add a negative test that a run-tools worker still cannot call at least one\n  user-only non-MCP endpoint, such as approve/deny or timeline.\n\n### `fabro-cli` / MCP Integration\n\n- Existing `stdio_server_initializes_and_lists_run_tools` should remain green\n  and continue to validate the external human MCP catalog.\n- Add or update integration coverage only if the shared catalog change affects\n  agent-visible tool listing snapshots or MCP schema parity tests.\n\n### Commands\n\nTargeted verification:\n\n```bash\ncargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli\n```\n\nFull verification before merge if the route migration touches broad auth code:\n\n```bash\ncargo nextest run --workspace\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\n## Implementation Notes\n\n- Prefer renaming and consolidating auth extractors over adding another layer of\n  compatibility aliases. The goal is to make handler signatures read like the\n  product policy.\n- Keep actor provenance as `Principal::Worker { run_id: <originating run> }`\n  when a workflow agent acts through `fabro_tools`; do not forge a user\n  principal.\n- Pair route behavior may return domain errors when no live worker control\n  channel exists. Tests should assert auth acceptance by expecting those domain\n  errors, not by requiring a fully active pair session unless a fixture already\n  supports it.\n- The external MCP server already registers `fabro_run_pair` directly. Avoid\n  duplicating tool catalogs there; use the shared `fabro-tool` definitions only\n  where workflow-agent registration needs them.\n",
+          "internal.run_id": "01KSDFNA5W8QN6Q9GJ078DDWA3",
           "response.implement": "Implemented MCP tool parity for `[run.agent] fabro_tools = true`.\n\nSummary:\n- Added `fabro_run_pair` to the shared `fabro-tool` catalog with schema/test coverage.\n- Added workflow-agent dispatcher support for `fabro_run_pair`.\n- Kept workflow-agent `fabro_run_create` forced-child behavior and conflict rejection.\n- Replaced old run-tools extractor names with:\n  - `RequiredRunManagementActor`\n  - `RequireRunManagementTarget`\n- Migrated MCP-backed run-management routes to the new extractors.\n- Migrated pair routes so run-tools workers can call status/start/message/end/transcript while preserving worker provenance.\n- Kept user-only APIs user-only, including negative coverage for run-tools workers.\n- Confirmed Ask Fabro remains read-only with only `fabro_run_get` and `fabro_run_events`.\n- Updated public docs for `fabro_tools` parity and the create-parent exception.\n\nTDD/verification:\n- Confirmed red first for new catalog/auth coverage.\n- `cargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli` ✅\n- `cargo +nightly-2026-04-14 fmt --check --all` ✅\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` ✅\n- `cargo nextest run --workspace` ✅ (6343 passed, 181 skipped)",
           "internal.fidelity": "compact",
-          "outcome": "succeeded",
-          "thread.simplify_opus.current_node": "simplify_gpt",
           "internal.retry_count.implement": 0,
-          "graph.rankdir": "LR",
-          "internal.thread_id": "simplify_gpt",
           "last_stage": "simplify_gpt",
-          "internal.retry_count.preflight_compile": 0,
-          "internal.retry_count.verify": 0,
           "thread.preflight_compile.current_node": "preflight_lint",
-          "internal.retry_count.simplify_opus": 0
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "thread.simplify_gpt.current_node": "verify",
+          "internal.retry_count.toolchain": 0,
+          "last_response": "Reviewed the branch against `origin/main`, launched the three requested parallel review agents, and did a direct focused pass over the changed auth/tool/pair code.\n\nFound and fixed one small code-reus",
+          "current_node": "verify",
+          "internal.retry_count.preflight_lint": 0
         },
         "node_outcomes": {
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "simplify_gpt": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "Reviewed the branch against `origin/main`, launched the three requested parallel review agents, and did a direct focused pass over the changed auth/tool/pair code.\n\nFound and fixed one small code-reus",
+              "last_stage": "simplify_gpt",
+              "response.simplify_gpt": "Reviewed the branch against `origin/main`, launched the three requested parallel review agents, and did a direct focused pass over the changed auth/tool/pair code.\n\nFound and fixed one small code-reuse cleanup:\n\n- Consolidated repeated `fabro_run_pair is not available` default backend error construction in `lib/crates/fabro-tool/src/common.rs` into `pair_tool_unavailable_error()`.\n\nVerification run:\n\n- `cargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli` — passed before the cleanup.\n- `cargo nextest run -p fabro-tool` — passed after the cleanup.\n- `cargo +nightly-2026-04-14 fmt --check --all` — passed.\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-tool --all-targets -- -D warnings` — passed.\n\nOnly remaining working-tree change is the cleanup in `lib/crates/fabro-tool/src/common.rs`."
+            },
+            "notes": "Stage completed: simplify_gpt",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 939754,
+                    "output_tokens": 3162,
+                    "reasoning_tokens": 1038,
+                    "cache_read_tokens": 409600,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 5029570
+            }
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "implement",
+              "last_response": "Implemented MCP tool parity for `[run.agent] fabro_tools = true`.\n\nSummary:\n- Added `fabro_run_pair` to the shared `fabro-tool` catalog with schema/test coverage.\n- Added workflow-agent dispatcher sup",
+              "response.implement": "Implemented MCP tool parity for `[run.agent] fabro_tools = true`.\n\nSummary:\n- Added `fabro_run_pair` to the shared `fabro-tool` catalog with schema/test coverage.\n- Added workflow-agent dispatcher support for `fabro_run_pair`.\n- Kept workflow-agent `fabro_run_create` forced-child behavior and conflict rejection.\n- Replaced old run-tools extractor names with:\n  - `RequiredRunManagementActor`\n  - `RequireRunManagementTarget`\n- Migrated MCP-backed run-management routes to the new extractors.\n- Migrated pair routes so run-tools workers can call status/start/message/end/transcript while preserving worker provenance.\n- Kept user-only APIs user-only, including negative coverage for run-tools workers.\n- Confirmed Ask Fabro remains read-only with only `fabro_run_get` and `fabro_run_events`.\n- Updated public docs for `fabro_tools` parity and the create-parent exception.\n\nTDD/verification:\n- Confirmed red first for new catalog/auth coverage.\n- `cargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli` ✅\n- `cargo +nightly-2026-04-14 fmt --check --all` ✅\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` ✅\n- `cargo nextest run --workspace` ✅ (6343 passed, 181 skipped)"
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 5393488,
+                    "output_tokens": 17347,
+                    "reasoning_tokens": 8311,
+                    "cache_read_tokens": 10987008,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 33230684
+            }
+          },
           "simplify_opus": {
             "status": "succeeded",
             "context_updates": {
@@ -1298,54 +1370,12 @@
               "/home/daytona/workspace/fabro/lib/crates/fabro-server/src/server/tests.rs"
             ]
           },
-          "preflight_compile": {
-            "status": "succeeded",
-            "context_updates": {
-              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
-            },
-            "notes": "Script completed: cargo check -q --workspace 2>&1",
-            "usage": null
-          },
           "verify": {
             "status": "succeeded",
             "context_updates": {
               "command.output": "blob://sha256/cac568c1a9494d552af4eab122942a6384a46a00fa07cf9ec4db9885f4fce359"
             },
             "notes": "Script completed: git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
-            "usage": null
-          },
-          "implement": {
-            "status": "succeeded",
-            "context_updates": {
-              "last_stage": "implement",
-              "last_response": "Implemented MCP tool parity for `[run.agent] fabro_tools = true`.\n\nSummary:\n- Added `fabro_run_pair` to the shared `fabro-tool` catalog with schema/test coverage.\n- Added workflow-agent dispatcher sup",
-              "response.implement": "Implemented MCP tool parity for `[run.agent] fabro_tools = true`.\n\nSummary:\n- Added `fabro_run_pair` to the shared `fabro-tool` catalog with schema/test coverage.\n- Added workflow-agent dispatcher support for `fabro_run_pair`.\n- Kept workflow-agent `fabro_run_create` forced-child behavior and conflict rejection.\n- Replaced old run-tools extractor names with:\n  - `RequiredRunManagementActor`\n  - `RequireRunManagementTarget`\n- Migrated MCP-backed run-management routes to the new extractors.\n- Migrated pair routes so run-tools workers can call status/start/message/end/transcript while preserving worker provenance.\n- Kept user-only APIs user-only, including negative coverage for run-tools workers.\n- Confirmed Ask Fabro remains read-only with only `fabro_run_get` and `fabro_run_events`.\n- Updated public docs for `fabro_tools` parity and the create-parent exception.\n\nTDD/verification:\n- Confirmed red first for new catalog/auth coverage.\n- `cargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli` ✅\n- `cargo +nightly-2026-04-14 fmt --check --all` ✅\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` ✅\n- `cargo nextest run --workspace` ✅ (6343 passed, 181 skipped)"
-            },
-            "notes": "Stage completed: implement",
-            "usage": {
-              "input": {
-                "usage": {
-                  "model": {
-                    "provider": "openai",
-                    "model_id": "gpt-5.5"
-                  },
-                  "tokens": {
-                    "input_tokens": 5393488,
-                    "output_tokens": 17347,
-                    "reasoning_tokens": 8311,
-                    "cache_read_tokens": 10987008,
-                    "cache_write_tokens": 0
-                  }
-                },
-                "facts": {
-                  "algorithm": "openai"
-                }
-              },
-              "total_usd_micros": 33230684
-            }
-          },
-          "start": {
-            "status": "succeeded",
             "usage": null
           },
           "toolchain": {
@@ -1355,36 +1385,6 @@
             },
             "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
             "usage": null
-          },
-          "simplify_gpt": {
-            "status": "succeeded",
-            "context_updates": {
-              "last_response": "Reviewed the branch against `origin/main`, launched the three requested parallel review agents, and did a direct focused pass over the changed auth/tool/pair code.\n\nFound and fixed one small code-reus",
-              "last_stage": "simplify_gpt",
-              "response.simplify_gpt": "Reviewed the branch against `origin/main`, launched the three requested parallel review agents, and did a direct focused pass over the changed auth/tool/pair code.\n\nFound and fixed one small code-reuse cleanup:\n\n- Consolidated repeated `fabro_run_pair is not available` default backend error construction in `lib/crates/fabro-tool/src/common.rs` into `pair_tool_unavailable_error()`.\n\nVerification run:\n\n- `cargo nextest run -p fabro-tool -p fabro-workflow -p fabro-server -p fabro-cli` — passed before the cleanup.\n- `cargo nextest run -p fabro-tool` — passed after the cleanup.\n- `cargo +nightly-2026-04-14 fmt --check --all` — passed.\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-tool --all-targets -- -D warnings` — passed.\n\nOnly remaining working-tree change is the cleanup in `lib/crates/fabro-tool/src/common.rs`."
-            },
-            "notes": "Stage completed: simplify_gpt",
-            "usage": {
-              "input": {
-                "usage": {
-                  "model": {
-                    "provider": "openai",
-                    "model_id": "gpt-5.5"
-                  },
-                  "tokens": {
-                    "input_tokens": 939754,
-                    "output_tokens": 3162,
-                    "reasoning_tokens": 1038,
-                    "cache_read_tokens": 409600,
-                    "cache_write_tokens": 0
-                  }
-                },
-                "facts": {
-                  "algorithm": "openai"
-                }
-              },
-              "total_usd_micros": 5029570
-            }
           },
           "preflight_lint": {
             "status": "succeeded",
@@ -1396,21 +1396,143 @@
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "a8a0300c16d1d08257ea36e25fb422dea7423ec1",
         "node_visits": {
-          "preflight_compile": 1,
-          "implement": 1,
-          "simplify_gpt": 1,
           "verify": 1,
           "preflight_lint": 1,
-          "toolchain": 1,
+          "implement": 1,
+          "simplify_gpt": 1,
           "simplify_opus": 1,
-          "start": 1
+          "toolchain": 1,
+          "start": 1,
+          "preflight_compile": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "patch": "diff --git a/apps/fabro-web/app/components/stage-insights-sidebar.tsx b/apps/fabro-web/app/components/stage-insights-sidebar.tsx\nindex 71ffa5094..d718f0828 100644\n--- a/apps/fabro-web/app/components/stage-insights-sidebar.tsx\n+++ b/apps/fabro-web/app/components/stage-insights-sidebar.tsx\n@@ -246,22 +246,22 @@ function TodoSection({ todos }: { todos: TodoListProjection | null }) {\n }\n \n function TodoRow({ todo }: { todo: TodoProjection }) {\n-  const { Icon, color, srLabel } = todoStatusVisual(todo.status);\n+  const { Icon, color, srLabel, spin } = todoStatusVisual(todo.status);\n   const muted = todo.status === TodoStatus.COMPLETED;\n   return (\n     <li className=\"flex items-start gap-1.5\">\n-      <Icon className={`mt-0.5 size-3.5 shrink-0 ${color}`} aria-label={srLabel} />\n+      <Icon className={`mt-0.5 size-3.5 shrink-0 ${color} ${spin ? \"animate-spin\" : \"\"}`} aria-label={srLabel} />\n       <span className={`min-w-0 text-xs ${muted ? \"text-fg-muted line-through\" : \"text-fg-2\"}`}>{todo.subject}</span>\n     </li>\n   );\n }\n \n-function todoStatusVisual(status: TodoStatus): { Icon: IconType; color: string; srLabel: string } {\n+function todoStatusVisual(status: TodoStatus): { Icon: IconType; color: string; srLabel: string; spin?: boolean } {\n   switch (status) {\n     case TodoStatus.COMPLETED:\n       return { Icon: CheckCircleIcon, color: \"text-mint\", srLabel: \"Completed\" };\n     case TodoStatus.IN_PROGRESS:\n-      return { Icon: ArrowPathIcon, color: \"text-teal-500\", srLabel: \"In progress\" };\n+      return { Icon: ArrowPathIcon, color: \"text-teal-500\", srLabel: \"In progress\", spin: true };\n     case TodoStatus.DELETED:\n       return { Icon: XCircleIcon, color: \"text-fg-muted\", srLabel: \"Deleted\" };\n     case TodoStatus.PENDING:\ndiff --git a/apps/fabro-web/app/routes/runs.preferences.test.tsx b/apps/fabro-web/app/routes/runs.preferences.test.tsx\nindex 003e44ae1..d3ad1cc1f 100644\n--- a/apps/fabro-web/app/routes/runs.preferences.test.tsx\n+++ b/apps/fabro-web/app/routes/runs.preferences.test.tsx\n@@ -244,6 +244,28 @@ describe(\"Runs workspace preference restoration\", () => {\n     expect(JSON.parse(storage.getItem(RUNS_PREFERENCES_STORAGE_KEY) ?? \"{}\").view).toBe(\"columns\");\n   });\n \n+  test(\"clicking a sort header in list view updates the URL while preserving other params\", async () => {\n+    const { renderer, router } = await renderRuns(\"/runs?view=list&archived=1\");\n+\n+    await act(async () => {\n+      compositeByName(renderer, \"SortHeader\", (props) => props.sortKey === \"status\").props.onClick(\"status\");\n+    });\n+\n+    expect(router.state.location.search).toContain(\"sort=status\");\n+    expect(router.state.location.search).toContain(\"view=list\");\n+    expect(router.state.location.search).toContain(\"archived=1\");\n+\n+    // Clicking the same header again toggles direction to ascending.\n+    await act(async () => {\n+      compositeByName(renderer, \"SortHeader\", (props) => props.sortKey === \"status\").props.onClick(\"status\");\n+    });\n+\n+    expect(router.state.location.search).toContain(\"sort=status\");\n+    expect(router.state.location.search).toContain(\"direction=asc\");\n+    expect(router.state.location.search).toContain(\"view=list\");\n+    expect(router.state.location.search).toContain(\"archived=1\");\n+  });\n+\n   test(\"changing filters and hidden columns persists them\", async () => {\n     const { renderer } = await renderRuns(\"/runs?view=list\");\n \ndiff --git a/apps/fabro-web/app/routes/runs.test.tsx b/apps/fabro-web/app/routes/runs.test.tsx\nindex 85e9a4dd0..0cea3dca4 100644\n--- a/apps/fabro-web/app/routes/runs.test.tsx\n+++ b/apps/fabro-web/app/routes/runs.test.tsx\n@@ -5,7 +5,7 @@ import {\n   buildBoardColumns,\n   loadStoredRunsWorkspaceSearchParams,\n   placeArchivedColumnLast,\n-  persistRunsWorkspaceSearchParams,\n+  persistRunsWorkspacePreferences,\n   RUNS_PREFERENCES_STORAGE_KEY,\n   runsQuickStartCommands,\n   shouldRefreshBoardForEvent,\n@@ -279,11 +279,24 @@ describe(\"runs route workspace preferences\", () => {\n \n   test(\"persisting preferences omits page and stores canonical values\", () => {\n     const storage = new MemoryStorage();\n-    const params = new URLSearchParams(\n-      \"view=columns&search=abc&created=1d&sort=made-up&direction=asc&size=100&page=9&hide=unknown,workflow,repo\",\n-    );\n \n-    persistRunsWorkspaceSearchParams(params, storage);\n+    persistRunsWorkspacePreferences(\n+      {\n+        version:   1,\n+        view:      \"columns\",\n+        search:    \"abc\",\n+        repo:      \"all\",\n+        workflow:  \"all\",\n+        created:   \"1d\",\n+        archived:  false,\n+        sort:      \"created_at\",\n+        direction: \"asc\",\n+        size:      100,\n+        hide:      \"repo,workflow\",\n+        page:      9,\n+      },\n+      storage,\n+    );\n \n     expect(JSON.parse(storage.getItem(RUNS_PREFERENCES_STORAGE_KEY) ?? \"{}\")).toEqual({\n       version:   1,\ndiff --git a/apps/fabro-web/app/routes/runs.tsx b/apps/fabro-web/app/routes/runs.tsx\nindex 7d5878b86..9f6a2aec3 100644\n--- a/apps/fabro-web/app/routes/runs.tsx\n+++ b/apps/fabro-web/app/routes/runs.tsx\n@@ -693,6 +693,8 @@ interface RunsWorkspacePreferences {\n   direction: ListRunsDirectionEnum;\n   size: number;\n   hide: string;\n+  // URL-only: never persisted to localStorage.\n+  page: number;\n }\n \n function defaultRunsWorkspacePreferences(): RunsWorkspacePreferences {\n@@ -708,6 +710,7 @@ function defaultRunsWorkspacePreferences(): RunsWorkspacePreferences {\n     direction: \"desc\",\n     size:      DEFAULT_LIST_PAGE_SIZE,\n     hide:      \"\",\n+    page:      1,\n   };\n }\n \n@@ -754,6 +757,7 @@ function normalizeStoredRunsWorkspacePreferences(value: unknown): RunsWorkspaceP\n     direction: parseDirection(stringValue(record.direction)),\n     size:      parsePageSize(typeof size === \"number\" || typeof size === \"string\" ? String(size) : null),\n     hide:      serializeHiddenColumns(hiddenColumns) ?? \"\",\n+    page:      1,\n   };\n }\n \n@@ -770,6 +774,7 @@ function runsWorkspacePreferencesFromSearchParams(searchParams: URLSearchParams)\n     direction: parseDirection(searchParams.get(\"direction\")),\n     size:      parsePageSize(searchParams.get(\"size\")),\n     hide:      serializeHiddenColumns(parseHiddenColumns(searchParams.get(\"hide\"))) ?? \"\",\n+    page:      parsePage(searchParams.get(\"page\")),\n   };\n }\n \n@@ -785,6 +790,7 @@ function runsWorkspacePreferencesToSearchParams(preferences: RunsWorkspacePrefer\n   if (preferences.direction === \"asc\") params.set(\"direction\", \"asc\");\n   if (preferences.size !== DEFAULT_LIST_PAGE_SIZE) params.set(\"size\", String(preferences.size));\n   if (preferences.hide !== \"\") params.set(\"hide\", preferences.hide);\n+  if (preferences.page > 1) params.set(\"page\", String(preferences.page));\n   return params;\n }\n \n@@ -821,16 +827,15 @@ export function resolveRunsWorkspaceSearchParams(\n   return stored.toString() === \"\" ? urlSearchParams : stored;\n }\n \n-export function persistRunsWorkspaceSearchParams(\n-  searchParams: URLSearchParams,\n+export function persistRunsWorkspacePreferences(\n+  preferences: RunsWorkspacePreferences,\n   storage: Pick<Storage, \"setItem\"> | null = runsPreferencesStorage(),\n ) {\n   if (storage == null) return;\n+  // `page` is URL-only ephemeral view state; strip it before persisting.\n+  const { page: _page, ...storable } = preferences;\n   try {\n-    storage.setItem(\n-      RUNS_PREFERENCES_STORAGE_KEY,\n-      JSON.stringify(runsWorkspacePreferencesFromSearchParams(searchParams)),\n-    );\n+    storage.setItem(RUNS_PREFERENCES_STORAGE_KEY, JSON.stringify(storable));\n   } catch {\n     // localStorage persistence is best effort only.\n   }\n@@ -1821,55 +1826,59 @@ export default function Runs() {\n     [searchParams],\n   );\n \n-  const updateParam = useCallback(\n-    (key: string, value: string | null) => {\n-      const next = new URLSearchParams(searchParams);\n-      if (value == null || value === \"\") {\n-        next.delete(key);\n-      } else {\n-        next.set(key, value);\n-      }\n-      persistRunsWorkspaceSearchParams(next);\n-      setSearchParams(next, { replace: true });\n+  const updatePreferences = useCallback(\n+    (updater: (prev: RunsWorkspacePreferences) => RunsWorkspacePreferences) => {\n+      setSearchParams(\n+        (prevParams) => {\n+          const next = updater(runsWorkspacePreferencesFromSearchParams(prevParams));\n+          persistRunsWorkspacePreferences(next);\n+          return runsWorkspacePreferencesToSearchParams(next);\n+        },\n+        { replace: true },\n+      );\n     },\n-    [searchParams, setSearchParams],\n+    [setSearchParams],\n   );\n \n-  const setQuery = (value: string) => updateParam(\"search\", value || null);\n-  const setRepoFilter = (value: string) => updateParam(\"repo\", value === \"all\" ? null : value);\n-  const setWorkflowFilter = (value: string) => updateParam(\"workflow\", value === \"all\" ? null : value);\n-  const setCreatedFilter = (value: CreatedFilter) => updateParam(\"created\", value === \"all\" ? null : value);\n-  const setIncludeArchived = (value: boolean) => updateParam(\"archived\", value ? \"1\" : null);\n-  const setView = (value: ViewMode) => updateParam(\"view\", value === \"columns\" ? null : value);\n+  const setQuery = (value: string) =>\n+    updatePreferences((prev) => ({ ...prev, search: value }));\n+  const setRepoFilter = (value: string) =>\n+    updatePreferences((prev) => ({ ...prev, repo: value }));\n+  const setWorkflowFilter = (value: string) =>\n+    updatePreferences((prev) => ({ ...prev, workflow: value }));\n+  const setCreatedFilter = (value: CreatedFilter) =>\n+    updatePreferences((prev) => ({ ...prev, created: value }));\n+  const setIncludeArchived = (value: boolean) =>\n+    updatePreferences((prev) => ({ ...prev, archived: value }));\n+  const setView = (value: ViewMode) =>\n+    updatePreferences((prev) => ({ ...prev, view: value }));\n   const setPage = useCallback(\n-    (next: number) => updateParam(\"page\", next > 1 ? String(next) : null),\n-    [updateParam],\n+    (next: number) => updatePreferences((prev) => ({ ...prev, page: next })),\n+    [updatePreferences],\n   );\n   const setPageSize = useCallback(\n-    (next: number) => {\n-      updateParam(\"size\", next === DEFAULT_LIST_PAGE_SIZE ? null : String(next));\n-      updateParam(\"page\", null);\n-    },\n-    [updateParam],\n+    (next: number) => updatePreferences((prev) => ({ ...prev, size: next, page: 1 })),\n+    [updatePreferences],\n   );\n   const setHiddenColumns = useCallback(\n-    (next: Set<ToggleableColumn>) => updateParam(\"hide\", serializeHiddenColumns(next)),\n-    [updateParam],\n+    (next: Set<ToggleableColumn>) =>\n+      updatePreferences((prev) => ({ ...prev, hide: serializeHiddenColumns(next) ?? \"\" })),\n+    [updatePreferences],\n   );\n   const handleSortClick = useCallback(\n-    (key: ListRunsSortEnum) => {\n-      if (sort === key) {\n-        updateParam(\"direction\", direction === \"asc\" ? null : \"asc\");\n-      } else {\n-        updateParam(\"sort\", key === \"created_at\" ? null : key);\n-        updateParam(\"direction\", null);\n-      }\n-      updateParam(\"page\", null);\n-    },\n-    [sort, direction, updateParam],\n+    (key: ListRunsSortEnum) =>\n+      updatePreferences((prev) =>\n+        prev.sort === key\n+          ? { ...prev, direction: prev.direction === \"asc\" ? \"desc\" : \"asc\", page: 1 }\n+          : { ...prev, sort: key, direction: \"desc\", page: 1 },\n+      ),\n+    [updatePreferences],\n   );\n \n+  const hydratedFromStorage = useRef(false);\n   useEffect(() => {\n+    if (hydratedFromStorage.current) return;\n+    hydratedFromStorage.current = true;\n     if (searchParams === urlSearchParams) return;\n     setSearchParams(searchParams, { replace: true });\n   }, [searchParams, urlSearchParams, setSearchParams]);\ndiff --git a/docs/public/reference/user-configuration.mdx b/docs/public/reference/user-configuration.mdx\nindex c20e07282..bdad7e3c5 100644\n--- a/docs/public/reference/user-configuration.mdx\n+++ b/docs/public/reference/user-configuration.mdx\n@@ -440,7 +440,7 @@ permissions = \"read-write\"\n \n | Key | Type / values | Default | Description |\n |---|---|---|---|\n-| `fabro_tools` | boolean | false | Allow workflow agents to use the Fabro run-management MCP tool catalog: create, search, get, interact, gather, events, and pair. Agent-created runs are always children of the current run. |\n+| `fabro_tools` | boolean | false | Allow workflow agents to use Fabro run-management tools. |\n | `mcps` | table | None | Agent-scoped MCP server entries, keyed by name. |\n | `permissions` | \"read-only\" \\| \"read-write\" \\| \"full\" | \"read-write\" | Default tool permission level for workflow agents. |\n \ndiff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs\nindex 62ca5f048..11c43fffa 100644\n--- a/lib/crates/fabro-agent/src/session.rs\n+++ b/lib/crates/fabro-agent/src/session.rs\n@@ -564,7 +564,7 @@ impl Session {\n         } else {\n             let skills_dir = fabro_util::Home::from_env().skills_dir();\n             let skills_str = skills_dir.to_string_lossy().to_string();\n-            default_skill_dirs(Some(&skills_str), self.config.git_root.as_deref())\n+            default_skill_dirs(Some(&skills_str), Some(&doc_root))\n         };\n         self.skills = discover_skills(self.sandbox.as_ref(), &skill_dirs, &cancel_token).await?;\n         debug!(skill_count = self.skills.len(), \"Skills discovered\");\ndiff --git a/lib/crates/fabro-server/tests/it/scenario/run_completion.rs b/lib/crates/fabro-server/tests/it/scenario/run_completion.rs\nindex fa0f6a4a7..4dfec9f30 100644\n--- a/lib/crates/fabro-server/tests/it/scenario/run_completion.rs\n+++ b/lib/crates/fabro-server/tests/it/scenario/run_completion.rs\n@@ -1,14 +1,83 @@\n+use std::sync::Arc;\n+\n use axum::body::Body;\n use axum::http::{Request, StatusCode};\n+use fabro_auth::EnvCredentialSource;\n+use fabro_model::{Catalog, ProviderId};\n+use fabro_test::{TwinScenario, TwinScenarios, twin_openai};\n+use fabro_types::RunId;\n use tokio::time::sleep;\n use tower::ServiceExt;\n \n use crate::helpers::{\n-    MINIMAL_DOT, api, checked_response, create_and_start_run_from_manifest,\n+    MINIMAL_DOT, api, checked_response, create_and_start_run_from_manifest, minimal_manifest_json,\n     minimal_manifest_json_with_dry_run, response_text, test_app_state_with_options,\n     test_app_with_scheduler, test_settings, wait_for_run_status,\n };\n \n+const OPENAI_AGENT_MODEL: &str = \"gpt-5.4\";\n+\n+const PROJECT_SKILL_AGENT_DOT: &str = r#\"digraph ProjectSkillAgent {\n+    graph [goal=\"Verify project skills are visible to agent runs\"]\n+    rankdir=LR\n+\n+    start [shape=Mdiamond, label=\"Start\"]\n+    exit  [shape=Msquare, label=\"Exit\"]\n+\n+    work [shape=box, label=\"Work\", prompt=\"Respond with done.\"]\n+\n+    start -> work -> exit\n+}\"#;\n+\n+fn test_app_with_openai_agent_backend(openai_base_url: String, api_key: String) -> axum::Router {\n+    let settings = test_settings();\n+    let llm_catalog_settings =\n+        fabro_server::test_support::llm_catalog_settings_with_provider_base_url(\n+            \"openai\",\n+            openai_base_url,\n+        );\n+    let catalog = Arc::new(\n+        Catalog::from_builtin_with_overrides(&llm_catalog_settings)\n+            .expect(\"test catalog should build\"),\n+    );\n+    let source_api_key = api_key.clone();\n+    let env_api_key = api_key;\n+    let llm_source: Arc<dyn fabro_auth::CredentialSource> = Arc::new(\n+        EnvCredentialSource::with_env_lookup(Arc::new(move |name| match name {\n+            \"OPENAI_API_KEY\" => Some(source_api_key.clone()),\n+            _ => None,\n+        })),\n+    );\n+    let state = fabro_server::test_support::TestAppStateBuilder::new()\n+        .runtime_settings(settings.server_settings, settings.manifest_run_defaults)\n+        .max_concurrent_runs(5)\n+        .llm_catalog_settings(llm_catalog_settings)\n+        .registry_factory(move |interviewer| {\n+            let catalog = Arc::clone(&catalog);\n+            let llm_source = Arc::clone(&llm_source);\n+            let emitter = Arc::new(fabro_workflow::event::Emitter::new(RunId::new()));\n+            let steering_hub = Arc::new(fabro_workflow::SteeringHub::new(emitter));\n+            fabro_workflow::handler::default_registry(interviewer, move || {\n+                Some(Box::new(\n+                    fabro_workflow::handler::llm::AgentApiBackend::new_with_catalog(\n+                        OPENAI_AGENT_MODEL.to_string(),\n+                        ProviderId::openai(),\n+                        Vec::new(),\n+                        Arc::clone(&llm_source),\n+                        Arc::clone(&steering_hub),\n+                        Arc::clone(&catalog),\n+                    ),\n+                ))\n+            })\n+        })\n+        .env_lookup(move |name| match name {\n+            \"OPENAI_API_KEY\" => Some(env_api_key.clone()),\n+            _ => None,\n+        })\n+        .build();\n+    test_app_with_scheduler(state)\n+}\n+\n #[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]\n async fn run_completes_and_status_is_completed() {\n     let state = test_app_state_with_options(test_settings(), 5);\n@@ -22,6 +91,62 @@ async fn run_completes_and_status_is_completed() {\n     assert_eq!(status, \"succeeded\");\n }\n \n+#[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]\n+async fn agent_run_includes_project_skills_from_local_sandbox_working_directory() {\n+    let project = tempfile::tempdir().expect(\"project tempdir should create\");\n+    let skill_dir = project\n+        .path()\n+        .join(\".fabro\")\n+        .join(\"skills\")\n+        .join(\"local-server-project-skill\");\n+    tokio::fs::create_dir_all(&skill_dir)\n+        .await\n+        .expect(\"project skill dir should create\");\n+    tokio::fs::write(\n+        skill_dir.join(\"SKILL.md\"),\n+        \"---\\nname: local-server-project-skill\\ndescription: Project-only skill\\n---\\nUse the project skill.\\n\",\n+    )\n+    .await\n+    .expect(\"project skill should write\");\n+\n+    let twin = twin_openai().await;\n+    let namespace = format!(\"{}::{}\", module_path!(), line!());\n+    TwinScenarios::new(&namespace)\n+        .scenario(\n+            TwinScenario::responses(OPENAI_AGENT_MODEL)\n+                .stream(true)\n+                .text(\"Done\"),\n+        )\n+        .load(twin)\n+        .await;\n+    let app = test_app_with_openai_agent_backend(twin.base_url.clone(), namespace.clone());\n+\n+    let mut manifest = minimal_manifest_json(PROJECT_SKILL_AGENT_DOT);\n+    manifest[\"title\"] = serde_json::Value::String(\"Project skill agent\".to_string());\n+    manifest[\"cwd\"] = serde_json::Value::String(project.path().display().to_string());\n+    let run_id = create_and_start_run_from_manifest(&app, manifest).await;\n+\n+    let status = wait_for_run_status(&app, &run_id, &[\"succeeded\", \"failed\"]).await;\n+    assert_eq!(status, \"succeeded\");\n+    let logs = twin.request_logs(&namespace).await;\n+    let requests = logs[\"requests\"]\n+        .as_array()\n+        .expect(\"twin-openai request logs should be an array\");\n+    let instructions = requests\n+        .iter()\n+        .find(|request| request[\"model\"] == OPENAI_AGENT_MODEL)\n+        .and_then(|request| request[\"instructions_text\"].as_str())\n+        .unwrap_or_default();\n+    assert!(\n+        instructions.contains(\"local-server-project-skill\"),\n+        \"expected project skill name in OpenAI instructions, got logs: {logs}\"\n+    );\n+    assert!(\n+        instructions.contains(\"Project-only skill\"),\n+        \"expected project skill description in OpenAI instructions, got logs: {logs}\"\n+    );\n+}\n+\n #[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]\n async fn attach_run_events_returns_sse_stream() {\n     let state = test_app_state_with_options(test_settings(), 5);\ndiff --git a/lib/crates/fabro-test/src/lib.rs b/lib/crates/fabro-test/src/lib.rs\nindex 9dd283d68..48c6ef4fc 100644\n--- a/lib/crates/fabro-test/src/lib.rs\n+++ b/lib/crates/fabro-test/src/lib.rs\n@@ -2067,6 +2067,22 @@ impl TwinOpenAi {\n             .expect(\"reset twin-openai namespace\");\n         assert_reqwest_status(response, fabro_http::StatusCode::OK, \"POST /__admin/reset\").await;\n     }\n+\n+    pub async fn request_logs(&self, namespace: &str) -> serde_json::Value {\n+        let response = test_http_client()\n+            .get(format!(\"{}/__admin/requests\", self.admin_url()))\n+            .bearer_auth(namespace)\n+            .send()\n+            .await\n+            .expect(\"fetch twin-openai request logs\");\n+        let response = expect_reqwest_status(\n+            response,\n+            fabro_http::StatusCode::OK,\n+            \"GET /__admin/requests\",\n+        )\n+        .await;\n+        response.json().await.expect(\"request logs should be JSON\")\n+    }\n }\n \n #[derive(Debug, Default, Clone)]\ndiff --git a/test/twin/openai/src/engine/mod.rs b/test/twin/openai/src/engine/mod.rs\nindex 56359ecd6..867735baa 100644\n--- a/test/twin/openai/src/engine/mod.rs\n+++ b/test/twin/openai/src/engine/mod.rs\n@@ -19,11 +19,12 @@ pub fn execute_responses_request(\n ) -> Result<ExecutionOutcome, OpenAiError> {\n     request.validate()?;\n     let context = RequestContext {\n-        endpoint:   \"responses\".to_owned(),\n-        model:      request.model.clone(),\n-        stream:     request.stream,\n-        metadata:   request.metadata.clone(),\n-        input_text: request.extract_user_text(),\n+        endpoint:          \"responses\".to_owned(),\n+        model:             request.model.clone(),\n+        stream:            request.stream,\n+        metadata:          request.metadata.clone(),\n+        input_text:        request.extract_user_text(),\n+        instructions_text: request.extract_instruction_text(),\n     };\n     state.log_request(namespace, context.clone());\n \n@@ -52,11 +53,12 @@ pub fn execute_chat_request(\n ) -> Result<ExecutionOutcome, OpenAiError> {\n     request.validate()?;\n     let context = RequestContext {\n-        endpoint:   \"chat.completions\".to_owned(),\n-        model:      request.model.clone(),\n-        stream:     request.stream,\n-        metadata:   serde_json::Map::new(),\n-        input_text: request.extract_user_text(),\n+        endpoint:          \"chat.completions\".to_owned(),\n+        model:             request.model.clone(),\n+        stream:            request.stream,\n+        metadata:          serde_json::Map::new(),\n+        input_text:        request.extract_user_text(),\n+        instructions_text: request.extract_instruction_text(),\n     };\n     state.log_request(namespace, context.clone());\n \ndiff --git a/test/twin/openai/src/engine/scenario.rs b/test/twin/openai/src/engine/scenario.rs\nindex 59d8fd642..ee7ff7377 100644\n--- a/test/twin/openai/src/engine/scenario.rs\n+++ b/test/twin/openai/src/engine/scenario.rs\n@@ -62,11 +62,12 @@ pub struct ToolCallTemplate {\n \n #[derive(Clone, Debug)]\n pub struct RequestContext {\n-    pub endpoint:   String,\n-    pub model:      String,\n-    pub stream:     bool,\n-    pub metadata:   Map<String, Value>,\n-    pub input_text: String,\n+    pub endpoint:          String,\n+    pub model:             String,\n+    pub stream:            bool,\n+    pub metadata:          Map<String, Value>,\n+    pub input_text:        String,\n+    pub instructions_text: String,\n }\n \n impl ScenarioScript {\ndiff --git a/test/twin/openai/src/logs.rs b/test/twin/openai/src/logs.rs\nindex 1edc6cd8b..0fce6eafd 100644\n--- a/test/twin/openai/src/logs.rs\n+++ b/test/twin/openai/src/logs.rs\n@@ -3,9 +3,10 @@ use serde_json::{Map, Value};\n \n #[derive(Clone, Debug, Serialize)]\n pub struct RequestLog {\n-    pub endpoint:   String,\n-    pub model:      String,\n-    pub stream:     bool,\n-    pub input_text: String,\n-    pub metadata:   Map<String, Value>,\n+    pub endpoint:          String,\n+    pub model:             String,\n+    pub stream:            bool,\n+    pub input_text:        String,\n+    pub instructions_text: String,\n+    pub metadata:          Map<String, Value>,\n }\ndiff --git a/test/twin/openai/src/openai/models.rs b/test/twin/openai/src/openai/models.rs\nindex 42fa186f5..bd7996891 100644\n--- a/test/twin/openai/src/openai/models.rs\n+++ b/test/twin/openai/src/openai/models.rs\n@@ -11,6 +11,7 @@ pub struct ResponsesRequest {\n     pub model:                String,\n     #[serde(default)]\n     pub input:                ResponseInput,\n+    pub instructions:         Option<String>,\n     #[serde(default)]\n     pub stream:               bool,\n     #[serde(default)]\n@@ -40,6 +41,13 @@ impl ResponsesRequest {\n         }\n     }\n \n+    pub fn extract_instruction_text(&self) -> String {\n+        self.instructions\n+            .as_deref()\n+            .map(normalize_whitespace)\n+            .unwrap_or_default()\n+    }\n+\n     pub fn response_format(&self) -> Option<ResponseFormat> {\n         let format = self.text.as_ref()?.format.as_ref()?;\n         response_format_from_kind(\n@@ -476,6 +484,16 @@ impl ChatCompletionsRequest {\n         }\n     }\n \n+    pub fn extract_instruction_text(&self) -> String {\n+        let pieces: Vec<String> = self\n+            .messages\n+            .iter()\n+            .filter(|message| message.role == \"system\" || message.role == \"developer\")\n+            .flat_map(ChatMessage::extract_texts)\n+            .collect();\n+        normalize_whitespace(&pieces.join(\" \"))\n+    }\n+\n     pub fn response_format(&self) -> Option<ResponseFormat> {\n         let format = self.response_format.as_ref()?;\n         response_format_from_kind(\n@@ -721,18 +739,26 @@ fn validate_tools(\n             return Err(OpenAiError::invalid_request(param, \"tool type is required\"));\n         };\n \n-        if tool_type != \"function\" {\n-            return Err(OpenAiError::invalid_request(\n-                param,\n-                \"only function tools are supported\",\n-            ));\n-        }\n-\n-        if function_tool_name(tool, surface).is_none() {\n-            return Err(OpenAiError::invalid_request(\n-                param,\n-                \"function tool name is required\",\n-            ));\n+        match tool_type {\n+            \"function\" => {\n+                if function_tool_name(tool, surface).is_none() {\n+                    return Err(OpenAiError::invalid_request(\n+                        param,\n+                        \"function tool name is required\",\n+                    ));\n+                }\n+            }\n+            \"custom\" if surface == ToolSurface::Responses => {\n+                if function_tool_name(tool, surface).is_none() {\n+                    return Err(OpenAiError::invalid_request(\n+                        param,\n+                        \"custom tool name is required\",\n+                    ));\n+                }\n+            }\n+            _ => {\n+                return Err(OpenAiError::invalid_request(param, \"unsupported tool type\"));\n+            }\n         }\n     }\n \ndiff --git a/test/twin/openai/src/state.rs b/test/twin/openai/src/state.rs\nindex d456ab6c5..29cece646 100644\n--- a/test/twin/openai/src/state.rs\n+++ b/test/twin/openai/src/state.rs\n@@ -125,11 +125,12 @@ impl AppState {\n             .or_default()\n             .request_logs\n             .push(RequestLog {\n-                endpoint:   request.endpoint,\n-                model:      request.model,\n-                stream:     request.stream,\n-                input_text: request.input_text,\n-                metadata:   request.metadata,\n+                endpoint:          request.endpoint,\n+                model:             request.model,\n+                stream:            request.stream,\n+                input_text:        request.input_text,\n+                instructions_text: request.instructions_text,\n+                metadata:          request.metadata,\n             });\n     }\n \n",
+        "summary": {
+          "files_changed": 25,
+          "additions": 725,
+          "deletions": 205
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-24T17:58:24.219347Z",
+    "status": "succeeded",
+    "timing": {
+      "wall_time_ms": 2650709,
+      "inference_time_ms": 0,
+      "tool_time_ms": 0,
+      "active_time_ms": 0
+    },
+    "final_git_commit_sha": "a8a0300c16d1d08257ea36e25fb422dea7423ec1",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "toolchain",
+        "stage_label": "toolchain",
+        "timing": {
+          "wall_time_ms": 1558,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_compile",
+        "stage_label": "preflight_compile",
+        "timing": {
+          "wall_time_ms": 126911,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_lint",
+        "stage_label": "preflight_lint",
+        "timing": {
+          "wall_time_ms": 137186,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "implement",
+        "stage_label": "implement",
+        "timing": {
+          "wall_time_ms": 1389571,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "billing_usd_micros": 33230684,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_opus",
+        "stage_label": "simplify_opus",
+        "timing": {
+          "wall_time_ms": 246654,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "billing_usd_micros": 1059523,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_gpt",
+        "stage_label": "simplify_gpt",
+        "timing": {
+          "wall_time_ms": 241799,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "billing_usd_micros": 5029570,
+        "retries": 0
+      },
+      {
+        "stage_id": "verify",
+        "stage_label": "verify",
+        "timing": {
+          "wall_time_ms": 476980,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 6371984,
+      "output_tokens": 24839,
+      "total_tokens": 18195863,
+      "reasoning_tokens": 9349,
+      "cache_read_tokens": 11692122,
+      "cache_write_tokens": 97569,
+      "total_usd_micros": 39319777
+    },
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "snapshot": "fabro-v12",
@@ -1512,6 +1634,40 @@
       "handler": "command",
       "timing": {
         "wall_time_ms": 126911,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "exit@1": {
+      "first_event_seq": 1536,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-24T17:58:24.157Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-24T17:58:24.156947Z",
+      "handler": "exit",
+      "timing": {
+        "wall_time_ms": 0,
         "inference_time_ms": 0,
         "tool_time_ms": 0,
         "active_time_ms": 0
@@ -1645,7 +1801,12 @@
       "first_event_seq": 1526,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-24T17:58:20.223919Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -1653,11 +1814,27 @@
         "command": "exec 2>&1\ngit fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "output": "blob://sha256/cac568c1a9494d552af4eab122942a6384a46a00fa07cf9ec4db9885f4fce359",
+        "exit_code": 0,
+        "duration_ms": 476955,
+        "termination": "exited",
+        "output_bytes": 198156,
+        "live_streaming": true
+      },
       "parallel_results": null,
       "output": null,
+      "output_bytes": 198156,
+      "live_streaming": true,
+      "termination": "exited",
       "started_at": "2026-05-24T17:50:23.239707Z",
       "handler": "command",
+      "timing": {
+        "wall_time_ms": 476980,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -1666,7 +1843,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "implement@1": {
       "first_event_seq": 52,
