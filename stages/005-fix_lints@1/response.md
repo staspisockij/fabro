@@ -1,0 +1,1 @@
+Clippy is now clean across the workspace. The fix collapsed the inner `if props.resume` into a guarded match arm on `EventBody::RunStartRequested`, falling through to the existing wildcard arm for non-resume cases.
