@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import {
+  ArrowDownTrayIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ClipboardDocumentIcon,
   CpuChipIcon,
 } from "@heroicons/react/16/solid";
 import { CircleStackIcon, ClockIcon } from "@heroicons/react/20/solid";
@@ -1234,6 +1236,66 @@ function EventsTabToggle({
   );
 }
 
+function EventExportActions({
+  events,
+  runId,
+  stageId,
+  className,
+}: {
+  events: EventEnvelope[];
+  runId: string;
+  stageId: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const disabled = events.length === 0;
+  const buttonClass =
+    "inline-flex size-6 items-center justify-center rounded text-fg-muted transition-colors hover:bg-overlay hover:text-fg-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-teal-500 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-fg-muted";
+  return (
+    <div className={`flex items-center gap-1 ${className ?? ""}`}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(JSON.stringify(events, null, 2));
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1200);
+          } catch {
+            // ignore — clipboard may be unavailable in some contexts
+          }
+        }}
+        title={copied ? "Copied!" : "Copy loaded events as JSON"}
+        aria-label="Copy loaded events as JSON"
+        className={buttonClass}
+      >
+        <ClipboardDocumentIcon className="size-3.5" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          const jsonl = events.map((e) => JSON.stringify(e)).join("\n");
+          const blob = new Blob([jsonl], { type: "application/x-ndjson" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${runId}-${stageId}-events.jsonl`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }}
+        title="Download loaded events as JSONL"
+        aria-label="Download loaded events as JSONL"
+        className={buttonClass}
+      >
+        <ArrowDownTrayIcon className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
 function EventsToolbar({
   tab,
   renderer,
@@ -1250,6 +1312,9 @@ function EventsToolbar({
   filteredCount,
   totalCount,
   providerUsed,
+  events,
+  runId,
+  stageId,
 }: {
   tab: EventsTab;
   renderer: StageRenderer;
@@ -1266,6 +1331,9 @@ function EventsToolbar({
   filteredCount: number;
   totalCount: number;
   providerUsed: StageModelUsage | null;
+  events: EventEnvelope[];
+  runId: string;
+  stageId: string;
 }) {
   // Filters apply to: the agent transcript (filter event kinds) and the Debug
   // tab (filter event categories). Specialized renderers (human, parallel,
@@ -1348,6 +1416,12 @@ function EventsToolbar({
           <span className="font-mono">{modelUsageLabel}</span>
         </HoverCard>
       )}
+      <EventExportActions
+        events={events}
+        runId={runId}
+        stageId={stageId}
+        className={!showFilters && !modelUsageLabel ? "ml-auto" : ""}
+      />
       {tab === "primary" && renderer === "command" && commandTurn && (
         <CommandStatus turn={commandTurn} />
       )}
@@ -1560,6 +1634,9 @@ export default function RunStages() {
               filteredCount={effectiveTab === "primary" ? filteredTurns.length : filteredDebugEvents.length}
               totalCount={effectiveTab === "primary" ? turns.length : debugEvents.length}
               providerUsed={selectedStage.providerUsed}
+              events={stageEventsQuery.data ?? []}
+              runId={id ?? ""}
+              stageId={selectedStageId ?? ""}
             />
             {effectiveTab === "debug" && (
               <div className="pb-3">
