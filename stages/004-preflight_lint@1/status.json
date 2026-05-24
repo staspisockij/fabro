@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "Script failed with exit code: 101\n\n## output\nerror[E0063]: missing field `expected_secret_name` in initializer of `fabro_model::Provider`\n  --> lib/crates/fabro-api/tests/provider_round_trip.rs:14:20\n   |\n14 |     let provider = Provider {\n   |                    ^^^^^^^^ missing `expected_secret_name`\n\nerror[E0063]: missing field `expected_secret_name` in initializer of `fabro_model::Provider`\n  --> lib/crates/fabro-api/tests/provider_round_trip.rs:51:20\n   |\n51 |     let provider = Provider {\n   |                    ^^^^^^^^ missing `expected_secret_name`\n\nFor more information about this error, try `rustc --explain E0063`.\nerror: could not compile `fabro-api` (test \"provider_round_trip\") due to 2 previous errors\n",
+  "timestamp": "2026-05-24T15:44:24.017812Z"
+}
