@@ -508,7 +508,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-25T16:09:54.481677Z",
-  "last_event_at": "2026-05-25T17:12:22.042426Z",
+  "last_event_at": "2026-05-25T17:19:07.354626Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -1244,9 +1244,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 1216,
       "checkpoint": {
-        "timestamp": "2026-05-25T17:16:32.792533Z",
+        "timestamp": "2026-05-25T17:16:37.637809Z",
         "current_node": "verify",
         "completed_nodes": [
           "start",
@@ -1260,10 +1260,231 @@
         ],
         "node_retries": {},
         "context_values": {
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.retry_count.implement": 0,
+          "internal.run_id": "01KSFYCA4W7NCM7F70FRM1PX7N",
+          "thread.toolchain.current_node": "preflight_compile",
+          "internal.retry_count.simplify_opus": 0,
+          "thread.simplify_gpt.current_node": "verify",
+          "internal.retry_count.toolchain": 0,
+          "current_node": "verify",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "outcome": "failed",
+          "internal.retry_count.verify": 0,
+          "response.simplify_gpt": "Reviewed the feature diff against `origin/main` and completed cleanup.\n\nFixed:\n- Removed duplicated batch command logic between:\n  - `approve` / `deny`\n  - `archive` / `unarchive`\n- Added shared helper in `lib/crates/fabro-cli/src/commands/runs/mod.rs`:\n  - resolves each selector\n  - attempts all runs\n  - prints short IDs in text mode\n  - emits the common JSON `{ key: [...], errors: [...] }` shape\n  - returns a non-zero error after processing all failures\n- Simplified:\n  - `lib/crates/fabro-cli/src/commands/runs/approval.rs`\n  - `lib/crates/fabro-cli/src/commands/runs/archive.rs`\n\nValidation run:\n- `cargo +nightly-2026-04-14 fmt --all`\n- `cargo check -q -p fabro-cli`\n- `cargo nextest run -p fabro-cli approve deny archive unarchive`\n- `cargo nextest run -p fabro-tool interact`\n- `cargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-cli --all-targets -- -D warnings`\n\nAll passed.",
+          "thread.implement.current_node": "simplify_opus",
+          "thread.simplify_opus.current_node": "simplify_gpt",
+          "internal.retry_count.preflight_lint": 0,
+          "internal.node_visit_count": 1,
+          "graph.rankdir": "LR",
+          "internal.retry_count.simplify_gpt": 0,
+          "last_stage": "simplify_gpt",
+          "response.simplify_opus": "All clean. Summary of fixes applied:\n\n**Fixed (HIGH/MEDIUM priority issues from review):**\n\n1. **Removed duplicate `normalize_optional_text`** — Deleted the unused helper in `lib/crates/fabro-client/src/client.rs` and simplified `deny_run` to pass `reason` directly. The validator in `interact.rs` already normalizes for the MCP path; the server handles blank values for the CLI path.\n\n2. **Encapsulated user-only policy on the enum** — Added `ValidatedInteractAction::requires_user()` in `lib/crates/fabro-tool/src/interact.rs` and replaced the leaky `matches!` peek in `lib/crates/fabro-workflow/src/handler/llm/api.rs`.\n\n3. **Aligned `approval.rs` style with `archive.rs`** — Dropped the redundant `json_key()` and `failure_message()` wrappers; renamed `verb()` → `past()`; switched `bail!(action.failure_message())` to `bail!(\"some runs could not be {}\", action.past())` matching archive.rs.\n\n4. **Deduplicated test helpers** — Moved `ulid_filter()` and `conflict_error_body()` into `lib/crates/fabro-cli/tests/it/cmd/support.rs`. Updated `approve.rs`, `deny.rs`, `archive.rs`, and `unarchive.rs` to import them, eliminating 4 duplicate copies.\n\n**Skipped (out of scope or low-value):**\n\n- Extracting a generic `run_bulk` shared between `archive.rs` and `approval.rs` — would require refactoring existing archive code; the two files now follow the same idiomatic pattern, which is the simpler win.\n- Centralizing the 3 mock `FabroToolBackend` impls behind a `test_support::PanicBackend` — broader cross-crate refactor flagged by the reuse agent, not scoped to this change.\n- Parallelizing the batch CLI loop — flagged LOW only because it would diverge from `archive.rs`.\n\n**Verification:** `cargo check --workspace`, `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`, `cargo +nightly-2026-04-14 fmt --check --all`, and `cargo nextest run -p fabro-tool -p fabro-client -p fabro-server -p fabro-workflow` (1893 tests) all pass. The new `approve`/`deny` CLI tests and existing `archive`/`unarchive` tests (36 tests) all pass.",
+          "failure_class": "deterministic",
+          "internal.fidelity": "compact",
+          "thread.preflight_lint.current_node": "implement",
+          "internal.retry_count.preflight_compile": 0,
+          "command.output": "blob://sha256/b022b3ede378bcd069482215651fbc966813837501d94f82dcd93501ff5974e3",
+          "failure_signature": "verify|deterministic|script failed with exit code: <n> ## output icespanelview > shows api error state with the error message [<n>.68ms] react-test-renderer is deprecated. see https://react.dev/warnings/react-test-renderer the current testing environment is not",
+          "internal.retry_count.start": 0,
+          "response.implement": "Implemented run approval controls for MCP and CLI.\n\nSummary:\n- Added `fabro_client::Client::approve_run` and `deny_run`.\n- Extended `FabroToolBackend` and `ClientBackend` with approval methods.\n- Extended `fabro_run_interact` with:\n  - `approve`\n  - `deny`\n  - optional `reason`\n  - reason trimming / blank-to-`None`\n  - summary-returning dispatch.\n- Updated MCP tool descriptions and schema coverage.\n- Blocked workflow-agent `fabro_tools` from approving/denying runs with an immediate explicit `ToolError`.\n- Added top-level CLI commands:\n  - `fabro approve <RUNS>...`\n  - `fabro deny [--reason <REASON>] <RUNS>...`\n- Added batch JSON/text behavior and partial-error handling.\n- Updated CLI/MCP docs and verified generated CLI docs are current.\n- Extended server auth regression to include `/runs/{id}/deny`.\n\nValidation run:\n- Red step: `cargo nextest run -p fabro-tool interact` failed before implementation as expected.\n- `cargo nextest run -p fabro-tool interact`\n- `cargo nextest run -p fabro-cli approve deny fabro::help stdio_server_initializes_and_lists_run_tools mcp_interact`\n- `cargo nextest run -p fabro-workflow agent_run_interact_rejects_approval_actions_before_backend_dispatch`\n- `cargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes`\n- `cargo nextest run -p fabro-tool -p fabro-cli -p fabro-server`\n- `cargo dev docs check`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n- `git diff --check`\n\nNote: `cargo insta pending-snapshots` could not be run because `cargo-insta` is not installed in this environment, but the affected inline snapshot tests passed.",
+          "last_response": "Reviewed the feature diff against `origin/main` and completed cleanup.\n\nFixed:\n- Removed duplicated batch command logic between:\n  - `approve` / `deny`\n  - `archive` / `unarchive`\n- Added shared helpe",
+          "graph.goal": "---\ntitle: \"feat: Add run approval controls to MCP and CLI\"\ntype: feat\nstatus: active\ndate: 2026-05-25\n---\n\n# feat: Add run approval controls to MCP and CLI\n\n## Summary\n\nFabro already has pre-execution run approval state and REST endpoints:\n\n- `POST /api/v1/runs/{id}/approve`\n- `POST /api/v1/runs/{id}/deny`\n\nThis plan exposes that capability through the existing human run-management surfaces:\n\n- `fabro_run_interact` gains `approve` and `deny` actions.\n- The CLI gains top-level batch commands:\n  - `fabro approve <RUNS>...`\n  - `fabro deny [--reason <REASON>] <RUNS>...`\n\nApproval remains a human/user action. Workflow-agent `fabro_tools` must not be able to approve or deny child runs it created.\n\n## Key Interface Changes\n\n### MCP\n\nExtend `fabro_run_interact`:\n\n- Add actions: `approve`, `deny`.\n- Add optional parameter: `reason: string | null`.\n- `reason` is valid only for `deny`; trim whitespace and send `None` for absent or blank values.\n- `approve` and `deny` return the updated run summary using the existing `result.summary` shape.\n- Update the tool description to include approval actions.\n\nExample:\n\n```json\n{\n  \"run_id\": \"nightly\",\n  \"action\": \"approve\"\n}\n```\n\n```json\n{\n  \"run_id\": \"nightly\",\n  \"action\": \"deny\",\n  \"reason\": \"Not approved for execution\"\n}\n```\n\n### CLI\n\nAdd flattened top-level commands, alongside `archive` and `unarchive`:\n\n```bash\nfabro approve <RUNS>...\nfabro deny [--reason <REASON>] <RUNS>...\n```\n\nBatch behavior:\n\n- Resolve each argument using the same selector path as archive/unarchive.\n- Attempt every requested run even if earlier runs fail.\n- Text mode prints each successful short run id to stderr.\n- If any run fails, exit non-zero after processing all runs.\n\nJSON output:\n\n```json\n{\n  \"approved\": [\"01K...\"],\n  \"errors\": []\n}\n```\n\n```json\n{\n  \"denied\": [\"01K...\"],\n  \"errors\": []\n}\n```\n\nErrors use the existing batch shape:\n\n```json\n{\n  \"identifier\": \"nightly\",\n  \"error\": \"Run is not pending approval.\"\n}\n```\n\n`fabro deny --reason <REASON>` applies the same reason to every run in the batch.\n\n## Implementation Plan\n\n### 1. Add client and shared tool backend methods\n\nFiles:\n\n- `lib/crates/fabro-client/src/client.rs`\n- `lib/crates/fabro-tool/src/common.rs`\n- `lib/crates/fabro-tool/src/fabro_client.rs`\n- Mock `FabroToolBackend` impls in tests under `fabro-tool` and `fabro-workflow`\n\nChanges:\n\n- Add `Client::approve_run(&RunId) -> Result<Run>`.\n- Add `Client::deny_run(&RunId, Option<String>) -> Result<Run>`.\n- Implement them by calling the generated `approve_run` and `deny_run` OpenAPI client methods.\n- Add matching methods to `FabroToolBackend`.\n- Implement them in `ClientBackend`.\n- For `deny_run`, build `types::DenyRunRequest { reason }` only when the generated client requires a body; preserve the API behavior that omitted, null, empty, or whitespace-only reasons are stored as absent.\n\nNo OpenAPI or generated-client regeneration is expected because the endpoints and DTO already exist.\n\n### 2. Extend `fabro_run_interact`\n\nFiles:\n\n- `lib/crates/fabro-tool/src/interact.rs`\n- `lib/crates/fabro-tool/src/common.rs`\n- `lib/crates/fabro-tool/src/lib.rs`\n- `lib/crates/fabro-mcp-server/src/server.rs`\n\nChanges:\n\n- Add `RunInteractAction::Approve` and `RunInteractAction::Deny`.\n- Add `reason: Option<String>` to `FabroRunInteractParams`.\n- Add `ValidatedInteractAction::Approve` and `ValidatedInteractAction::Deny { reason: Option<String> }`.\n- Validate `reason` by trimming whitespace and dropping blank values.\n- Dispatch:\n  - `Approve` -> `backend.approve_run(&run_id)`\n  - `Deny` -> `backend.deny_run(&run_id, reason)`\n- Return `json!({ \"summary\": common::run_summary_result(&summary) })`.\n- Update `interact_run_text` output automatically through the action name; no special summary text is required.\n- Update tool descriptions from “start, message, interrupt, cancel…” to include “approve, deny”.\n\n### 3. Block workflow-agent self-approval\n\nFiles:\n\n- `lib/crates/fabro-workflow/src/handler/llm/api.rs`\n- Existing run-tool tests in the same file\n\nChanges:\n\n- In `execute_fabro_run_tool`, parse `FabroRunInteractParams` before dispatching.\n- If the tool call is `fabro_run_interact` with action `approve` or `deny`, return a `ToolError` explaining that run approval must be performed by a user through the API, CLI, web UI, or human MCP server.\n- Do not rely only on server auth for this guard; the tool error should be immediate and explicit for workflow agents.\n- Keep server `approve_run` and `deny_run` handlers on `RequiredUser`.\n- Keep the existing server negative test that run-tools workers cannot call user-only routes, and extend it to include `/runs/{id}/deny`.\n\n### 4. Add CLI approval commands\n\nFiles:\n\n- `lib/crates/fabro-cli/src/args.rs`\n- `lib/crates/fabro-cli/src/commands/runs/mod.rs`\n- Create `lib/crates/fabro-cli/src/commands/runs/approval.rs`\n\nChanges:\n\n- Add:\n  - `RunsApproveArgs { server: ServerTargetArgs, runs: Vec<String> }`\n  - `RunsDenyArgs { server: ServerTargetArgs, reason: Option<String>, runs: Vec<String> }`\n- Add `RunsCommands::Approve(RunsApproveArgs)` and `RunsCommands::Deny(RunsDenyArgs)`.\n- Command help:\n  - approve: “Approve pending workflow runs.”\n  - deny: “Deny pending workflow runs.”\n  - run args: “Run IDs or workflow names to approve/deny.”\n  - reason flag: “Reason for denying execution.”\n- Implement shared batch logic in `commands/runs/approval.rs`, patterned after `archive.rs`:\n  - Resolve each identifier with `client.resolve_run`.\n  - Call `client.approve_run` or `client.deny_run`.\n  - Collect successes and per-identifier errors.\n  - Print short run ids to stderr in text mode.\n  - Print JSON only in JSON mode.\n  - Fail at the end with `some runs could not be approved` or `some runs could not be denied`.\n- Register the new dispatch arms in `commands/runs/mod.rs`.\n- Update command-name reporting in `RunsCommands::name()`.\n\n### 5. Update docs\n\nFiles:\n\n- `docs/public/agents/mcp.mdx`\n- `docs/public/reference/cli.mdx`\n\nChanges:\n\n- Update the `fabro_run_interact` row to include approve/deny.\n- Add a short MCP example for approving or denying a pending run.\n- Add generated or manually updated CLI reference sections for:\n  - `fabro approve`\n  - `fabro deny`\n- If `docs/public/reference/cli.mdx` is generated from `fabro __cli-reference`, regenerate it after the CLI args are implemented.\n\n## Test Plan\n\n### `fabro-tool`\n\n- Add unit tests for action validation:\n  - `approve` validates with only `run_id` and action.\n  - `deny` validates with absent reason as `None`.\n  - `deny` trims a nonblank reason.\n  - `deny` converts blank reason to `None`.\n- Add dispatch tests with a mock backend:\n  - `approve` calls `approve_run` and returns `result.summary`.\n  - `deny` calls `deny_run` with the expected reason and returns `result.summary`.\n- Update schema/tool-definition assertions to prove `approve`, `deny`, and `reason` appear in the `fabro_run_interact` schema.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-tool interact\n```\n\n### MCP integration\n\nFile:\n\n- `lib/crates/fabro-cli/tests/it/cmd/mcp.rs`\n\nScenarios:\n\n- `fabro_run_interact` action `approve`:\n  - resolves selector through `/api/v1/runs/resolve`\n  - posts to `/api/v1/runs/{id}/approve`\n  - returns updated summary\n- `fabro_run_interact` action `deny`:\n  - resolves selector\n  - posts to `/api/v1/runs/{id}/deny`\n  - sends `{ \"reason\": \"Not approved for execution\" }` when reason is supplied\n  - returns updated summary\n- Existing tool-list/schema test checks the new actions and parameter.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli mcp_interact\n```\n\n### CLI command tests\n\nFiles:\n\n- Create `lib/crates/fabro-cli/tests/it/cmd/approve.rs`\n- Create `lib/crates/fabro-cli/tests/it/cmd/deny.rs`\n- Modify `lib/crates/fabro-cli/tests/it/cmd/mod.rs`\n- Modify `lib/crates/fabro-cli/tests/it/cmd/fabro.rs`\n\nScenarios:\n\n- Help snapshots for `fabro approve --help` and `fabro deny --help`.\n- Required-argument snapshots for missing `<RUNS>...`.\n- Mock-server success path:\n  - resolve `nightly-build`\n  - call approve/deny endpoint\n  - print short run id in text mode\n- JSON success path:\n  - approve returns `approved`\n  - deny returns `denied`\n  - both include `errors: []`\n- Partial-error path:\n  - one selector or endpoint fails\n  - remaining runs are still attempted\n  - JSON includes both successes and errors\n  - process exits non-zero\n- `fabro deny --reason \"Needs review\"` sends that reason in the request body.\n- Top-level help snapshot includes `approve` and `deny`.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli approve deny fabro::help\n```\n\n### Server auth regression\n\nFile:\n\n- `lib/crates/fabro-server/src/server/tests.rs`\n\nScenario:\n\n- Extend `run_tools_worker_cannot_call_user_only_non_mcp_routes` so a run-tools worker remains rejected for:\n  - `POST /runs/{target}/approve`\n  - `POST /runs/{target}/deny`\n  - an existing user-only route such as timeline\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes\n```\n\n### Final verification\n\nRun targeted checks first:\n\n```bash\ncargo nextest run -p fabro-tool -p fabro-cli -p fabro-server\n```\n\nBefore merge, run:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\nRun full workspace tests if the client/backend trait changes produce broad compile churn:\n\n```bash\ncargo nextest run --workspace\n```\n\n## Assumptions\n\n- Approval and denial remain user-authorized operations.\n- Human MCP clients use normal CLI/server user auth and may approve or deny.\n- Workflow-agent `fabro_tools` may inspect pending runs but must not approve or deny them.\n- `fabro deny --reason <REASON>` applies one reason to every run in the batch.\n- No API contract change is required because the REST approval endpoints already exist.\n",
+          "thread.start.current_node": "toolchain",
+          "internal.thread_id": "simplify_gpt"
+        },
+        "node_outcomes": {
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "implement",
+              "response.implement": "Implemented run approval controls for MCP and CLI.\n\nSummary:\n- Added `fabro_client::Client::approve_run` and `deny_run`.\n- Extended `FabroToolBackend` and `ClientBackend` with approval methods.\n- Extended `fabro_run_interact` with:\n  - `approve`\n  - `deny`\n  - optional `reason`\n  - reason trimming / blank-to-`None`\n  - summary-returning dispatch.\n- Updated MCP tool descriptions and schema coverage.\n- Blocked workflow-agent `fabro_tools` from approving/denying runs with an immediate explicit `ToolError`.\n- Added top-level CLI commands:\n  - `fabro approve <RUNS>...`\n  - `fabro deny [--reason <REASON>] <RUNS>...`\n- Added batch JSON/text behavior and partial-error handling.\n- Updated CLI/MCP docs and verified generated CLI docs are current.\n- Extended server auth regression to include `/runs/{id}/deny`.\n\nValidation run:\n- Red step: `cargo nextest run -p fabro-tool interact` failed before implementation as expected.\n- `cargo nextest run -p fabro-tool interact`\n- `cargo nextest run -p fabro-cli approve deny fabro::help stdio_server_initializes_and_lists_run_tools mcp_interact`\n- `cargo nextest run -p fabro-workflow agent_run_interact_rejects_approval_actions_before_backend_dispatch`\n- `cargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes`\n- `cargo nextest run -p fabro-tool -p fabro-cli -p fabro-server`\n- `cargo dev docs check`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n- `git diff --check`\n\nNote: `cargo insta pending-snapshots` could not be run because `cargo-insta` is not installed in this environment, but the affected inline snapshot tests passed.",
+              "last_response": "Implemented run approval controls for MCP and CLI.\n\nSummary:\n- Added `fabro_client::Client::approve_run` and `deny_run`.\n- Extended `FabroToolBackend` and `ClientBackend` with approval methods.\n- Exte"
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 5145319,
+                    "output_tokens": 24021,
+                    "reasoning_tokens": 10644,
+                    "cache_read_tokens": 11609088,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 32571089
+            }
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "simplify_gpt": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "Reviewed the feature diff against `origin/main` and completed cleanup.\n\nFixed:\n- Removed duplicated batch command logic between:\n  - `approve` / `deny`\n  - `archive` / `unarchive`\n- Added shared helpe",
+              "response.simplify_gpt": "Reviewed the feature diff against `origin/main` and completed cleanup.\n\nFixed:\n- Removed duplicated batch command logic between:\n  - `approve` / `deny`\n  - `archive` / `unarchive`\n- Added shared helper in `lib/crates/fabro-cli/src/commands/runs/mod.rs`:\n  - resolves each selector\n  - attempts all runs\n  - prints short IDs in text mode\n  - emits the common JSON `{ key: [...], errors: [...] }` shape\n  - returns a non-zero error after processing all failures\n- Simplified:\n  - `lib/crates/fabro-cli/src/commands/runs/approval.rs`\n  - `lib/crates/fabro-cli/src/commands/runs/archive.rs`\n\nValidation run:\n- `cargo +nightly-2026-04-14 fmt --all`\n- `cargo check -q -p fabro-cli`\n- `cargo nextest run -p fabro-cli approve deny archive unarchive`\n- `cargo nextest run -p fabro-tool interact`\n- `cargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-cli --all-targets -- -D warnings`\n\nAll passed.",
+              "last_stage": "simplify_gpt"
+            },
+            "notes": "Stage completed: simplify_gpt",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 726400,
+                    "output_tokens": 5333,
+                    "reasoning_tokens": 1310,
+                    "cache_read_tokens": 265216,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 3963898
+            }
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "simplify_opus": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "All clean. Summary of fixes applied:\n\n**Fixed (HIGH/MEDIUM priority issues from review):**\n\n1. **Removed duplicate `normalize_optional_text`** — Deleted the unused helper in `lib/crates/fabro-client",
+              "response.simplify_opus": "All clean. Summary of fixes applied:\n\n**Fixed (HIGH/MEDIUM priority issues from review):**\n\n1. **Removed duplicate `normalize_optional_text`** — Deleted the unused helper in `lib/crates/fabro-client/src/client.rs` and simplified `deny_run` to pass `reason` directly. The validator in `interact.rs` already normalizes for the MCP path; the server handles blank values for the CLI path.\n\n2. **Encapsulated user-only policy on the enum** — Added `ValidatedInteractAction::requires_user()` in `lib/crates/fabro-tool/src/interact.rs` and replaced the leaky `matches!` peek in `lib/crates/fabro-workflow/src/handler/llm/api.rs`.\n\n3. **Aligned `approval.rs` style with `archive.rs`** — Dropped the redundant `json_key()` and `failure_message()` wrappers; renamed `verb()` → `past()`; switched `bail!(action.failure_message())` to `bail!(\"some runs could not be {}\", action.past())` matching archive.rs.\n\n4. **Deduplicated test helpers** — Moved `ulid_filter()` and `conflict_error_body()` into `lib/crates/fabro-cli/tests/it/cmd/support.rs`. Updated `approve.rs`, `deny.rs`, `archive.rs`, and `unarchive.rs` to import them, eliminating 4 duplicate copies.\n\n**Skipped (out of scope or low-value):**\n\n- Extracting a generic `run_bulk` shared between `archive.rs` and `approval.rs` — would require refactoring existing archive code; the two files now follow the same idiomatic pattern, which is the simpler win.\n- Centralizing the 3 mock `FabroToolBackend` impls behind a `test_support::PanicBackend` — broader cross-crate refactor flagged by the reuse agent, not scoped to this change.\n- Parallelizing the batch CLI loop — flagged LOW only because it would diverge from `archive.rs`.\n\n**Verification:** `cargo check --workspace`, `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`, `cargo +nightly-2026-04-14 fmt --check --all`, and `cargo nextest run -p fabro-tool -p fabro-client -p fabro-server -p fabro-workflow` (1893 tests) all pass. The new `approve`/`deny` CLI tests and existing `archive`/`unarchive` tests (36 tests) all pass.",
+              "last_stage": "simplify_opus"
+            },
+            "notes": "Stage completed: simplify_opus",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 86101,
+                    "output_tokens": 22842,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 3583598,
+                    "cache_write_tokens": 231978
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 231978,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 4243216
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-cli/src/commands/runs/approval.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-cli/tests/it/cmd/approve.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-cli/tests/it/cmd/archive.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-cli/tests/it/cmd/deny.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-cli/tests/it/cmd/support.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-cli/tests/it/cmd/unarchive.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-client/src/client.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-tool/src/interact.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/handler/llm/api.rs"
+            ]
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "verify": {
+            "status": "failed",
+            "context_updates": {
+              "command.output": "blob://sha256/b022b3ede378bcd069482215651fbc966813837501d94f82dcd93501ff5974e3"
+            },
+            "failure": {
+              "message": "Script failed with exit code: 1\n\n## output\nicesPanelView > shows API error state with the error message [0.68ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) ServicesPanelView > renders a non-previewable service without a Preview button [0.67ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) ServicesPanelView > renders a Preview button for a previewable service and triggers with signed args [7.92ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) ServicesPanelView > clicking Preview opens the returned URL in a new tab [1.06ms]\n\napp/routes/run-sandbox/vnc-panel.test.tsx:\n(pass) vncSupported > only daytona is supported [0.07ms]\n(pass) describeVncError > treats 501 as non-recoverable unsupported [0.10ms]\n(pass) describeVncError > treats 409 as recoverable startup failure [0.03ms]\n(pass) describeVncError > treats 404 as non-recoverable [0.03ms]\n(pass) describeVncError > falls back to a generic recoverable error for unknown shapes [0.05ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > disables the query and shows unsupported state for non-Daytona providers [14.49ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > enables the query and shows loading state on Daytona while fetching [1.09ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > renders an iframe with the signed URL on success [0.66ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > renders an actionable error state for 409 startup failures [0.75ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > reconnect button refetches the signed URL [0.71ms]\n\n5 tests failed:\n(fail) StageInsightsSidebar > renders permission badge for read-only [0.78ms]\n(fail) StageInsightsSidebar > renders permission badge for full access [0.70ms]\n(fail) StageInsightsSidebar > renders projected agent tool names, descriptions, categories, and invoked state [0.93ms]\n(fail) StageInsightsSidebar > legacy stages without agent tools keep permission fallback only [0.91ms]\n(fail) StageInsightsSidebar > renders empty-friendly content when stage projection is missing [0.63ms]\n\n 484 pass\n 5 fail\n 1189 expect() calls\nRan 489 tests across 59 files. [9.65s]\nerror: script \"test\" exited with code 1\n",
+              "category": "deterministic"
+            },
+            "usage": null
+          }
+        },
+        "next_node_id": "fixup",
+        "git_commit_sha": "720c8b49f46a4b93943328676944cb60f5ad31da",
+        "loop_failure_signatures": {
+          "verify|deterministic|script failed with exit code: <n> ## output icespanelview > shows api error state with the error message [<n>.68ms] react-test-renderer is deprecated. see https://react.dev/warnings/react-test-renderer the current testing environment is not": 1
+        },
+        "node_visits": {
+          "verify": 1,
+          "toolchain": 1,
+          "simplify_gpt": 1,
+          "simplify_opus": 1,
+          "implement": 1,
+          "preflight_compile": 1,
+          "preflight_lint": 1,
+          "start": 1
+        }
+      },
+      "diff": {
+        "patch": "diff --git a/Cargo.lock b/Cargo.lock\nindex 9372c2503..703bbbae7 100644\n--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1583,7 +1583,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-acp\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"agent-client-protocol\",\n  \"agent-client-protocol-tokio\",\n@@ -1602,7 +1602,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-agent\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-trait\",\n@@ -1644,7 +1644,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-api\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"chrono\",\n  \"fabro-config\",\n@@ -1665,7 +1665,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-auth\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-trait\",\n@@ -1689,11 +1689,11 @@ dependencies = [\n \n [[package]]\n name = \"fabro-build-support\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n \n [[package]]\n name = \"fabro-checkpoint\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"chrono\",\n  \"fabro-config\",\n@@ -1709,7 +1709,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-cli\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"assert_cmd\",\n@@ -1810,7 +1810,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-client\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"bytes\",\n@@ -1839,7 +1839,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-config\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"chrono\",\n@@ -1868,7 +1868,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-core\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"async-trait\",\n  \"fabro-types\",\n@@ -1883,7 +1883,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-dev\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"assert_cmd\",\n@@ -1902,7 +1902,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-devcontainer\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"fabro-http\",\n  \"fabro-static\",\n@@ -1919,7 +1919,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-dump\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"bytes\",\n@@ -1933,7 +1933,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-github\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"base64\",\n@@ -1955,7 +1955,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-graphviz\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"fabro-types\",\n@@ -1969,7 +1969,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-hooks\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"async-trait\",\n  \"fabro-agent\",\n@@ -1993,7 +1993,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-http\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"fabro-static\",\n  \"http\",\n@@ -2003,7 +2003,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-install\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"base64\",\n@@ -2019,7 +2019,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-interview\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"async-trait\",\n  \"dialoguer\",\n@@ -2034,7 +2034,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-llm\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-trait\",\n@@ -2069,7 +2069,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-macros\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"clap\",\n  \"fabro-options-metadata\",\n@@ -2080,7 +2080,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-manifest\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"fabro-api\",\n@@ -2098,7 +2098,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-mcp\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"axum\",\n@@ -2118,7 +2118,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-mcp-server\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"chrono\",\n@@ -2145,7 +2145,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-model\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"fabro-static\",\n  \"http\",\n@@ -2161,7 +2161,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-oauth\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"axum\",\n@@ -2183,7 +2183,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-options-metadata\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"serde\",\n  \"serde_json\",\n@@ -2191,7 +2191,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-proc\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"cc\",\n  \"libc\",\n@@ -2200,7 +2200,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-redact\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"aho-corasick\",\n  \"ref-cast\",\n@@ -2216,7 +2216,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-sandbox\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-trait\",\n@@ -2259,7 +2259,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-server\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-trait\",\n@@ -2344,7 +2344,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-slack\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"fabro-http\",\n  \"fabro-interview\",\n@@ -2366,18 +2366,18 @@ dependencies = [\n \n [[package]]\n name = \"fabro-spa\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"rust-embed\",\n ]\n \n [[package]]\n name = \"fabro-static\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n \n [[package]]\n name = \"fabro-store\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"async-trait\",\n  \"bytes\",\n@@ -2404,7 +2404,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-telemetry\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"base64\",\n@@ -2430,7 +2430,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-template\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"fabro-types\",\n@@ -2444,7 +2444,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-test\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"assert_cmd\",\n  \"axum\",\n@@ -2467,7 +2467,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-tool\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-trait\",\n@@ -2488,7 +2488,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-tracker\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-trait\",\n@@ -2502,7 +2502,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-types\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"chrono\",\n  \"clap\",\n@@ -2523,7 +2523,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-util\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"console 0.15.11\",\n@@ -2543,7 +2543,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-validate\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"fabro-acp\",\n  \"fabro-graphviz\",\n@@ -2556,7 +2556,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-vault\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"chrono\",\n  \"fabro-types\",\n@@ -2568,7 +2568,7 @@ dependencies = [\n \n [[package]]\n name = \"fabro-workflow\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"assert_cmd\",\n@@ -7362,7 +7362,7 @@ dependencies = [\n \n [[package]]\n name = \"twin-github\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"axum\",\n  \"base64\",\n@@ -7381,7 +7381,7 @@ dependencies = [\n \n [[package]]\n name = \"twin-openai\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n dependencies = [\n  \"anyhow\",\n  \"async-stream\",\ndiff --git a/Cargo.toml b/Cargo.toml\nindex cb0d19f56..4d2e02f91 100644\n--- a/Cargo.toml\n+++ b/Cargo.toml\n@@ -5,7 +5,7 @@ resolver = \"2\"\n \n [workspace.package]\n edition = \"2021\"\n-version = \"0.244.0-nightly.0\"\n+version = \"0.244.0\"\n license = \"MIT\"\n \n [workspace.dependencies]\n",
+        "summary": {
+          "files_changed": 24,
+          "additions": 1430,
+          "deletions": 161
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-25T17:19:07.456845Z",
+        "current_node": "fixup",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint",
+          "implement",
+          "simplify_opus",
+          "simplify_gpt",
+          "verify",
+          "fixup"
+        ],
+        "node_retries": {},
+        "context_values": {
           "internal.fidelity": "compact",
           "graph.rankdir": "LR",
           "internal.retry_count.start": 0,
-          "last_stage": "simplify_gpt",
+          "last_stage": "fixup",
           "thread.implement.current_node": "simplify_opus",
           "response.simplify_gpt": "Reviewed the feature diff against `origin/main` and completed cleanup.\n\nFixed:\n- Removed duplicated batch command logic between:\n  - `approve` / `deny`\n  - `archive` / `unarchive`\n- Added shared helper in `lib/crates/fabro-cli/src/commands/runs/mod.rs`:\n  - resolves each selector\n  - attempts all runs\n  - prints short IDs in text mode\n  - emits the common JSON `{ key: [...], errors: [...] }` shape\n  - returns a non-zero error after processing all failures\n- Simplified:\n  - `lib/crates/fabro-cli/src/commands/runs/approval.rs`\n  - `lib/crates/fabro-cli/src/commands/runs/archive.rs`\n\nValidation run:\n- `cargo +nightly-2026-04-14 fmt --all`\n- `cargo check -q -p fabro-cli`\n- `cargo nextest run -p fabro-cli approve deny archive unarchive`\n- `cargo nextest run -p fabro-tool interact`\n- `cargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-cli --all-targets -- -D warnings`\n\nAll passed.",
           "thread.preflight_lint.current_node": "implement",
@@ -1271,27 +1492,30 @@
           "response.simplify_opus": "All clean. Summary of fixes applied:\n\n**Fixed (HIGH/MEDIUM priority issues from review):**\n\n1. **Removed duplicate `normalize_optional_text`** — Deleted the unused helper in `lib/crates/fabro-client/src/client.rs` and simplified `deny_run` to pass `reason` directly. The validator in `interact.rs` already normalizes for the MCP path; the server handles blank values for the CLI path.\n\n2. **Encapsulated user-only policy on the enum** — Added `ValidatedInteractAction::requires_user()` in `lib/crates/fabro-tool/src/interact.rs` and replaced the leaky `matches!` peek in `lib/crates/fabro-workflow/src/handler/llm/api.rs`.\n\n3. **Aligned `approval.rs` style with `archive.rs`** — Dropped the redundant `json_key()` and `failure_message()` wrappers; renamed `verb()` → `past()`; switched `bail!(action.failure_message())` to `bail!(\"some runs could not be {}\", action.past())` matching archive.rs.\n\n4. **Deduplicated test helpers** — Moved `ulid_filter()` and `conflict_error_body()` into `lib/crates/fabro-cli/tests/it/cmd/support.rs`. Updated `approve.rs`, `deny.rs`, `archive.rs`, and `unarchive.rs` to import them, eliminating 4 duplicate copies.\n\n**Skipped (out of scope or low-value):**\n\n- Extracting a generic `run_bulk` shared between `archive.rs` and `approval.rs` — would require refactoring existing archive code; the two files now follow the same idiomatic pattern, which is the simpler win.\n- Centralizing the 3 mock `FabroToolBackend` impls behind a `test_support::PanicBackend` — broader cross-crate refactor flagged by the reuse agent, not scoped to this change.\n- Parallelizing the batch CLI loop — flagged LOW only because it would diverge from `archive.rs`.\n\n**Verification:** `cargo check --workspace`, `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`, `cargo +nightly-2026-04-14 fmt --check --all`, and `cargo nextest run -p fabro-tool -p fabro-client -p fabro-server -p fabro-workflow` (1893 tests) all pass. The new `approve`/`deny` CLI tests and existing `archive`/`unarchive` tests (36 tests) all pass.",
           "graph.goal": "---\ntitle: \"feat: Add run approval controls to MCP and CLI\"\ntype: feat\nstatus: active\ndate: 2026-05-25\n---\n\n# feat: Add run approval controls to MCP and CLI\n\n## Summary\n\nFabro already has pre-execution run approval state and REST endpoints:\n\n- `POST /api/v1/runs/{id}/approve`\n- `POST /api/v1/runs/{id}/deny`\n\nThis plan exposes that capability through the existing human run-management surfaces:\n\n- `fabro_run_interact` gains `approve` and `deny` actions.\n- The CLI gains top-level batch commands:\n  - `fabro approve <RUNS>...`\n  - `fabro deny [--reason <REASON>] <RUNS>...`\n\nApproval remains a human/user action. Workflow-agent `fabro_tools` must not be able to approve or deny child runs it created.\n\n## Key Interface Changes\n\n### MCP\n\nExtend `fabro_run_interact`:\n\n- Add actions: `approve`, `deny`.\n- Add optional parameter: `reason: string | null`.\n- `reason` is valid only for `deny`; trim whitespace and send `None` for absent or blank values.\n- `approve` and `deny` return the updated run summary using the existing `result.summary` shape.\n- Update the tool description to include approval actions.\n\nExample:\n\n```json\n{\n  \"run_id\": \"nightly\",\n  \"action\": \"approve\"\n}\n```\n\n```json\n{\n  \"run_id\": \"nightly\",\n  \"action\": \"deny\",\n  \"reason\": \"Not approved for execution\"\n}\n```\n\n### CLI\n\nAdd flattened top-level commands, alongside `archive` and `unarchive`:\n\n```bash\nfabro approve <RUNS>...\nfabro deny [--reason <REASON>] <RUNS>...\n```\n\nBatch behavior:\n\n- Resolve each argument using the same selector path as archive/unarchive.\n- Attempt every requested run even if earlier runs fail.\n- Text mode prints each successful short run id to stderr.\n- If any run fails, exit non-zero after processing all runs.\n\nJSON output:\n\n```json\n{\n  \"approved\": [\"01K...\"],\n  \"errors\": []\n}\n```\n\n```json\n{\n  \"denied\": [\"01K...\"],\n  \"errors\": []\n}\n```\n\nErrors use the existing batch shape:\n\n```json\n{\n  \"identifier\": \"nightly\",\n  \"error\": \"Run is not pending approval.\"\n}\n```\n\n`fabro deny --reason <REASON>` applies the same reason to every run in the batch.\n\n## Implementation Plan\n\n### 1. Add client and shared tool backend methods\n\nFiles:\n\n- `lib/crates/fabro-client/src/client.rs`\n- `lib/crates/fabro-tool/src/common.rs`\n- `lib/crates/fabro-tool/src/fabro_client.rs`\n- Mock `FabroToolBackend` impls in tests under `fabro-tool` and `fabro-workflow`\n\nChanges:\n\n- Add `Client::approve_run(&RunId) -> Result<Run>`.\n- Add `Client::deny_run(&RunId, Option<String>) -> Result<Run>`.\n- Implement them by calling the generated `approve_run` and `deny_run` OpenAPI client methods.\n- Add matching methods to `FabroToolBackend`.\n- Implement them in `ClientBackend`.\n- For `deny_run`, build `types::DenyRunRequest { reason }` only when the generated client requires a body; preserve the API behavior that omitted, null, empty, or whitespace-only reasons are stored as absent.\n\nNo OpenAPI or generated-client regeneration is expected because the endpoints and DTO already exist.\n\n### 2. Extend `fabro_run_interact`\n\nFiles:\n\n- `lib/crates/fabro-tool/src/interact.rs`\n- `lib/crates/fabro-tool/src/common.rs`\n- `lib/crates/fabro-tool/src/lib.rs`\n- `lib/crates/fabro-mcp-server/src/server.rs`\n\nChanges:\n\n- Add `RunInteractAction::Approve` and `RunInteractAction::Deny`.\n- Add `reason: Option<String>` to `FabroRunInteractParams`.\n- Add `ValidatedInteractAction::Approve` and `ValidatedInteractAction::Deny { reason: Option<String> }`.\n- Validate `reason` by trimming whitespace and dropping blank values.\n- Dispatch:\n  - `Approve` -> `backend.approve_run(&run_id)`\n  - `Deny` -> `backend.deny_run(&run_id, reason)`\n- Return `json!({ \"summary\": common::run_summary_result(&summary) })`.\n- Update `interact_run_text` output automatically through the action name; no special summary text is required.\n- Update tool descriptions from “start, message, interrupt, cancel…” to include “approve, deny”.\n\n### 3. Block workflow-agent self-approval\n\nFiles:\n\n- `lib/crates/fabro-workflow/src/handler/llm/api.rs`\n- Existing run-tool tests in the same file\n\nChanges:\n\n- In `execute_fabro_run_tool`, parse `FabroRunInteractParams` before dispatching.\n- If the tool call is `fabro_run_interact` with action `approve` or `deny`, return a `ToolError` explaining that run approval must be performed by a user through the API, CLI, web UI, or human MCP server.\n- Do not rely only on server auth for this guard; the tool error should be immediate and explicit for workflow agents.\n- Keep server `approve_run` and `deny_run` handlers on `RequiredUser`.\n- Keep the existing server negative test that run-tools workers cannot call user-only routes, and extend it to include `/runs/{id}/deny`.\n\n### 4. Add CLI approval commands\n\nFiles:\n\n- `lib/crates/fabro-cli/src/args.rs`\n- `lib/crates/fabro-cli/src/commands/runs/mod.rs`\n- Create `lib/crates/fabro-cli/src/commands/runs/approval.rs`\n\nChanges:\n\n- Add:\n  - `RunsApproveArgs { server: ServerTargetArgs, runs: Vec<String> }`\n  - `RunsDenyArgs { server: ServerTargetArgs, reason: Option<String>, runs: Vec<String> }`\n- Add `RunsCommands::Approve(RunsApproveArgs)` and `RunsCommands::Deny(RunsDenyArgs)`.\n- Command help:\n  - approve: “Approve pending workflow runs.”\n  - deny: “Deny pending workflow runs.”\n  - run args: “Run IDs or workflow names to approve/deny.”\n  - reason flag: “Reason for denying execution.”\n- Implement shared batch logic in `commands/runs/approval.rs`, patterned after `archive.rs`:\n  - Resolve each identifier with `client.resolve_run`.\n  - Call `client.approve_run` or `client.deny_run`.\n  - Collect successes and per-identifier errors.\n  - Print short run ids to stderr in text mode.\n  - Print JSON only in JSON mode.\n  - Fail at the end with `some runs could not be approved` or `some runs could not be denied`.\n- Register the new dispatch arms in `commands/runs/mod.rs`.\n- Update command-name reporting in `RunsCommands::name()`.\n\n### 5. Update docs\n\nFiles:\n\n- `docs/public/agents/mcp.mdx`\n- `docs/public/reference/cli.mdx`\n\nChanges:\n\n- Update the `fabro_run_interact` row to include approve/deny.\n- Add a short MCP example for approving or denying a pending run.\n- Add generated or manually updated CLI reference sections for:\n  - `fabro approve`\n  - `fabro deny`\n- If `docs/public/reference/cli.mdx` is generated from `fabro __cli-reference`, regenerate it after the CLI args are implemented.\n\n## Test Plan\n\n### `fabro-tool`\n\n- Add unit tests for action validation:\n  - `approve` validates with only `run_id` and action.\n  - `deny` validates with absent reason as `None`.\n  - `deny` trims a nonblank reason.\n  - `deny` converts blank reason to `None`.\n- Add dispatch tests with a mock backend:\n  - `approve` calls `approve_run` and returns `result.summary`.\n  - `deny` calls `deny_run` with the expected reason and returns `result.summary`.\n- Update schema/tool-definition assertions to prove `approve`, `deny`, and `reason` appear in the `fabro_run_interact` schema.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-tool interact\n```\n\n### MCP integration\n\nFile:\n\n- `lib/crates/fabro-cli/tests/it/cmd/mcp.rs`\n\nScenarios:\n\n- `fabro_run_interact` action `approve`:\n  - resolves selector through `/api/v1/runs/resolve`\n  - posts to `/api/v1/runs/{id}/approve`\n  - returns updated summary\n- `fabro_run_interact` action `deny`:\n  - resolves selector\n  - posts to `/api/v1/runs/{id}/deny`\n  - sends `{ \"reason\": \"Not approved for execution\" }` when reason is supplied\n  - returns updated summary\n- Existing tool-list/schema test checks the new actions and parameter.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli mcp_interact\n```\n\n### CLI command tests\n\nFiles:\n\n- Create `lib/crates/fabro-cli/tests/it/cmd/approve.rs`\n- Create `lib/crates/fabro-cli/tests/it/cmd/deny.rs`\n- Modify `lib/crates/fabro-cli/tests/it/cmd/mod.rs`\n- Modify `lib/crates/fabro-cli/tests/it/cmd/fabro.rs`\n\nScenarios:\n\n- Help snapshots for `fabro approve --help` and `fabro deny --help`.\n- Required-argument snapshots for missing `<RUNS>...`.\n- Mock-server success path:\n  - resolve `nightly-build`\n  - call approve/deny endpoint\n  - print short run id in text mode\n- JSON success path:\n  - approve returns `approved`\n  - deny returns `denied`\n  - both include `errors: []`\n- Partial-error path:\n  - one selector or endpoint fails\n  - remaining runs are still attempted\n  - JSON includes both successes and errors\n  - process exits non-zero\n- `fabro deny --reason \"Needs review\"` sends that reason in the request body.\n- Top-level help snapshot includes `approve` and `deny`.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli approve deny fabro::help\n```\n\n### Server auth regression\n\nFile:\n\n- `lib/crates/fabro-server/src/server/tests.rs`\n\nScenario:\n\n- Extend `run_tools_worker_cannot_call_user_only_non_mcp_routes` so a run-tools worker remains rejected for:\n  - `POST /runs/{target}/approve`\n  - `POST /runs/{target}/deny`\n  - an existing user-only route such as timeline\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes\n```\n\n### Final verification\n\nRun targeted checks first:\n\n```bash\ncargo nextest run -p fabro-tool -p fabro-cli -p fabro-server\n```\n\nBefore merge, run:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\nRun full workspace tests if the client/backend trait changes produce broad compile churn:\n\n```bash\ncargo nextest run --workspace\n```\n\n## Assumptions\n\n- Approval and denial remain user-authorized operations.\n- Human MCP clients use normal CLI/server user auth and may approve or deny.\n- Workflow-agent `fabro_tools` may inspect pending runs but must not approve or deny them.\n- `fabro deny --reason <REASON>` applies one reason to every run in the batch.\n- No API contract change is required because the REST approval endpoints already exist.\n",
           "response.implement": "Implemented run approval controls for MCP and CLI.\n\nSummary:\n- Added `fabro_client::Client::approve_run` and `deny_run`.\n- Extended `FabroToolBackend` and `ClientBackend` with approval methods.\n- Extended `fabro_run_interact` with:\n  - `approve`\n  - `deny`\n  - optional `reason`\n  - reason trimming / blank-to-`None`\n  - summary-returning dispatch.\n- Updated MCP tool descriptions and schema coverage.\n- Blocked workflow-agent `fabro_tools` from approving/denying runs with an immediate explicit `ToolError`.\n- Added top-level CLI commands:\n  - `fabro approve <RUNS>...`\n  - `fabro deny [--reason <REASON>] <RUNS>...`\n- Added batch JSON/text behavior and partial-error handling.\n- Updated CLI/MCP docs and verified generated CLI docs are current.\n- Extended server auth regression to include `/runs/{id}/deny`.\n\nValidation run:\n- Red step: `cargo nextest run -p fabro-tool interact` failed before implementation as expected.\n- `cargo nextest run -p fabro-tool interact`\n- `cargo nextest run -p fabro-cli approve deny fabro::help stdio_server_initializes_and_lists_run_tools mcp_interact`\n- `cargo nextest run -p fabro-workflow agent_run_interact_rejects_approval_actions_before_backend_dispatch`\n- `cargo nextest run -p fabro-server run_tools_worker_cannot_call_user_only_non_mcp_routes`\n- `cargo nextest run -p fabro-tool -p fabro-cli -p fabro-server`\n- `cargo dev docs check`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n- `git diff --check`\n\nNote: `cargo insta pending-snapshots` could not be run because `cargo-insta` is not installed in this environment, but the affected inline snapshot tests passed.",
-          "current_node": "verify",
+          "current_node": "fixup",
+          "thread.verify.current_node": "fixup",
           "internal.retry_count.toolchain": 0,
-          "outcome": "failed",
+          "outcome": "succeeded",
           "internal.retry_count.preflight_compile": 0,
           "thread.toolchain.current_node": "preflight_compile",
+          "response.fixup": "Both tests and typecheck pass. The failure was caused by a stale test file: commit `aa1613e95` on main simplified the `StageInsightsSidebar` component (dropped the permission badge and stripped tool row metadata) but did not update `stage-insights-sidebar.test.tsx`. After merging main into this branch, those assertions broke.\n\nFixes:\n- Removed the two permission-badge tests (`Read-only`, `Full access`) since the component no longer renders that badge.\n- Removed the `legacy stages without agent tools keep permission fallback only` test (same reason).\n- Trimmed the agent-tools test to assert only the tool names, descriptions (as `title` tooltips), and the `1/2` count, matching what the slimmed `AgentToolsSection` actually renders.\n- Removed the `Unknown` assertion from the empty-state test.\n- Replaced the unused `PermissionLevel` import with `AgentToolCategory` (still required by the `AgentToolSummary` type).\n\nFinal result: 486 pass / 0 fail, typecheck clean.",
           "command.output": "blob://sha256/b022b3ede378bcd069482215651fbc966813837501d94f82dcd93501ff5974e3",
           "thread.start.current_node": "toolchain",
           "thread.simplify_opus.current_node": "simplify_gpt",
           "internal.retry_count.verify": 0,
           "thread.simplify_gpt.current_node": "verify",
-          "last_response": "Reviewed the feature diff against `origin/main` and completed cleanup.\n\nFixed:\n- Removed duplicated batch command logic between:\n  - `approve` / `deny`\n  - `archive` / `unarchive`\n- Added shared helpe",
+          "last_response": "Both tests and typecheck pass. The failure was caused by a stale test file: commit `aa1613e95` on main simplified the `StageInsightsSidebar` component (dropped the permission badge and stripped tool r",
           "internal.retry_count.implement": 0,
           "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
           "internal.node_visit_count": 1,
-          "failure_class": "deterministic",
-          "failure_signature": "verify|deterministic|script failed with exit code: <n> ## output icespanelview > shows api error state with the error message [<n>.68ms] react-test-renderer is deprecated. see https://react.dev/warnings/react-test-renderer the current testing environment is not",
+          "failure_class": "",
+          "failure_signature": "",
           "thread.preflight_compile.current_node": "preflight_lint",
           "internal.retry_count.simplify_gpt": 0,
           "internal.run_id": "01KSFYCA4W7NCM7F70FRM1PX7N",
           "internal.work_dir": "/home/daytona/workspace/fabro",
-          "internal.thread_id": "simplify_gpt",
+          "internal.retry_count.fixup": 0,
+          "internal.thread_id": "verify",
           "internal.retry_count.preflight_lint": 0
         },
         "node_outcomes": {
@@ -1399,6 +1623,41 @@
               "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/handler/llm/api.rs"
             ]
           },
+          "fixup": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.fixup": "Both tests and typecheck pass. The failure was caused by a stale test file: commit `aa1613e95` on main simplified the `StageInsightsSidebar` component (dropped the permission badge and stripped tool row metadata) but did not update `stage-insights-sidebar.test.tsx`. After merging main into this branch, those assertions broke.\n\nFixes:\n- Removed the two permission-badge tests (`Read-only`, `Full access`) since the component no longer renders that badge.\n- Removed the `legacy stages without agent tools keep permission fallback only` test (same reason).\n- Trimmed the agent-tools test to assert only the tool names, descriptions (as `title` tooltips), and the `1/2` count, matching what the slimmed `AgentToolsSection` actually renders.\n- Removed the `Unknown` assertion from the empty-state test.\n- Replaced the unused `PermissionLevel` import with `AgentToolCategory` (still required by the `AgentToolSummary` type).\n\nFinal result: 486 pass / 0 fail, typecheck clean.",
+              "last_response": "Both tests and typecheck pass. The failure was caused by a stale test file: commit `aa1613e95` on main simplified the `StageInsightsSidebar` component (dropped the permission badge and stripped tool r",
+              "last_stage": "fixup"
+            },
+            "notes": "Stage completed: fixup",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 49476,
+                    "output_tokens": 7294,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 848126,
+                    "cache_write_tokens": 111368
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 111368,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 1549843
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/apps/fabro-web/app/components/stage-insights-sidebar.test.tsx"
+            ]
+          },
           "simplify_gpt": {
             "status": "succeeded",
             "context_updates": {
@@ -1438,8 +1697,9 @@
             "usage": null
           }
         },
-        "next_node_id": "fixup",
+        "next_node_id": "verify",
         "node_visits": {
+          "fixup": 1,
           "simplify_gpt": 1,
           "simplify_opus": 1,
           "implement": 1,
@@ -1805,6 +2065,233 @@
       },
       "state": "succeeded"
     },
+    "fixup@1": {
+      "first_event_seq": 1219,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-opus-4-7"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-25T17:16:37.641030Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 49476,
+        "output_tokens": 7294,
+        "total_tokens": 1016264,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 848126,
+        "cache_write_tokens": 111368,
+        "total_usd_micros": 1549843
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-opus-4-7"
+      },
+      "permission_level": "full",
+      "agent_tools": [
+        {
+          "name": "AskUserQuestion",
+          "description": "Ask the human one or more questions and wait for their answers before continuing this stage.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "TaskCreate",
+          "description": "Create pending tasks in the current session. Use concise subjects, descriptions, optional activeForm text, and metadata. Check TaskList first to avoid duplicate tasks.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "TaskGet",
+          "description": "Get one task by taskId, including subject, status, description, owner, blockedBy, and blocks.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "TaskList",
+          "description": "List tasks for the current session, including status, owner, and blocking dependencies. Use TaskGet with a taskId for full description and dependency details.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "TaskUpdate",
+          "description": "Update an existing task's status, text, owner, metadata, or dependencies. Valid statuses are pending, in_progress, completed, and deleted. After completing a task, call TaskList to find newly unblocked work.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "close_agent",
+          "description": "Close a running subagent that is no longer needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "edit_file",
+          "description": "Edit a file by replacing an exact string. The old_string must be an exact match and unique unless replace_all is true; include surrounding context when needed. Read the file first and preserve existing indentation.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        },
+        {
+          "name": "glob",
+          "description": "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "grep",
+          "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "read_file",
+          "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "send_input",
+          "description": "Send a follow-up message to a running subagent when new information or corrected instructions are needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "shell",
+          "description": "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "shell",
+          "invoked": true
+        },
+        {
+          "name": "spawn_agent",
+          "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "wait",
+          "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "web_fetch",
+          "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "web_search",
+          "description": "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "write_file",
+          "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": false
+        }
+      ],
+      "context_window": {
+        "provider": "anthropic",
+        "model": "claude-opus-4-7",
+        "context_window_tokens": 1000000,
+        "input_tokens": 61641,
+        "usage_percent": 6.1641,
+        "count_method": "response_usage_scaled_breakdown",
+        "staleness": "live",
+        "generated_at": "2026-05-25T17:19:07.354391Z",
+        "event_seq": 1285,
+        "breakdown": [
+          {
+            "category": "system_prompt",
+            "tokens": 2704,
+            "usage_percent": 0.2704
+          },
+          {
+            "category": "tools",
+            "tokens": 3095,
+            "usage_percent": 0.3095
+          },
+          {
+            "category": "memory",
+            "tokens": 6466,
+            "usage_percent": 0.6466
+          },
+          {
+            "category": "conversation",
+            "tokens": 49368,
+            "usage_percent": 4.9368
+          },
+          {
+            "category": "other",
+            "tokens": 8,
+            "usage_percent": 0.0008
+          }
+        ],
+        "warnings": []
+      },
+      "state": "running"
+    },
     "implement@1": {
       "first_event_seq": 52,
       "prompt": null,
@@ -2145,7 +2632,12 @@
       "first_event_seq": 1209,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "failed",
+        "notes": null,
+        "failure_reason": "Script failed with exit code: 1\n\n## output\nicesPanelView > shows API error state with the error message [0.68ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) ServicesPanelView > renders a non-previewable service without a Preview button [0.67ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) ServicesPanelView > renders a Preview button for a previewable service and triggers with signed args [7.92ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) ServicesPanelView > clicking Preview opens the returned URL in a new tab [1.06ms]\n\napp/routes/run-sandbox/vnc-panel.test.tsx:\n(pass) vncSupported > only daytona is supported [0.07ms]\n(pass) describeVncError > treats 501 as non-recoverable unsupported [0.10ms]\n(pass) describeVncError > treats 409 as recoverable startup failure [0.03ms]\n(pass) describeVncError > treats 404 as non-recoverable [0.03ms]\n(pass) describeVncError > falls back to a generic recoverable error for unknown shapes [0.05ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > disables the query and shows unsupported state for non-Daytona providers [14.49ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > enables the query and shows loading state on Daytona while fetching [1.09ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > renders an iframe with the signed URL on success [0.66ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > renders an actionable error state for 409 startup failures [0.75ms]\nreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\nThe current testing environment is not configured to support act(...)\n(pass) VncPanel render > reconnect button refetches the signed URL [0.71ms]\n\n5 tests failed:\n(fail) StageInsightsSidebar > renders permission badge for read-only [0.78ms]\n(fail) StageInsightsSidebar > renders permission badge for full access [0.70ms]\n(fail) StageInsightsSidebar > renders projected agent tool names, descriptions, categories, and invoked state [0.93ms]\n(fail) StageInsightsSidebar > legacy stages without agent tools keep permission fallback only [0.91ms]\n(fail) StageInsightsSidebar > renders empty-friendly content when stage projection is missing [0.63ms]\n\n 484 pass\n 5 fail\n 1189 expect() calls\nRan 489 tests across 59 files. [9.65s]\nerror: script \"test\" exited with code 1\n",
+        "timestamp": "2026-05-25T17:16:32.791680Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -2153,11 +2645,27 @@
         "command": "exec 2>&1\ngit fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "output": "blob://sha256/b022b3ede378bcd069482215651fbc966813837501d94f82dcd93501ff5974e3",
+        "exit_code": 1,
+        "duration_ms": 250737,
+        "termination": "exited",
+        "output_bytes": 90660,
+        "live_streaming": true
+      },
       "parallel_results": null,
       "output": null,
+      "output_bytes": 90660,
+      "live_streaming": true,
+      "termination": "exited",
       "started_at": "2026-05-25T17:12:22.042156Z",
       "handler": "command",
+      "timing": {
+        "wall_time_ms": 250747,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -2166,7 +2674,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "failed"
     },
     "toolchain@1": {
       "first_event_seq": 22,
