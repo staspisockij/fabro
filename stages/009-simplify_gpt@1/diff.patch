@@ -1,0 +1,13 @@
+diff --git a/lib/crates/fabro-server/src/automation_materializer.rs b/lib/crates/fabro-server/src/automation_materializer.rs
+index 36970cb13..2a400b73c 100644
+--- a/lib/crates/fabro-server/src/automation_materializer.rs
++++ b/lib/crates/fabro-server/src/automation_materializer.rs
+@@ -368,7 +368,7 @@ mod tests {
+         let target = AutomationTarget {
+             repository: RepositorySlug::from_str("fabro-sh/fabro").unwrap(),
+             ref_:       GitRefSelector::from_str("main").unwrap(),
+-            workflow:   WorkflowSlug::from_str("flows/deps").unwrap(),
++            workflow:   WorkflowSlug::from_str("flows/deps.fabro").unwrap(),
+         };
+         let run_id = RunId::new();
+         let input = AutomationRunMaterializeInput {
