@@ -368,7 +368,7 @@ mod tests {
         let target = AutomationTarget {
             repository: RepositorySlug::from_str("fabro-sh/fabro").unwrap(),
             ref_:       GitRefSelector::from_str("main").unwrap(),
-            workflow:   WorkflowSlug::from_str("flows/deps").unwrap(),
+            workflow:   WorkflowSlug::from_str("flows/deps.fabro").unwrap(),
         };
         let run_id = RunId::new();
         let input = AutomationRunMaterializeInput {
