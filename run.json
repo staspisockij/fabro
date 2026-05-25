@@ -505,7 +505,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-25T21:44:41.751851Z",
-  "last_event_at": "2026-05-25T22:52:11.999808Z",
+  "last_event_at": "2026-05-25T22:52:16.027281Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -1042,9 +1042,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 1819,
       "checkpoint": {
-        "timestamp": "2026-05-25T22:52:12.048532Z",
+        "timestamp": "2026-05-25T22:52:16.025120Z",
         "current_node": "simplify_gpt",
         "completed_nodes": [
           "start",
@@ -1057,6 +1057,212 @@
         ],
         "node_retries": {},
         "context_values": {
+          "internal.retry_count.preflight_compile": 0,
+          "last_stage": "simplify_gpt",
+          "thread.preflight_lint.current_node": "implement",
+          "thread.simplify_opus.current_node": "simplify_gpt",
+          "failure_signature": "",
+          "response.simplify_opus": "All six fixes landed, with net **-57 lines** even while adding three shared helpers and a constructor. Summary of cleanups applied based on the three reviewers' findings:\n\n## Fixed\n\n1. **Returned timing from `process_input_with_runtime` instead of stashing it on `Session`** (Agent 2 #1). Dropped `last_input_inference_duration` / `last_input_tool_duration` fields, the `last_input_timing()` getter, and the per-call reset prologue. Signature is now `-> (SessionInputTiming, Result<(), Error>)`. Eliminates the \"must read immediately\" implicit contract.\n\n2. **Replaced the `record_inference_duration!` macro with a free function** `record_elapsed(&mut Option<Instant>, &mut Duration)` (Agent 1 #2, Agent 2 #2). Same 7 call sites, but type-checked, IDE-discoverable, and no macro hygiene.\n\n3. **Made `run_store` required on `DetachedRunBootstrapGuard::arm()`** (Agent 1 #7, Agent 2 #3/#5). Dropped the `Option<RunStoreHandle>` field and the external setter pattern. Drop impl unconditionally builds the conclusion now.\n\n4. **Extracted `emit_workflow_run_failed` helper** (Agent 1 #7, Agent 2 #4). Collapses the four near-identical \"build conclusion → emit run.failed\" sites in `start.rs` (terminal engine failure, both Drop guards, `persist_detached_failure`) into one shared function.\n\n5. **Added `StageTiming::active_only(inference, tool)` constructor** (Agent 1 #1). Removed the local `active_stage_timing` helper in `handler/llm/api.rs` and unified `acp.rs` and `command.rs` on the same shape.\n\n6. **Reverted `Box<BilledModelUsage>` in `CodergenResult::Text`** (Agent 1 #6, Agent 2 #6). Was the worst of both worlds — didn't equalise variant size, forced `.map(|usage| *usage)` ceremony at every call site. Used `#[allow(clippy::large_enum_variant, reason = \"...\")]` matching the established pattern in `event/events.rs` and `event/sink.rs`.\n\n7. **Hoisted `test_usage` and `mark_run_running` to `test_support`** (Agent 1 #3/#4). `test_usage` was duplicated in 4 files (this PR was about to add a 5th); the 4th `mark_run_running` copy was right next to a pre-existing 3-event seed in test_support that didn't quite match. Both are now public helpers in `crate::test_support`.\n\n## Skipped (with reason)\n\n- **Make Drop guard tasks survive runtime shutdown** (Agent 3 #3) — flagged as a correctness-on-shutdown concern, not introduced by this PR; widening it would be a separate fix.\n- **`wait_for_conclusion` polling timeout hardening** (Agent 2 #8) — minor CI flake risk; current 50ms budget is enough for unit tests.\n- **`Candidate::timing` zero on LLM-failure heuristic fallback** (Agent 2 #9, Agent 3 implicit) — agent itself noted this is acceptable; capturing wasted inference on errors would require threading Instants through the fan-in evaluator.\n- **Helper for the 3-line failed-outcome decoration in agent.rs/prompt.rs** (Agent 2 #7/#10) — marginal benefit not worth the indirection.\n\n## Verification\n\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` clean\n- `cargo +nightly-2026-04-14 fmt --check --all` clean\n- `cargo nextest run -p fabro-workflow -p fabro-agent -p fabro-types -p fabro-core` — all 3592 tests pass (1175 + 1844 + 573 across the affected crates).",
+          "thread.implement.current_node": "simplify_opus",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.retry_count.simplify_gpt": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "outcome": "succeeded",
+          "response.simplify_gpt": "Reviewed the branch diff vs merge base and ran the parallel review pass. I found and fixed one cleanup issue:\n\n- Restored `Session::process_input_with_runtime` to its original public `Result<(), Error>` shape instead of returning a tuple.\n- Added the requested `Session::last_input_timing()` getter and `last_input_timing` state on `Session`.\n- Updated workflow callers to read timing through the getter after `process_input_with_runtime(...)`.\n- Updated the agent timing unit test accordingly.\n\nValidation passed:\n\n- `cargo check -q -p fabro-agent -p fabro-workflow`\n- `cargo nextest run -p fabro-agent -p fabro-workflow`\n- `cargo nextest run -p fabro-store -p fabro-core`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-agent -p fabro-workflow --all-targets -- -D warnings`\n\nWorking tree now has the cleanup edits in:\n\n- `lib/crates/fabro-agent/src/session.rs`\n- `lib/crates/fabro-workflow/src/handler/llm/api.rs`",
+          "internal.run_id": "01KSGHHBR7DQ1RHFYKD7P46R6F",
+          "internal.retry_count.toolchain": 0,
+          "last_response": "Reviewed the branch diff vs merge base and ran the parallel review pass. I found and fixed one cleanup issue:\n\n- Restored `Session::process_input_with_runtime` to its original public `Result<(), Error",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "graph.rankdir": "LR",
+          "internal.thread_id": "simplify_opus",
+          "failure_class": "",
+          "response.implement": "Implemented the stage timing and terminal failure rollup fixes.\n\nSummary of changes:\n- Added per-input `fabro-agent::Session` timing:\n  - Tracks LLM inference/stream time and tool execution time.\n  - Exposes `SessionInputTiming` via `Session::last_input_timing()`.\n  - Resets timing at each `process_input_with_runtime` entry.\n- Threaded timing through workflow LLM backends:\n  - `CodergenResult::Text` now carries active `StageTiming`.\n  - API backend measures one-shot inference and agent-loop inference/tool time.\n  - ACP backend attributes opaque duration to inference.\n- Populated `Outcome.timing` in production handlers:\n  - Agent, prompt, fan-in, and command handlers now preserve active timing.\n  - Command duration is reported as tool time.\n- Preserved timing/billing for terminal run failures:\n  - `persist_terminal_engine_failure` now uses `build_conclusion_from_store` timing and billing.\n  - Detached bootstrap/completion guards now preserve conclusion timing/billing when a store exists.\n  - Detached failure helper now rolls up timing/billing from the store.\n- Added tests for:\n  - Agent per-input inference/tool timing.\n  - Agent/prompt/fan-in handler timing propagation.\n  - Command handler tool timing.\n  - Executor propagation into `NodeResult`.\n  - Full workflow event rollup from `Outcome.timing` → `stage.completed` → `run.completed`.\n  - Terminal engine failure and drop-guard timing/billing preservation.\n\nValidation passed:\n- `cargo nextest run -p fabro-agent -p fabro-workflow -p fabro-store -p fabro-core`\n  - 1913 passed, 122 skipped\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n- `cargo build -p fabro-server`\n- `git diff --check`\n\nI did not run the interactive/live server + UI E2E workflow steps, but the server build and full requested automated validation are green.",
+          "internal.retry_count.start": 0,
+          "internal.retry_count.implement": 0,
+          "internal.retry_count.simplify_opus": 0,
+          "internal.fidelity": "compact",
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "thread.start.current_node": "toolchain",
+          "thread.toolchain.current_node": "preflight_compile",
+          "internal.retry_count.preflight_lint": 0,
+          "graph.goal": "# Plan: Fix stage timing (inference + tool) reporting\n\n## Context\n\nThe web UI's Duration popover shows `Active (inference + tools): 0ms` for every run, including agent-heavy runs that obviously did substantial LLM and tool work. Verified on `01KSE2PAVXD56N4TWNK4T5H5VA`: 10 stage.completed events and 1 run.failed event all carry `inference_time_ms: 0, tool_time_ms: 0`, even though stages like `implement@1` (94 min wall) and `simplify_opus@1` (29 min wall) were doing nothing but inference and tool calls.\n\nTwo independent bugs:\n\n1. **No production handler ever populates `Outcome.timing`.** The plumbing from `Outcome.timing` → `NodeResult` (`lib/crates/fabro-core/src/executor.rs:30-37`) → `StageTiming` → `stage.completed` props → projection → billing rollup → run.completed/failed → UI is fully wired and shipped as of #343 (2026-05-21), but `AgentHandler::execute`, `PromptHandler::execute`, `CommandHandler::execute`, and `FanInHandler` all build `Outcome::success()` and never touch `.timing`. The executor falls back to zero, and every downstream consumer faithfully aggregates zero.\n\n2. **`persist_terminal_engine_failure` and its sibling Drop-guard failure paths discard timing/billing entirely.** When the engine returns `Err` (e.g. `VisitLimitExceeded`, which is what killed the user's run), `lib/crates/fabro-workflow/src/operations/start.rs:284-308` builds a `Conclusion` via `build_conclusion_from_store`, then throws it away (`let _conclusion = ...`) and emits `WorkflowRunFailed` with `RunTiming::wall_only(...)` and `None` for billing/diff. The three Drop-guard paths (`start.rs:934`, `1001`, `1033`) do similar with `RunTiming::default()` and never even build a conclusion.\n\nGoal: stage and run events carry real per-stage `inference_time_ms` + `tool_time_ms`; engine-failure terminal events preserve the conclusion's rolled-up timing and billing.\n\n## Approach\n\n### Part A — Capture inference + tool time in handlers (Bug 1)\n\n**A1. `fabro-agent` — accumulate per-input timing in `Session`**\n\n`lib/crates/fabro-agent/src/session.rs`\n\nAdd two `Duration` accumulators to `Session` (initialised to `Duration::ZERO`):\n- `last_input_inference_duration`\n- `last_input_tool_duration`\n\nIn `process_input_with_runtime` (line 1196), zero them at entry so each call's totals are independent.\n\nIn `run_single_input` (line 1254):\n- Wrap the inference span: capture `Instant::now()` immediately before opening the stream at line 1391, and add `.elapsed()` to `last_input_inference_duration` once `response = Some(resp)` (line 1487-1490) OR when the loop exits with an error/cancellation. The whole `'streamattempts` loop counts as inference work — retries included.\n- Wrap the tool span around `execute_tool_calls` at line 1705-1719: `Instant::now()` before, accumulate `.elapsed()` after `.await`.\n\nExpose a getter:\n```rust\npub fn last_input_timing(&self) -> SessionInputTiming { ... }\n```\nwhere `SessionInputTiming { pub inference: Duration, pub tool: Duration }` is a new tiny struct in `fabro-agent`.\n\n**A2. `fabro-workflow` — thread timing through the backend boundary**\n\n`lib/crates/fabro-workflow/src/handler/agent.rs`\n\nExtend `CodergenResult::Text` with a `timing: fabro_types::StageTiming` field (wall is irrelevant — see note below). Update the few `CodergenResult::Text { ... }` constructions found by the explore agent to populate it; existing match-bindings only read `text`/`usage`/`files_touched` so they keep compiling with `..` patterns. `CodergenResult::Full(outcome)` keeps current behaviour — the outcome itself already carries any timing.\n\nNote on wall: `lib/crates/fabro-core/src/executor.rs:30-37` reads ONLY `inference_time_ms` and `tool_time_ms` out of `outcome.timing`. The wall comes from the executor's own stopwatch. So we construct `StageTiming::new(0, inference_ms, tool_ms)` and document that the wall field is ignored in this hop.\n\n`lib/crates/fabro-workflow/src/handler/llm/api.rs`\n\n- `AgentApiBackend::run` (line 1103): after `session.process_input_with_runtime(...)` returns, read `session.last_input_timing()` and set the new `timing` on `CodergenResult::Text` at line 1094.\n- `AgentApiBackend::one_shot` (line 994): wrap the `complete_one_shot_request` call at line 1053 with `Instant::now()` / `.elapsed()`. Accumulate across repair iterations of the surrounding loop. All of it counts as inference; no tool work happens in `one_shot`. Set `timing` on `CodergenResult::Text` at line 1094.\n\n`lib/crates/fabro-workflow/src/handler/llm/acp.rs`\n\n`AgentAcpBackend::run` (line ~140): already exposes `result.duration_ms`. Set `timing: StageTiming::new(0, duration_ms, 0)` on the returned `CodergenResult::Text` (per user decision: attribute all ACP duration to inference; ACP is opaque about the split).\n\n**A3. Consume timing in stage handlers and set `outcome.timing`**\n\n- `lib/crates/fabro-workflow/src/handler/agent.rs:341` — after building `outcome`, before the final `Ok(outcome)`, set `outcome.timing = Some(timing_from_codergen_result)`.\n- `lib/crates/fabro-workflow/src/handler/prompt.rs:180` — same pattern.\n- `lib/crates/fabro-workflow/src/handler/fan_in.rs:266` — backend returns timing; pass it onto the outcome built from the fan-in response.\n- `lib/crates/fabro-workflow/src/handler/command.rs:175` — `outcome.timing = Some(StageTiming::new(0, 0, result.duration_ms))`. All command wall-time is tool time. `result.duration_ms` is already at line 154 in scope.\n\nOther handlers (`human`, `wait`, `conditional`, `parallel`, `start`, `exit`, `structured_output`, `manager_loop`) do no inference or tool work. Leave `outcome.timing` as `None`; the executor will naturally produce `inference: 0, tool: 0` for those stages, which is correct.\n\n### Part B — Preserve conclusion timing on engine failure (Bug 2)\n\n`lib/crates/fabro-workflow/src/operations/start.rs`\n\n**B1. Main path** (`persist_terminal_engine_failure`, line 274-308):\n- Rename `_conclusion` → `conclusion` and use it:\n  - Pass `conclusion.timing` (already a `RunTiming` with the proper inference/tool/wall rollup from `build_conclusion_from_parts`) instead of `RunTiming::wall_only(...)`.\n  - Pass `conclusion.billing.clone()` instead of `None` for the billing arg of `workflow_run_failed_from_error`.\n  - `final_git_commit_sha`, `final_patch`, `diff_summary` stay `None` — those require the finalize-side workspace diff computation that this path deliberately skips.\n\n**B2. Drop-guard paths** (per user decision: fix them too):\n\n- `DetachedRunBootstrapGuard` (line 882-948): add an `Option<RunStoreHandle>` field. The bootstrap function builds the guard before the store exists, then mutates `bootstrap_guard.run_store = Some(store.clone())` once the store is in scope. On Drop, if the store is `Some`, the spawned task calls `build_conclusion_from_store` and uses its timing/billing; otherwise falls back to `RunTiming::default()` (pre-store failure means no stages can possibly exist).\n\n- `DetachedRunCompletionGuard` (line 953-1021): armed after the store exists, so add a non-optional `run_store: RunStoreHandle`. Drop's spawned task builds the conclusion and uses it.\n\n- `persist_detached_failure` (line 1023): add a `run_store: &RunStoreHandle` parameter. Call `build_conclusion_from_store` and forward `timing` + `billing` to the failure event. Update the two callers (postrun-related) to pass the store they already have in scope.\n\n`RunStoreHandle` is already `Clone` (the surrounding code clones it routinely), so move-into-spawned-task is fine.\n\n### Critical existing utilities to reuse (do not duplicate)\n\n- `fabro_types::StageTiming::new(wall, inference, tool)` and `RunTiming::new(...)` — invariant-enforcing constructors at `lib/crates/fabro-types/src/timing.rs:38, 91`.\n- `crate::millis_u64(duration)` helper for `Duration → u64` ms in `fabro-workflow` (used widely; see `lifecycle/event.rs:80-86`).\n- `build_conclusion_from_store` at `lib/crates/fabro-workflow/src/pipeline/finalize.rs:71` already does the rollup we need on the engine-failure path.\n- `billing_rollup_from_projection` (called inside `build_conclusion_from_parts`) sums per-stage timings into `RunTiming` — no need to reimplement.\n\n## Tests\n\n- **`fabro-agent` unit test**: feed `Session` a fake `LlmClient` whose `stream` sleeps a known duration and a fake tool that sleeps another known duration. Drive one `process_input_with_runtime` call. Assert `session.last_input_timing()` reports both non-zero and roughly matching the sleeps. Then call again and assert it's per-call (not cumulative).\n- **`fabro-workflow` handler tests**: in `handler/agent.rs`'s test module, wire a `CodergenBackend` that returns `CodergenResult::Text { timing: StageTiming::new(0, 200, 300), .. }` and assert `AgentHandler::execute`'s returned `Outcome.timing` carries those values. Mirror for `prompt.rs` and `fan_in.rs`. Add a `command.rs` test that mocks a `sandbox.exec_command_streaming` returning `duration_ms = 500` and asserts `outcome.timing.tool_time_ms == 500`.\n- **Executor integration**: add a test in `fabro-workflow` (or extend an existing one in `pipeline/finalize.rs` tests) that runs a tiny graph with a handler producing `Outcome.timing = Some(StageTiming::new(0, 100, 50))` and asserts the emitted `stage.completed` event carries those values, and that `run.completed` carries the summed rollup.\n- **`persist_terminal_engine_failure` test**: seed a `RunStore` with a couple of `stage.completed` events whose timing is non-zero, drive the engine-failure path, and assert the emitted `WorkflowRunFailed` event has `timing.inference_time_ms` and `tool_time_ms` matching the per-stage sum and `billing` populated.\n- **Drop guard tests**: trickier because of `Handle::try_current` + spawn. Add focused tests that arm a guard, drop it, and `tokio::task::yield_now().await` enough times to let the spawned task run, then assert the emitted failure event carries non-zero timing.\n- Run `cargo nextest run -p fabro-agent -p fabro-workflow -p fabro-store -p fabro-core`.\n- Run formatter and lints per CLAUDE.md: `cargo +nightly-2026-04-14 fmt --check --all` and `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n\n## End-to-end verification\n\n1. Build the server: `cargo build -p fabro-server`.\n2. Start server: `fabro server start`.\n3. Run a small agent-backed workflow (e.g. `fabro run repl` with a short prompt that fires at least one tool call).\n4. `fabro events <run_id> --json | jq -s '[.[] | select(.event==\"stage.completed\")] | .[].properties.timing'` — confirm `inference_time_ms > 0` and `tool_time_ms > 0` for the agent stage.\n5. `fabro events <run_id> --json | jq -s '[.[] | select(.event==\"run.completed\" or .event==\"run.failed\")] | .[].properties.timing'` — confirm `active_time_ms == inference_time_ms + tool_time_ms` and both are non-zero.\n6. Open the run in the web UI (start the SPA dev build per CLAUDE.md or rebuild the embedded SPA with `cargo dev build`), hover the Duration chip, confirm **Active (inference + tools)** is non-zero.\n7. For Bug 2: force an engine failure by setting a very low visit limit and rerunning the same workflow; confirm the `run.failed` event timing breakdown is non-zero and matches the per-stage sum.\n\n## Out of scope\n\n- Adding `wall_time_ms` correctness to `Outcome.timing` (executor ignores it; doc tweak only if necessary).\n- Surfacing inference vs tool split for ACP backend beyond \"all-inference\" attribution.\n- Backfilling timing for historical runs that have already emitted zero events — past events are immutable.\n- Web UI changes beyond what the existing popover already renders.\n",
+          "current_node": "simplify_gpt",
+          "internal.node_visit_count": 1
+        },
+        "node_outcomes": {
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null
+          },
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.implement": "Implemented the stage timing and terminal failure rollup fixes.\n\nSummary of changes:\n- Added per-input `fabro-agent::Session` timing:\n  - Tracks LLM inference/stream time and tool execution time.\n  - Exposes `SessionInputTiming` via `Session::last_input_timing()`.\n  - Resets timing at each `process_input_with_runtime` entry.\n- Threaded timing through workflow LLM backends:\n  - `CodergenResult::Text` now carries active `StageTiming`.\n  - API backend measures one-shot inference and agent-loop inference/tool time.\n  - ACP backend attributes opaque duration to inference.\n- Populated `Outcome.timing` in production handlers:\n  - Agent, prompt, fan-in, and command handlers now preserve active timing.\n  - Command duration is reported as tool time.\n- Preserved timing/billing for terminal run failures:\n  - `persist_terminal_engine_failure` now uses `build_conclusion_from_store` timing and billing.\n  - Detached bootstrap/completion guards now preserve conclusion timing/billing when a store exists.\n  - Detached failure helper now rolls up timing/billing from the store.\n- Added tests for:\n  - Agent per-input inference/tool timing.\n  - Agent/prompt/fan-in handler timing propagation.\n  - Command handler tool timing.\n  - Executor propagation into `NodeResult`.\n  - Full workflow event rollup from `Outcome.timing` → `stage.completed` → `run.completed`.\n  - Terminal engine failure and drop-guard timing/billing preservation.\n\nValidation passed:\n- `cargo nextest run -p fabro-agent -p fabro-workflow -p fabro-store -p fabro-core`\n  - 1913 passed, 122 skipped\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n- `cargo build -p fabro-server`\n- `git diff --check`\n\nI did not run the interactive/live server + UI E2E workflow steps, but the server build and full requested automated validation are green.",
+              "last_stage": "implement",
+              "last_response": "Implemented the stage timing and terminal failure rollup fixes.\n\nSummary of changes:\n- Added per-input `fabro-agent::Session` timing:\n  - Tracks LLM inference/stream time and tool execution time.\n  - "
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 2811275,
+                    "output_tokens": 9602,
+                    "reasoning_tokens": 9372,
+                    "cache_read_tokens": 6235136,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 17743163
+            }
+          },
+          "simplify_gpt": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "simplify_gpt",
+              "response.simplify_gpt": "Reviewed the branch diff vs merge base and ran the parallel review pass. I found and fixed one cleanup issue:\n\n- Restored `Session::process_input_with_runtime` to its original public `Result<(), Error>` shape instead of returning a tuple.\n- Added the requested `Session::last_input_timing()` getter and `last_input_timing` state on `Session`.\n- Updated workflow callers to read timing through the getter after `process_input_with_runtime(...)`.\n- Updated the agent timing unit test accordingly.\n\nValidation passed:\n\n- `cargo check -q -p fabro-agent -p fabro-workflow`\n- `cargo nextest run -p fabro-agent -p fabro-workflow`\n- `cargo nextest run -p fabro-store -p fabro-core`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-agent -p fabro-workflow --all-targets -- -D warnings`\n\nWorking tree now has the cleanup edits in:\n\n- `lib/crates/fabro-agent/src/session.rs`\n- `lib/crates/fabro-workflow/src/handler/llm/api.rs`",
+              "last_response": "Reviewed the branch diff vs merge base and ran the parallel review pass. I found and fixed one cleanup issue:\n\n- Restored `Session::process_input_with_runtime` to its original public `Result<(), Error"
+            },
+            "notes": "Stage completed: simplify_gpt",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 884532,
+                    "output_tokens": 3565,
+                    "reasoning_tokens": 1406,
+                    "cache_read_tokens": 628224,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 4885902
+            }
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null
+          },
+          "simplify_opus": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "simplify_opus",
+              "response.simplify_opus": "All six fixes landed, with net **-57 lines** even while adding three shared helpers and a constructor. Summary of cleanups applied based on the three reviewers' findings:\n\n## Fixed\n\n1. **Returned timing from `process_input_with_runtime` instead of stashing it on `Session`** (Agent 2 #1). Dropped `last_input_inference_duration` / `last_input_tool_duration` fields, the `last_input_timing()` getter, and the per-call reset prologue. Signature is now `-> (SessionInputTiming, Result<(), Error>)`. Eliminates the \"must read immediately\" implicit contract.\n\n2. **Replaced the `record_inference_duration!` macro with a free function** `record_elapsed(&mut Option<Instant>, &mut Duration)` (Agent 1 #2, Agent 2 #2). Same 7 call sites, but type-checked, IDE-discoverable, and no macro hygiene.\n\n3. **Made `run_store` required on `DetachedRunBootstrapGuard::arm()`** (Agent 1 #7, Agent 2 #3/#5). Dropped the `Option<RunStoreHandle>` field and the external setter pattern. Drop impl unconditionally builds the conclusion now.\n\n4. **Extracted `emit_workflow_run_failed` helper** (Agent 1 #7, Agent 2 #4). Collapses the four near-identical \"build conclusion → emit run.failed\" sites in `start.rs` (terminal engine failure, both Drop guards, `persist_detached_failure`) into one shared function.\n\n5. **Added `StageTiming::active_only(inference, tool)` constructor** (Agent 1 #1). Removed the local `active_stage_timing` helper in `handler/llm/api.rs` and unified `acp.rs` and `command.rs` on the same shape.\n\n6. **Reverted `Box<BilledModelUsage>` in `CodergenResult::Text`** (Agent 1 #6, Agent 2 #6). Was the worst of both worlds — didn't equalise variant size, forced `.map(|usage| *usage)` ceremony at every call site. Used `#[allow(clippy::large_enum_variant, reason = \"...\")]` matching the established pattern in `event/events.rs` and `event/sink.rs`.\n\n7. **Hoisted `test_usage` and `mark_run_running` to `test_support`** (Agent 1 #3/#4). `test_usage` was duplicated in 4 files (this PR was about to add a 5th); the 4th `mark_run_running` copy was right next to a pre-existing 3-event seed in test_support that didn't quite match. Both are now public helpers in `crate::test_support`.\n\n## Skipped (with reason)\n\n- **Make Drop guard tasks survive runtime shutdown** (Agent 3 #3) — flagged as a correctness-on-shutdown concern, not introduced by this PR; widening it would be a separate fix.\n- **`wait_for_conclusion` polling timeout hardening** (Agent 2 #8) — minor CI flake risk; current 50ms budget is enough for unit tests.\n- **`Candidate::timing` zero on LLM-failure heuristic fallback** (Agent 2 #9, Agent 3 implicit) — agent itself noted this is acceptable; capturing wasted inference on errors would require threading Instants through the fan-in evaluator.\n- **Helper for the 3-line failed-outcome decoration in agent.rs/prompt.rs** (Agent 2 #7/#10) — marginal benefit not worth the indirection.\n\n## Verification\n\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` clean\n- `cargo +nightly-2026-04-14 fmt --check --all` clean\n- `cargo nextest run -p fabro-workflow -p fabro-agent -p fabro-types -p fabro-core` — all 3592 tests pass (1175 + 1844 + 573 across the affected crates).",
+              "last_response": "All six fixes landed, with net **-57 lines** even while adding three shared helpers and a constructor. Summary of cleanups applied based on the three reviewers' findings:\n\n## Fixed\n\n1. **Returned timi"
+            },
+            "notes": "Stage completed: simplify_opus",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 146925,
+                    "output_tokens": 49357,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 14717122,
+                    "cache_write_tokens": 1256698
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 1256698,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 17181473
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-agent/src/session.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-types/src/timing.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/billing_rollup.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/event/convert.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/handler/agent.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/handler/command.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/handler/llm/acp.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/handler/llm/api.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/handler/prompt.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/operations/start.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/pipeline/finalize.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/test_support.rs"
+            ]
+          }
+        },
+        "next_node_id": "verify",
+        "git_commit_sha": "8ff9de422bd79e98274be0769aea266ed6a4a558",
+        "node_visits": {
+          "toolchain": 1,
+          "simplify_opus": 1,
+          "preflight_compile": 1,
+          "implement": 1,
+          "start": 1,
+          "simplify_gpt": 1,
+          "preflight_lint": 1
+        }
+      },
+      "diff": {
+        "patch": "diff --git a/lib/crates/fabro-agent/src/session.rs b/lib/crates/fabro-agent/src/session.rs\nindex 0cfe25d98..38d14a63c 100644\n--- a/lib/crates/fabro-agent/src/session.rs\n+++ b/lib/crates/fabro-agent/src/session.rs\n@@ -352,6 +352,7 @@ pub struct Session {\n     tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,\n     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,\n     completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,\n+    last_input_timing: SessionInputTiming,\n }\n \n impl Session {\n@@ -389,6 +390,7 @@ impl Session {\n             tool_env_provider: None,\n             subagent_manager,\n             completion_coordinator: None,\n+            last_input_timing: SessionInputTiming::default(),\n         }\n     }\n \n@@ -1206,19 +1208,25 @@ impl Session {\n     pub async fn process_input(&mut self, input: &str) -> Result<(), Error> {\n         self.process_input_with_runtime(input, AgentToolRuntime::default())\n             .await\n-            .1\n     }\n \n-    /// Process an input. Returns the inference/tool timing accumulated during\n-    /// the call alongside the call result; timing is observed even on error.\n+    #[must_use]\n+    pub const fn last_input_timing(&self) -> SessionInputTiming {\n+        self.last_input_timing\n+    }\n+\n+    /// Process an input. The inference/tool timing accumulated during the call\n+    /// is available via [`Self::last_input_timing`] after this returns, even on\n+    /// error.\n     pub async fn process_input_with_runtime(\n         &mut self,\n         input: &str,\n         agent_tool_runtime: AgentToolRuntime,\n-    ) -> (SessionInputTiming, Result<(), Error>) {\n+    ) -> Result<(), Error> {\n         let mut timing = SessionInputTiming::default();\n+        self.last_input_timing = timing;\n         if self.state == SessionState::Closed {\n-            return (timing, Err(Error::SessionClosed));\n+            return Err(Error::SessionClosed);\n         }\n \n         // Spawn wall-clock timeout task if configured\n@@ -1271,7 +1279,8 @@ impl Session {\n             self.transition(SessionState::Idle);\n         }\n \n-        (timing, result)\n+        self.last_input_timing = timing;\n+        result\n     }\n \n     async fn run_single_input(\n@@ -2285,10 +2294,11 @@ mod tests {\n         let env = Arc::new(MockSandbox::default());\n         let mut session = Session::new(client, profile, env, SessionOptions::default(), None);\n \n-        let (first, result) = session\n+        let result = session\n             .process_input_with_runtime(\"use the slow tool\", AgentToolRuntime::default())\n             .await;\n         result.unwrap();\n+        let first = session.last_input_timing();\n         assert!(\n             first.inference >= Duration::from_millis(35),\n             \"expected non-zero inference timing for first input, got {first:?}\"\n@@ -2298,10 +2308,11 @@ mod tests {\n             \"expected non-zero tool timing for first input, got {first:?}\"\n         );\n \n-        let (second, result) = session\n+        let result = session\n             .process_input_with_runtime(\"no tools this time\", AgentToolRuntime::default())\n             .await;\n         result.unwrap();\n+        let second = session.last_input_timing();\n         assert!(\n             second.inference >= Duration::from_millis(15),\n             \"expected per-input inference timing for second input, got {second:?}\"\ndiff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs\nindex 46e2e5d90..fc9c6998c 100644\n--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs\n+++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs\n@@ -1254,9 +1254,10 @@ impl CodergenBackend for AgentApiBackend {\n                 if !is_reused {\n                     emit_agent_tools_available(&session, &node.id, &stage_id, emitter);\n                 }\n-                let (timing, process_result) = session\n+                let process_result = session\n                     .process_input_with_runtime(prompt, agent_tool_runtime.clone())\n                     .await;\n+                let timing = session.last_input_timing();\n                 inference_duration = inference_duration.saturating_add(timing.inference);\n                 tool_duration = tool_duration.saturating_add(timing.tool);\n                 process_result\n@@ -1385,9 +1386,10 @@ impl CodergenBackend for AgentApiBackend {\n                             }\n                         }\n                         emit_agent_tools_available(&session, &node.id, &stage_id, emitter);\n-                        let (timing, process_result) = session\n+                        let process_result = session\n                             .process_input_with_runtime(prompt, agent_tool_runtime.clone())\n                             .await;\n+                        let timing = session.last_input_timing();\n                         inference_duration = inference_duration.saturating_add(timing.inference);\n                         tool_duration = tool_duration.saturating_add(timing.tool);\n                         match process_result {\n@@ -1451,12 +1453,13 @@ impl CodergenBackend for AgentApiBackend {\n                             ));\n                         }\n                         let repair_message = error.repair_message(schema);\n-                        let (timing, repair_result) = session\n+                        let repair_result = session\n                             .process_input_with_runtime(\n                                 &repair_message,\n                                 fabro_agent::AgentToolRuntime::default(),\n                             )\n                             .await;\n+                        let timing = session.last_input_timing();\n                         inference_duration = inference_duration.saturating_add(timing.inference);\n                         tool_duration = tool_duration.saturating_add(timing.tool);\n                         match repair_result {\n",
+        "summary": {
+          "files_changed": 17,
+          "additions": 922,
+          "deletions": 198
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-25T23:01:16.017079Z",
+        "current_node": "verify",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint",
+          "implement",
+          "simplify_opus",
+          "simplify_gpt",
+          "verify"
+        ],
+        "node_retries": {},
+        "context_values": {
           "graph.rankdir": "LR",
           "failure_class": "",
           "response.implement": "Implemented the stage timing and terminal failure rollup fixes.\n\nSummary of changes:\n- Added per-input `fabro-agent::Session` timing:\n  - Tracks LLM inference/stream time and tool execution time.\n  - Exposes `SessionInputTiming` via `Session::last_input_timing()`.\n  - Resets timing at each `process_input_with_runtime` entry.\n- Threaded timing through workflow LLM backends:\n  - `CodergenResult::Text` now carries active `StageTiming`.\n  - API backend measures one-shot inference and agent-loop inference/tool time.\n  - ACP backend attributes opaque duration to inference.\n- Populated `Outcome.timing` in production handlers:\n  - Agent, prompt, fan-in, and command handlers now preserve active timing.\n  - Command duration is reported as tool time.\n- Preserved timing/billing for terminal run failures:\n  - `persist_terminal_engine_failure` now uses `build_conclusion_from_store` timing and billing.\n  - Detached bootstrap/completion guards now preserve conclusion timing/billing when a store exists.\n  - Detached failure helper now rolls up timing/billing from the store.\n- Added tests for:\n  - Agent per-input inference/tool timing.\n  - Agent/prompt/fan-in handler timing propagation.\n  - Command handler tool timing.\n  - Executor propagation into `NodeResult`.\n  - Full workflow event rollup from `Outcome.timing` → `stage.completed` → `run.completed`.\n  - Terminal engine failure and drop-guard timing/billing preservation.\n\nValidation passed:\n- `cargo nextest run -p fabro-agent -p fabro-workflow -p fabro-store -p fabro-core`\n  - 1913 passed, 122 skipped\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`\n- `cargo build -p fabro-server`\n- `git diff --check`\n\nI did not run the interactive/live server + UI E2E workflow steps, but the server build and full requested automated validation are green.",
@@ -1066,7 +1272,7 @@
           "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
           "internal.work_dir": "/home/daytona/workspace/fabro",
           "outcome": "succeeded",
-          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "command.output": "blob://sha256/dadf10e5135a6e1f3f0d7a88bd81fbc3cb82b8de6434e903365683528903553d",
           "internal.retry_count.toolchain": 0,
           "thread.preflight_compile.current_node": "preflight_lint",
           "response.simplify_gpt": "Reviewed the branch diff vs merge base and ran the parallel review pass. I found and fixed one cleanup issue:\n\n- Restored `Session::process_input_with_runtime` to its original public `Result<(), Error>` shape instead of returning a tuple.\n- Added the requested `Session::last_input_timing()` getter and `last_input_timing` state on `Session`.\n- Updated workflow callers to read timing through the getter after `process_input_with_runtime(...)`.\n- Updated the agent timing unit test accordingly.\n\nValidation passed:\n\n- `cargo check -q -p fabro-agent -p fabro-workflow`\n- `cargo nextest run -p fabro-agent -p fabro-workflow`\n- `cargo nextest run -p fabro-store -p fabro-core`\n- `cargo +nightly-2026-04-14 fmt --check --all`\n- `cargo +nightly-2026-04-14 clippy -q -p fabro-agent -p fabro-workflow --all-targets -- -D warnings`\n\nWorking tree now has the cleanup edits in:\n\n- `lib/crates/fabro-agent/src/session.rs`\n- `lib/crates/fabro-workflow/src/handler/llm/api.rs`",
@@ -1074,19 +1280,21 @@
           "internal.retry_count.preflight_compile": 0,
           "internal.retry_count.simplify_gpt": 0,
           "internal.fidelity": "compact",
-          "current_node": "simplify_gpt",
+          "current_node": "verify",
           "internal.retry_count.simplify_opus": 0,
           "last_response": "Reviewed the branch diff vs merge base and ran the parallel review pass. I found and fixed one cleanup issue:\n\n- Restored `Session::process_input_with_runtime` to its original public `Result<(), Error",
           "thread.toolchain.current_node": "preflight_compile",
           "internal.node_visit_count": 1,
-          "internal.thread_id": "simplify_opus",
+          "internal.thread_id": "simplify_gpt",
           "graph.goal": "# Plan: Fix stage timing (inference + tool) reporting\n\n## Context\n\nThe web UI's Duration popover shows `Active (inference + tools): 0ms` for every run, including agent-heavy runs that obviously did substantial LLM and tool work. Verified on `01KSE2PAVXD56N4TWNK4T5H5VA`: 10 stage.completed events and 1 run.failed event all carry `inference_time_ms: 0, tool_time_ms: 0`, even though stages like `implement@1` (94 min wall) and `simplify_opus@1` (29 min wall) were doing nothing but inference and tool calls.\n\nTwo independent bugs:\n\n1. **No production handler ever populates `Outcome.timing`.** The plumbing from `Outcome.timing` → `NodeResult` (`lib/crates/fabro-core/src/executor.rs:30-37`) → `StageTiming` → `stage.completed` props → projection → billing rollup → run.completed/failed → UI is fully wired and shipped as of #343 (2026-05-21), but `AgentHandler::execute`, `PromptHandler::execute`, `CommandHandler::execute`, and `FanInHandler` all build `Outcome::success()` and never touch `.timing`. The executor falls back to zero, and every downstream consumer faithfully aggregates zero.\n\n2. **`persist_terminal_engine_failure` and its sibling Drop-guard failure paths discard timing/billing entirely.** When the engine returns `Err` (e.g. `VisitLimitExceeded`, which is what killed the user's run), `lib/crates/fabro-workflow/src/operations/start.rs:284-308` builds a `Conclusion` via `build_conclusion_from_store`, then throws it away (`let _conclusion = ...`) and emits `WorkflowRunFailed` with `RunTiming::wall_only(...)` and `None` for billing/diff. The three Drop-guard paths (`start.rs:934`, `1001`, `1033`) do similar with `RunTiming::default()` and never even build a conclusion.\n\nGoal: stage and run events carry real per-stage `inference_time_ms` + `tool_time_ms`; engine-failure terminal events preserve the conclusion's rolled-up timing and billing.\n\n## Approach\n\n### Part A — Capture inference + tool time in handlers (Bug 1)\n\n**A1. `fabro-agent` — accumulate per-input timing in `Session`**\n\n`lib/crates/fabro-agent/src/session.rs`\n\nAdd two `Duration` accumulators to `Session` (initialised to `Duration::ZERO`):\n- `last_input_inference_duration`\n- `last_input_tool_duration`\n\nIn `process_input_with_runtime` (line 1196), zero them at entry so each call's totals are independent.\n\nIn `run_single_input` (line 1254):\n- Wrap the inference span: capture `Instant::now()` immediately before opening the stream at line 1391, and add `.elapsed()` to `last_input_inference_duration` once `response = Some(resp)` (line 1487-1490) OR when the loop exits with an error/cancellation. The whole `'streamattempts` loop counts as inference work — retries included.\n- Wrap the tool span around `execute_tool_calls` at line 1705-1719: `Instant::now()` before, accumulate `.elapsed()` after `.await`.\n\nExpose a getter:\n```rust\npub fn last_input_timing(&self) -> SessionInputTiming { ... }\n```\nwhere `SessionInputTiming { pub inference: Duration, pub tool: Duration }` is a new tiny struct in `fabro-agent`.\n\n**A2. `fabro-workflow` — thread timing through the backend boundary**\n\n`lib/crates/fabro-workflow/src/handler/agent.rs`\n\nExtend `CodergenResult::Text` with a `timing: fabro_types::StageTiming` field (wall is irrelevant — see note below). Update the few `CodergenResult::Text { ... }` constructions found by the explore agent to populate it; existing match-bindings only read `text`/`usage`/`files_touched` so they keep compiling with `..` patterns. `CodergenResult::Full(outcome)` keeps current behaviour — the outcome itself already carries any timing.\n\nNote on wall: `lib/crates/fabro-core/src/executor.rs:30-37` reads ONLY `inference_time_ms` and `tool_time_ms` out of `outcome.timing`. The wall comes from the executor's own stopwatch. So we construct `StageTiming::new(0, inference_ms, tool_ms)` and document that the wall field is ignored in this hop.\n\n`lib/crates/fabro-workflow/src/handler/llm/api.rs`\n\n- `AgentApiBackend::run` (line 1103): after `session.process_input_with_runtime(...)` returns, read `session.last_input_timing()` and set the new `timing` on `CodergenResult::Text` at line 1094.\n- `AgentApiBackend::one_shot` (line 994): wrap the `complete_one_shot_request` call at line 1053 with `Instant::now()` / `.elapsed()`. Accumulate across repair iterations of the surrounding loop. All of it counts as inference; no tool work happens in `one_shot`. Set `timing` on `CodergenResult::Text` at line 1094.\n\n`lib/crates/fabro-workflow/src/handler/llm/acp.rs`\n\n`AgentAcpBackend::run` (line ~140): already exposes `result.duration_ms`. Set `timing: StageTiming::new(0, duration_ms, 0)` on the returned `CodergenResult::Text` (per user decision: attribute all ACP duration to inference; ACP is opaque about the split).\n\n**A3. Consume timing in stage handlers and set `outcome.timing`**\n\n- `lib/crates/fabro-workflow/src/handler/agent.rs:341` — after building `outcome`, before the final `Ok(outcome)`, set `outcome.timing = Some(timing_from_codergen_result)`.\n- `lib/crates/fabro-workflow/src/handler/prompt.rs:180` — same pattern.\n- `lib/crates/fabro-workflow/src/handler/fan_in.rs:266` — backend returns timing; pass it onto the outcome built from the fan-in response.\n- `lib/crates/fabro-workflow/src/handler/command.rs:175` — `outcome.timing = Some(StageTiming::new(0, 0, result.duration_ms))`. All command wall-time is tool time. `result.duration_ms` is already at line 154 in scope.\n\nOther handlers (`human`, `wait`, `conditional`, `parallel`, `start`, `exit`, `structured_output`, `manager_loop`) do no inference or tool work. Leave `outcome.timing` as `None`; the executor will naturally produce `inference: 0, tool: 0` for those stages, which is correct.\n\n### Part B — Preserve conclusion timing on engine failure (Bug 2)\n\n`lib/crates/fabro-workflow/src/operations/start.rs`\n\n**B1. Main path** (`persist_terminal_engine_failure`, line 274-308):\n- Rename `_conclusion` → `conclusion` and use it:\n  - Pass `conclusion.timing` (already a `RunTiming` with the proper inference/tool/wall rollup from `build_conclusion_from_parts`) instead of `RunTiming::wall_only(...)`.\n  - Pass `conclusion.billing.clone()` instead of `None` for the billing arg of `workflow_run_failed_from_error`.\n  - `final_git_commit_sha`, `final_patch`, `diff_summary` stay `None` — those require the finalize-side workspace diff computation that this path deliberately skips.\n\n**B2. Drop-guard paths** (per user decision: fix them too):\n\n- `DetachedRunBootstrapGuard` (line 882-948): add an `Option<RunStoreHandle>` field. The bootstrap function builds the guard before the store exists, then mutates `bootstrap_guard.run_store = Some(store.clone())` once the store is in scope. On Drop, if the store is `Some`, the spawned task calls `build_conclusion_from_store` and uses its timing/billing; otherwise falls back to `RunTiming::default()` (pre-store failure means no stages can possibly exist).\n\n- `DetachedRunCompletionGuard` (line 953-1021): armed after the store exists, so add a non-optional `run_store: RunStoreHandle`. Drop's spawned task builds the conclusion and uses it.\n\n- `persist_detached_failure` (line 1023): add a `run_store: &RunStoreHandle` parameter. Call `build_conclusion_from_store` and forward `timing` + `billing` to the failure event. Update the two callers (postrun-related) to pass the store they already have in scope.\n\n`RunStoreHandle` is already `Clone` (the surrounding code clones it routinely), so move-into-spawned-task is fine.\n\n### Critical existing utilities to reuse (do not duplicate)\n\n- `fabro_types::StageTiming::new(wall, inference, tool)` and `RunTiming::new(...)` — invariant-enforcing constructors at `lib/crates/fabro-types/src/timing.rs:38, 91`.\n- `crate::millis_u64(duration)` helper for `Duration → u64` ms in `fabro-workflow` (used widely; see `lifecycle/event.rs:80-86`).\n- `build_conclusion_from_store` at `lib/crates/fabro-workflow/src/pipeline/finalize.rs:71` already does the rollup we need on the engine-failure path.\n- `billing_rollup_from_projection` (called inside `build_conclusion_from_parts`) sums per-stage timings into `RunTiming` — no need to reimplement.\n\n## Tests\n\n- **`fabro-agent` unit test**: feed `Session` a fake `LlmClient` whose `stream` sleeps a known duration and a fake tool that sleeps another known duration. Drive one `process_input_with_runtime` call. Assert `session.last_input_timing()` reports both non-zero and roughly matching the sleeps. Then call again and assert it's per-call (not cumulative).\n- **`fabro-workflow` handler tests**: in `handler/agent.rs`'s test module, wire a `CodergenBackend` that returns `CodergenResult::Text { timing: StageTiming::new(0, 200, 300), .. }` and assert `AgentHandler::execute`'s returned `Outcome.timing` carries those values. Mirror for `prompt.rs` and `fan_in.rs`. Add a `command.rs` test that mocks a `sandbox.exec_command_streaming` returning `duration_ms = 500` and asserts `outcome.timing.tool_time_ms == 500`.\n- **Executor integration**: add a test in `fabro-workflow` (or extend an existing one in `pipeline/finalize.rs` tests) that runs a tiny graph with a handler producing `Outcome.timing = Some(StageTiming::new(0, 100, 50))` and asserts the emitted `stage.completed` event carries those values, and that `run.completed` carries the summed rollup.\n- **`persist_terminal_engine_failure` test**: seed a `RunStore` with a couple of `stage.completed` events whose timing is non-zero, drive the engine-failure path, and assert the emitted `WorkflowRunFailed` event has `timing.inference_time_ms` and `tool_time_ms` matching the per-stage sum and `billing` populated.\n- **Drop guard tests**: trickier because of `Handle::try_current` + spawn. Add focused tests that arm a guard, drop it, and `tokio::task::yield_now().await` enough times to let the spawned task run, then assert the emitted failure event carries non-zero timing.\n- Run `cargo nextest run -p fabro-agent -p fabro-workflow -p fabro-store -p fabro-core`.\n- Run formatter and lints per CLAUDE.md: `cargo +nightly-2026-04-14 fmt --check --all` and `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings`.\n\n## End-to-end verification\n\n1. Build the server: `cargo build -p fabro-server`.\n2. Start server: `fabro server start`.\n3. Run a small agent-backed workflow (e.g. `fabro run repl` with a short prompt that fires at least one tool call).\n4. `fabro events <run_id> --json | jq -s '[.[] | select(.event==\"stage.completed\")] | .[].properties.timing'` — confirm `inference_time_ms > 0` and `tool_time_ms > 0` for the agent stage.\n5. `fabro events <run_id> --json | jq -s '[.[] | select(.event==\"run.completed\" or .event==\"run.failed\")] | .[].properties.timing'` — confirm `active_time_ms == inference_time_ms + tool_time_ms` and both are non-zero.\n6. Open the run in the web UI (start the SPA dev build per CLAUDE.md or rebuild the embedded SPA with `cargo dev build`), hover the Duration chip, confirm **Active (inference + tools)** is non-zero.\n7. For Bug 2: force an engine failure by setting a very low visit limit and rerunning the same workflow; confirm the `run.failed` event timing breakdown is non-zero and matches the per-stage sum.\n\n## Out of scope\n\n- Adding `wall_time_ms` correctness to `Outcome.timing` (executor ignores it; doc tweak only if necessary).\n- Surfacing inference vs tool split for ACP backend beyond \"all-inference\" attribution.\n- Backfilling timing for historical runs that have already emitted zero events — past events are immutable.\n- Web UI changes beyond what the existing popover already renders.\n",
+          "thread.simplify_gpt.current_node": "verify",
           "failure_signature": "",
           "response.simplify_opus": "All six fixes landed, with net **-57 lines** even while adding three shared helpers and a constructor. Summary of cleanups applied based on the three reviewers' findings:\n\n## Fixed\n\n1. **Returned timing from `process_input_with_runtime` instead of stashing it on `Session`** (Agent 2 #1). Dropped `last_input_inference_duration` / `last_input_tool_duration` fields, the `last_input_timing()` getter, and the per-call reset prologue. Signature is now `-> (SessionInputTiming, Result<(), Error>)`. Eliminates the \"must read immediately\" implicit contract.\n\n2. **Replaced the `record_inference_duration!` macro with a free function** `record_elapsed(&mut Option<Instant>, &mut Duration)` (Agent 1 #2, Agent 2 #2). Same 7 call sites, but type-checked, IDE-discoverable, and no macro hygiene.\n\n3. **Made `run_store` required on `DetachedRunBootstrapGuard::arm()`** (Agent 1 #7, Agent 2 #3/#5). Dropped the `Option<RunStoreHandle>` field and the external setter pattern. Drop impl unconditionally builds the conclusion now.\n\n4. **Extracted `emit_workflow_run_failed` helper** (Agent 1 #7, Agent 2 #4). Collapses the four near-identical \"build conclusion → emit run.failed\" sites in `start.rs` (terminal engine failure, both Drop guards, `persist_detached_failure`) into one shared function.\n\n5. **Added `StageTiming::active_only(inference, tool)` constructor** (Agent 1 #1). Removed the local `active_stage_timing` helper in `handler/llm/api.rs` and unified `acp.rs` and `command.rs` on the same shape.\n\n6. **Reverted `Box<BilledModelUsage>` in `CodergenResult::Text`** (Agent 1 #6, Agent 2 #6). Was the worst of both worlds — didn't equalise variant size, forced `.map(|usage| *usage)` ceremony at every call site. Used `#[allow(clippy::large_enum_variant, reason = \"...\")]` matching the established pattern in `event/events.rs` and `event/sink.rs`.\n\n7. **Hoisted `test_usage` and `mark_run_running` to `test_support`** (Agent 1 #3/#4). `test_usage` was duplicated in 4 files (this PR was about to add a 5th); the 4th `mark_run_running` copy was right next to a pre-existing 3-event seed in test_support that didn't quite match. Both are now public helpers in `crate::test_support`.\n\n## Skipped (with reason)\n\n- **Make Drop guard tasks survive runtime shutdown** (Agent 3 #3) — flagged as a correctness-on-shutdown concern, not introduced by this PR; widening it would be a separate fix.\n- **`wait_for_conclusion` polling timeout hardening** (Agent 2 #8) — minor CI flake risk; current 50ms budget is enough for unit tests.\n- **`Candidate::timing` zero on LLM-failure heuristic fallback** (Agent 2 #9, Agent 3 implicit) — agent itself noted this is acceptable; capturing wasted inference on errors would require threading Instants through the fan-in evaluator.\n- **Helper for the 3-line failed-outcome decoration in agent.rs/prompt.rs** (Agent 2 #7/#10) — marginal benefit not worth the indirection.\n\n## Verification\n\n- `cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings` clean\n- `cargo +nightly-2026-04-14 fmt --check --all` clean\n- `cargo nextest run -p fabro-workflow -p fabro-agent -p fabro-types -p fabro-core` — all 3592 tests pass (1175 + 1844 + 573 across the affected crates).",
           "internal.run_id": "01KSGHHBR7DQ1RHFYKD7P46R6F",
           "internal.retry_count.preflight_lint": 0,
           "internal.retry_count.implement": 0,
           "thread.preflight_lint.current_node": "implement",
+          "internal.retry_count.verify": 0,
           "thread.implement.current_node": "simplify_opus"
         },
         "node_outcomes": {
@@ -1212,6 +1420,14 @@
               "total_usd_micros": 4885902
             }
           },
+          "verify": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/dadf10e5135a6e1f3f0d7a88bd81fbc3cb82b8de6434e903365683528903553d"
+            },
+            "notes": "Script completed: git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+            "usage": null
+          },
           "preflight_lint": {
             "status": "succeeded",
             "context_updates": {
@@ -1225,14 +1441,15 @@
             "usage": null
           }
         },
-        "next_node_id": "verify",
+        "next_node_id": "exit",
         "node_visits": {
-          "simplify_gpt": 1,
-          "implement": 1,
+          "verify": 1,
           "simplify_opus": 1,
+          "preflight_compile": 1,
+          "implement": 1,
+          "simplify_gpt": 1,
           "toolchain": 1,
           "start": 1,
-          "preflight_compile": 1,
           "preflight_lint": 1
         }
       },
@@ -1583,51 +1800,270 @@
       },
       "state": "succeeded"
     },
-    "toolchain@1": {
-      "first_event_seq": 21,
+    "simplify_gpt@1": {
+      "first_event_seq": 1547,
       "prompt": null,
       "response": null,
       "completion": {
         "outcome": "succeeded",
-        "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "notes": "Stage completed: simplify_gpt",
         "failure_reason": null,
-        "timestamp": "2026-05-25T21:44:44.991298Z"
+        "timestamp": "2026-05-25T22:52:12.048014Z"
       },
-      "provider_used": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "openai",
+        "model": "gpt-5.5"
+      },
       "diff": null,
-      "script_invocation": {
-        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
-        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
-        "language": "shell"
-      },
-      "script_timing": {
-        "output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
-        "exit_code": 0,
-        "duration_ms": 1430,
-        "termination": "exited",
-        "output_bytes": 36,
-        "live_streaming": true
-      },
+      "script_invocation": null,
+      "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "output_bytes": 36,
-      "live_streaming": true,
-      "termination": "exited",
-      "started_at": "2026-05-25T21:44:43.553916Z",
-      "handler": "command",
+      "started_at": "2026-05-25T22:48:11.808047Z",
+      "handler": "agent",
       "timing": {
-        "wall_time_ms": 1437,
+        "wall_time_ms": 240238,
         "inference_time_ms": 0,
         "tool_time_ms": 0,
         "active_time_ms": 0
       },
       "usage": {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0
+        "input_tokens": 884532,
+        "output_tokens": 3565,
+        "total_tokens": 1517727,
+        "reasoning_tokens": 1406,
+        "cache_read_tokens": 628224,
+        "cache_write_tokens": 0,
+        "total_usd_micros": 4885902
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "gpt-5.5"
+      },
+      "todos": {
+        "kind": "openai_plan",
+        "list_id": "openai_plan:994f8336-cba0-4f7f-972d-ac5427d8976b",
+        "items": [
+          {
+            "id": "2f6a6b1e89a205ae",
+            "status": "in_progress",
+            "order": 0,
+            "subject": "Inspect repository instructions and staged diff file"
+          },
+          {
+            "id": "a7e1960422bd0708",
+            "status": "pending",
+            "order": 1,
+            "subject": "Search for existing helpers matching new code"
+          },
+          {
+            "id": "fe6ade00cfbca35a",
+            "status": "pending",
+            "order": 2,
+            "subject": "Report actionable code reuse findings with references"
+          }
+        ]
+      },
+      "subagents": [
+        {
+          "agent_id": "2069b50d",
+          "depth": 1,
+          "task": "Code Reuse Review. Review the full diff at /tmp/fabro-stage-timing.diff in working directory /home/daytona/workspace/fabro. For each change, search for existing utilities/helpers that could replace newly written code. Flag duplicate functions or inline logic that should use existing utilities. Focus on actionable findings only; include file/line references where possible. Do not modify files.",
+          "status": {
+            "kind": "completed",
+            "success": true,
+            "turns_used": 21
+          }
+        },
+        {
+          "agent_id": "963ba487",
+          "depth": 1,
+          "task": "Code Quality Review. Review the full diff at /tmp/fabro-stage-timing.diff in working directory /home/daytona/workspace/fabro for hacky patterns: redundant state, parameter sprawl, copy-paste, leaky abstractions, stringly-typed code. Be aggressive but actionable. Include file/line references where possible. Do not modify files.",
+          "status": {
+            "kind": "completed",
+            "success": true,
+            "turns_used": 21
+          }
+        },
+        {
+          "agent_id": "89af0eac",
+          "depth": 1,
+          "task": "Efficiency Review. Review the full diff at /tmp/fabro-stage-timing.diff in working directory /home/daytona/workspace/fabro for unnecessary work, missed concurrency, hot-path bloat, TOCTOU, memory/leaks, overly broad operations. Include actionable findings with file/line references. Do not modify files.",
+          "status": {
+            "kind": "completed",
+            "success": true,
+            "turns_used": 21
+          }
+        }
+      ],
+      "permission_level": "full",
+      "agent_tools": [
+        {
+          "name": "apply_patch",
+          "description": "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        },
+        {
+          "name": "close_agent",
+          "description": "Close a running subagent that is no longer needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "glob",
+          "description": "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "grep",
+          "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "read_file",
+          "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "request_user_input",
+          "description": "Ask the human one or more questions and wait for their answers before continuing this stage.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "send_input",
+          "description": "Send a follow-up message to a running subagent when new information or corrected instructions are needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "shell",
+          "description": "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "shell",
+          "invoked": true
+        },
+        {
+          "name": "spawn_agent",
+          "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": true
+        },
+        {
+          "name": "update_plan",
+          "description": "Update the multi-step plan for the current task. Submit the entire plan; existing steps are reconciled by exact step text.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": true
+        },
+        {
+          "name": "wait",
+          "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": true
+        },
+        {
+          "name": "web_fetch",
+          "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "web_search",
+          "description": "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "write_file",
+          "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": false
+        }
+      ],
+      "context_window": {
+        "provider": "openai",
+        "model": "gpt-5.5",
+        "context_window_tokens": 272000,
+        "input_tokens": 69307,
+        "usage_percent": 25.480514705882353,
+        "count_method": "response_usage_scaled_breakdown",
+        "staleness": "live",
+        "generated_at": "2026-05-25T22:52:11.999530Z",
+        "event_seq": 1812,
+        "breakdown": [
+          {
+            "category": "system_prompt",
+            "tokens": 1075,
+            "usage_percent": 0.3952205882352941
+          },
+          {
+            "category": "tools",
+            "tokens": 1522,
+            "usage_percent": 0.5595588235294118
+          },
+          {
+            "category": "memory",
+            "tokens": 3601,
+            "usage_percent": 1.3238970588235295
+          },
+          {
+            "category": "conversation",
+            "tokens": 63103,
+            "usage_percent": 23.199632352941176
+          },
+          {
+            "category": "other",
+            "tokens": 6,
+            "usage_percent": 0.0022058823529411764
+          }
+        ],
+        "warnings": []
       },
       "state": "succeeded"
     },
@@ -1651,54 +2087,6 @@
       "handler": "start",
       "timing": {
         "wall_time_ms": 0,
-        "inference_time_ms": 0,
-        "tool_time_ms": 0,
-        "active_time_ms": 0
-      },
-      "usage": {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0
-      },
-      "state": "succeeded"
-    },
-    "preflight_compile@1": {
-      "first_event_seq": 31,
-      "prompt": null,
-      "response": null,
-      "completion": {
-        "outcome": "succeeded",
-        "notes": "Script completed: cargo check -q --workspace 2>&1",
-        "failure_reason": null,
-        "timestamp": "2026-05-25T21:46:52.560410Z"
-      },
-      "provider_used": null,
-      "diff": null,
-      "script_invocation": {
-        "script": "cargo check -q --workspace 2>&1",
-        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
-        "language": "shell"
-      },
-      "script_timing": {
-        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-        "exit_code": 0,
-        "duration_ms": 123914,
-        "termination": "exited",
-        "output_bytes": 0,
-        "live_streaming": false
-      },
-      "parallel_results": null,
-      "output": null,
-      "output_bytes": 0,
-      "live_streaming": false,
-      "termination": "exited",
-      "started_at": "2026-05-25T21:44:48.639724Z",
-      "handler": "command",
-      "timing": {
-        "wall_time_ms": 123919,
         "inference_time_ms": 0,
         "tool_time_ms": 0,
         "active_time_ms": 0
@@ -2009,259 +2397,126 @@
       },
       "state": "succeeded"
     },
-    "simplify_gpt@1": {
-      "first_event_seq": 1547,
+    "toolchain@1": {
+      "first_event_seq": 21,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-25T21:44:44.991298Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": {
+        "output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+        "exit_code": 0,
+        "duration_ms": 1430,
+        "termination": "exited",
+        "output_bytes": 36,
+        "live_streaming": true
+      },
+      "parallel_results": null,
+      "output": null,
+      "output_bytes": 36,
+      "live_streaming": true,
+      "termination": "exited",
+      "started_at": "2026-05-25T21:44:43.553916Z",
+      "handler": "command",
+      "timing": {
+        "wall_time_ms": 1437,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "preflight_compile@1": {
+      "first_event_seq": 31,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo check -q --workspace 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-25T21:46:52.560410Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "cargo check -q --workspace 2>&1",
+        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
+        "language": "shell"
+      },
+      "script_timing": {
+        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 123914,
+        "termination": "exited",
+        "output_bytes": 0,
+        "live_streaming": false
+      },
+      "parallel_results": null,
+      "output": null,
+      "output_bytes": 0,
+      "live_streaming": false,
+      "termination": "exited",
+      "started_at": "2026-05-25T21:44:48.639724Z",
+      "handler": "command",
+      "timing": {
+        "wall_time_ms": 123919,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "verify@1": {
+      "first_event_seq": 1822,
       "prompt": null,
       "response": null,
       "completion": null,
-      "provider_used": {
-        "mode": "agent",
-        "provider": "openai",
-        "model": "gpt-5.5"
-      },
+      "provider_used": null,
       "diff": null,
-      "script_invocation": null,
+      "script_invocation": {
+        "script": "git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+        "command": "exec 2>&1\ngit fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+        "language": "shell"
+      },
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-25T22:48:11.808047Z",
-      "handler": "agent",
+      "started_at": "2026-05-25T22:52:16.026956Z",
+      "handler": "command",
       "usage": {
-        "input_tokens": 884532,
-        "output_tokens": 3565,
-        "total_tokens": 1517727,
-        "reasoning_tokens": 1406,
-        "cache_read_tokens": 628224,
-        "cache_write_tokens": 0,
-        "total_usd_micros": 4885902
-      },
-      "model": {
-        "provider": "openai",
-        "model_id": "gpt-5.5"
-      },
-      "todos": {
-        "kind": "openai_plan",
-        "list_id": "openai_plan:994f8336-cba0-4f7f-972d-ac5427d8976b",
-        "items": [
-          {
-            "id": "2f6a6b1e89a205ae",
-            "status": "in_progress",
-            "order": 0,
-            "subject": "Inspect repository instructions and staged diff file"
-          },
-          {
-            "id": "a7e1960422bd0708",
-            "status": "pending",
-            "order": 1,
-            "subject": "Search for existing helpers matching new code"
-          },
-          {
-            "id": "fe6ade00cfbca35a",
-            "status": "pending",
-            "order": 2,
-            "subject": "Report actionable code reuse findings with references"
-          }
-        ]
-      },
-      "subagents": [
-        {
-          "agent_id": "2069b50d",
-          "depth": 1,
-          "task": "Code Reuse Review. Review the full diff at /tmp/fabro-stage-timing.diff in working directory /home/daytona/workspace/fabro. For each change, search for existing utilities/helpers that could replace newly written code. Flag duplicate functions or inline logic that should use existing utilities. Focus on actionable findings only; include file/line references where possible. Do not modify files.",
-          "status": {
-            "kind": "completed",
-            "success": true,
-            "turns_used": 21
-          }
-        },
-        {
-          "agent_id": "963ba487",
-          "depth": 1,
-          "task": "Code Quality Review. Review the full diff at /tmp/fabro-stage-timing.diff in working directory /home/daytona/workspace/fabro for hacky patterns: redundant state, parameter sprawl, copy-paste, leaky abstractions, stringly-typed code. Be aggressive but actionable. Include file/line references where possible. Do not modify files.",
-          "status": {
-            "kind": "completed",
-            "success": true,
-            "turns_used": 21
-          }
-        },
-        {
-          "agent_id": "89af0eac",
-          "depth": 1,
-          "task": "Efficiency Review. Review the full diff at /tmp/fabro-stage-timing.diff in working directory /home/daytona/workspace/fabro for unnecessary work, missed concurrency, hot-path bloat, TOCTOU, memory/leaks, overly broad operations. Include actionable findings with file/line references. Do not modify files.",
-          "status": {
-            "kind": "completed",
-            "success": true,
-            "turns_used": 21
-          }
-        }
-      ],
-      "permission_level": "full",
-      "agent_tools": [
-        {
-          "name": "apply_patch",
-          "description": "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "write",
-          "invoked": true
-        },
-        {
-          "name": "close_agent",
-          "description": "Close a running subagent that is no longer needed.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "subagent",
-          "invoked": false
-        },
-        {
-          "name": "glob",
-          "description": "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "read",
-          "invoked": true
-        },
-        {
-          "name": "grep",
-          "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "read",
-          "invoked": true
-        },
-        {
-          "name": "read_file",
-          "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "read",
-          "invoked": true
-        },
-        {
-          "name": "request_user_input",
-          "description": "Ask the human one or more questions and wait for their answers before continuing this stage.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "other",
-          "invoked": false
-        },
-        {
-          "name": "send_input",
-          "description": "Send a follow-up message to a running subagent when new information or corrected instructions are needed.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "subagent",
-          "invoked": false
-        },
-        {
-          "name": "shell",
-          "description": "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "shell",
-          "invoked": true
-        },
-        {
-          "name": "spawn_agent",
-          "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "subagent",
-          "invoked": true
-        },
-        {
-          "name": "update_plan",
-          "description": "Update the multi-step plan for the current task. Submit the entire plan; existing steps are reconciled by exact step text.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "other",
-          "invoked": true
-        },
-        {
-          "name": "wait",
-          "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "subagent",
-          "invoked": true
-        },
-        {
-          "name": "web_fetch",
-          "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "other",
-          "invoked": false
-        },
-        {
-          "name": "web_search",
-          "description": "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "other",
-          "invoked": false
-        },
-        {
-          "name": "write_file",
-          "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
-          "source": {
-            "kind": "native"
-          },
-          "category": "write",
-          "invoked": false
-        }
-      ],
-      "context_window": {
-        "provider": "openai",
-        "model": "gpt-5.5",
-        "context_window_tokens": 272000,
-        "input_tokens": 69307,
-        "usage_percent": 25.480514705882353,
-        "count_method": "response_usage_scaled_breakdown",
-        "staleness": "live",
-        "generated_at": "2026-05-25T22:52:11.999530Z",
-        "event_seq": 1812,
-        "breakdown": [
-          {
-            "category": "system_prompt",
-            "tokens": 1075,
-            "usage_percent": 0.3952205882352941
-          },
-          {
-            "category": "tools",
-            "tokens": 1522,
-            "usage_percent": 0.5595588235294118
-          },
-          {
-            "category": "memory",
-            "tokens": 3601,
-            "usage_percent": 1.3238970588235295
-          },
-          {
-            "category": "conversation",
-            "tokens": 63103,
-            "usage_percent": 23.199632352941176
-          },
-          {
-            "category": "other",
-            "tokens": 6,
-            "usage_percent": 0.0022058823529411764
-          }
-        ],
-        "warnings": []
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
       },
       "state": "running"
     }
