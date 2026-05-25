@@ -1,0 +1,2426 @@
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index eb9f2f3ef..3983c37cd 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -7514,7 +7514,7 @@ components:
+       required: [provider, id]
+       properties:
+         provider:
+-          $ref: "#/components/schemas/SandboxProvider"
++          $ref: "#/components/schemas/SandboxProviderKind"
+         id:
+           type: string
+ 
+@@ -10155,16 +10155,8 @@ components:
+           description: Equals `inference_time_ms + tool_time_ms`.
+           example: 180000
+ 
+-    SandboxProvider:
+-      description: Sandbox execution provider.
+-      type: string
+-      enum:
+-        - local
+-        - docker
+-        - daytona
+-
+     SandboxProviderKind:
+-      description: Sandbox provider inventory discriminator.
++      description: Sandbox provider discriminator.
+       type: string
+       enum:
+         - local
+@@ -10181,7 +10173,7 @@ components:
+         - runtime
+       properties:
+         provider:
+-          $ref: "#/components/schemas/SandboxProvider"
++          $ref: "#/components/schemas/SandboxProviderKind"
+         image:
+           type: ["string", "null"]
+         snapshot:
+diff --git a/lib/crates/fabro-api/build.rs b/lib/crates/fabro-api/build.rs
+index 5784828d3..737ae9cf9 100644
+--- a/lib/crates/fabro-api/build.rs
++++ b/lib/crates/fabro-api/build.rs
+@@ -530,7 +530,6 @@ fn main() {
+         ("PreRunPushOutcome", "fabro_types::PreRunPushOutcome", &[]),
+         ("DirtyStatus", "fabro_types::DirtyStatus", &[]),
+         ("GitContext", "fabro_types::GitContext", &[]),
+-        ("SandboxProvider", "fabro_types::SandboxProvider", &[]),
+         (
+             "SandboxProviderKind",
+             "fabro_types::SandboxProviderKind",
+diff --git a/lib/crates/fabro-api/src/lib.rs b/lib/crates/fabro-api/src/lib.rs
+index 18d262fe1..0eceb6ec3 100644
+--- a/lib/crates/fabro-api/src/lib.rs
++++ b/lib/crates/fabro-api/src/lib.rs
+@@ -49,7 +49,7 @@ pub mod types {
+         RunPairStatusResponse, RunProjection, RunProvenance, RunRunnableSource, RunSandbox,
+         RunSandboxRuntime, RunServerProvenance, RunSize, SandboxDetails, SandboxInfo,
+         SandboxListMeta, SandboxListResponse, SandboxNetwork, SandboxNetworkPolicy,
+-        SandboxNetworkPolicyMode, SandboxProvider, SandboxProviderKind, SandboxProviderLookupError,
++        SandboxNetworkPolicyMode, SandboxProviderKind, SandboxProviderLookupError,
+         SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,
+         SandboxTimestamps, SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId,
+         SessionMessage, SessionRecord, SessionStatus, SessionSummary, SessionTurn,
+diff --git a/lib/crates/fabro-api/tests/run_sandbox_round_trip.rs b/lib/crates/fabro-api/tests/run_sandbox_round_trip.rs
+index 0e3a21af9..5c7da541a 100644
+--- a/lib/crates/fabro-api/tests/run_sandbox_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_sandbox_round_trip.rs
+@@ -1,19 +1,19 @@
+ use std::any::{TypeId, type_name};
+ 
+-use fabro_api::types::{RunSandbox as ApiRunSandbox, SandboxProvider as ApiSandboxProvider};
+-use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProvider};
++use fabro_api::types::{RunSandbox as ApiRunSandbox, SandboxProviderKind as ApiSandboxProvider};
++use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProviderKind};
+ use serde_json::json;
+ 
+ #[test]
+ fn run_sandbox_reuses_domain_types() {
+     assert_same_type::<ApiRunSandbox, RunSandbox>();
+-    assert_same_type::<ApiSandboxProvider, SandboxProvider>();
++    assert_same_type::<ApiSandboxProvider, SandboxProviderKind>();
+ }
+ 
+ #[test]
+ fn run_sandbox_json_matches_openapi_shape() {
+     let sandbox = RunSandbox {
+-        provider: SandboxProvider::Docker,
++        provider: SandboxProviderKind::Docker,
+         image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
+         snapshot: None,
+         runtime:  Some(RunSandboxRuntime {
+diff --git a/lib/crates/fabro-api/tests/sandbox_details_round_trip.rs b/lib/crates/fabro-api/tests/sandbox_details_round_trip.rs
+index 97485b4c1..a485ac4eb 100644
+--- a/lib/crates/fabro-api/tests/sandbox_details_round_trip.rs
++++ b/lib/crates/fabro-api/tests/sandbox_details_round_trip.rs
+@@ -5,20 +5,21 @@ use chrono::{TimeZone, Utc};
+ use fabro_api::types::{
+     SandboxDetails as ApiSandboxDetails, SandboxNetwork as ApiSandboxNetwork,
+     SandboxNetworkPolicy as ApiSandboxNetworkPolicy,
+-    SandboxNetworkPolicyMode as ApiSandboxNetworkPolicyMode, SandboxProvider as ApiSandboxProvider,
+-    SandboxResources as ApiSandboxResources, SandboxState as ApiSandboxState,
+-    SandboxTimestamps as ApiSandboxTimestamps,
++    SandboxNetworkPolicyMode as ApiSandboxNetworkPolicyMode,
++    SandboxProviderKind as ApiSandboxProvider, SandboxResources as ApiSandboxResources,
++    SandboxState as ApiSandboxState, SandboxTimestamps as ApiSandboxTimestamps,
+ };
+ use fabro_types::{
+     RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxNetworkPolicy,
+-    SandboxNetworkPolicyMode, SandboxProvider, SandboxResources, SandboxState, SandboxTimestamps,
++    SandboxNetworkPolicyMode, SandboxProviderKind, SandboxResources, SandboxState,
++    SandboxTimestamps,
+ };
+ use serde_json::json;
+ 
+ #[test]
+ fn sandbox_details_reuses_domain_types() {
+     assert_same_type::<ApiSandboxDetails, SandboxDetails>();
+-    assert_same_type::<ApiSandboxProvider, SandboxProvider>();
++    assert_same_type::<ApiSandboxProvider, SandboxProviderKind>();
+     assert_same_type::<ApiSandboxState, SandboxState>();
+     assert_same_type::<ApiSandboxResources, SandboxResources>();
+     assert_same_type::<ApiSandboxTimestamps, SandboxTimestamps>();
+@@ -32,7 +33,7 @@ fn sandbox_details_json_matches_openapi_shape() {
+     let created_at = Utc.with_ymd_and_hms(2026, 5, 9, 12, 0, 0).unwrap();
+     let details = SandboxDetails {
+         sandbox:      RunSandbox {
+-            provider: SandboxProvider::Docker,
++            provider: SandboxProviderKind::Docker,
+             image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
+             snapshot: None,
+             runtime:  Some(RunSandboxRuntime {
+@@ -129,7 +130,7 @@ fn sandbox_details_deserializes_when_optional_fields_are_absent() {
+     }))
+     .unwrap();
+ 
+-    assert_eq!(details.sandbox.provider, SandboxProvider::Local);
++    assert_eq!(details.sandbox.provider, SandboxProviderKind::Local);
+     assert_eq!(
+         details
+             .sandbox
+diff --git a/lib/crates/fabro-cli/src/commands/run/run_progress/mod.rs b/lib/crates/fabro-cli/src/commands/run/run_progress/mod.rs
+index b13f34dea..782d2badf 100644
+--- a/lib/crates/fabro-cli/src/commands/run/run_progress/mod.rs
++++ b/lib/crates/fabro-cli/src/commands/run/run_progress/mod.rs
+@@ -474,7 +474,7 @@ mod tests {
+     use fabro_model::{Catalog, ModelRef, ProviderId};
+     use fabro_types::run_event::CliEnsureCompletedProps;
+     use fabro_types::{
+-        MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, SandboxProvider,
++        MetadataSnapshotFailureKind, MetadataSnapshotPhase, ParallelBranchId, SandboxProviderKind,
+         StageId, fixtures,
+     };
+     use fabro_workflow::event::{Event, RunNoticeLevel, to_run_event, to_run_event_at};
+@@ -737,7 +737,7 @@ mod tests {
+             stage_started("code", "Code"),
+             Event::SandboxInitialized {
+                 working_directory: "/home/daytona/workspace".into(),
+-                provider:          SandboxProvider::Daytona,
++                provider:          SandboxProviderKind::Daytona,
+                 id:                "daytona:sandbox-id".into(),
+                 repo_cloned:       None,
+                 clone_origin_url:  None,
+@@ -1119,7 +1119,7 @@ mod tests {
+         emit(&mut ui, stage_started("code", "Code"));
+         emit(&mut ui, Event::SandboxInitialized {
+             working_directory: "/home/daytona/workspace".into(),
+-            provider:          SandboxProvider::Daytona,
++            provider:          SandboxProviderKind::Daytona,
+             id:                "daytona:sandbox-id".into(),
+             repo_cloned:       None,
+             clone_origin_url:  None,
+diff --git a/lib/crates/fabro-dump/src/lib.rs b/lib/crates/fabro-dump/src/lib.rs
+index 3c7b5a070..d44e01215 100644
+--- a/lib/crates/fabro-dump/src/lib.rs
++++ b/lib/crates/fabro-dump/src/lib.rs
+@@ -473,9 +473,9 @@ mod tests {
+     use fabro_types::graph::Graph;
+     use fabro_types::run::RunSpec;
+     use fabro_types::{
+-        Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunSandbox, RunStatus, SandboxProvider,
+-        StageCompletion, StageModelUsage, StageOutcome, StartRecord, SuccessReason,
+-        WorkflowSettings, first_event_seq, fixtures,
++        Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunSandbox, RunStatus,
++        SandboxProviderKind, StageCompletion, StageModelUsage, StageOutcome, StartRecord,
++        SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+     };
+     use futures::executor;
+ 
+@@ -558,7 +558,7 @@ mod tests {
+             diff:                 RunDiff::default(),
+         });
+         projection.sandbox = Some(RunSandbox {
+-            provider: SandboxProvider::Local,
++            provider: SandboxProviderKind::Local,
+             image:    None,
+             snapshot: None,
+             runtime:  Some(fabro_types::RunSandboxRuntime {
+diff --git a/lib/crates/fabro-install/src/lib.rs b/lib/crates/fabro-install/src/lib.rs
+index 933c161cc..7d88fe1dc 100644
+--- a/lib/crates/fabro-install/src/lib.rs
++++ b/lib/crates/fabro-install/src/lib.rs
+@@ -461,13 +461,13 @@ pub fn write_object_store_settings(
+ }
+ 
+ fn write_sandbox_provider_policy(server: &mut toml::Table) -> Result<()> {
+-    use fabro_types::SandboxProvider;
++    use fabro_types::SandboxProviderKind;
+     let sandbox = ensure_table(server, "sandbox")?;
+     let providers = ensure_table(sandbox, "providers")?;
+     for provider in [
+-        SandboxProvider::Local,
+-        SandboxProvider::Docker,
+-        SandboxProvider::Daytona,
++        SandboxProviderKind::Local,
++        SandboxProviderKind::Docker,
++        SandboxProviderKind::Daytona,
+     ] {
+         let entry = ensure_table(providers, &provider.to_string())?;
+         entry.insert("enabled".to_string(), toml::Value::Boolean(true));
+diff --git a/lib/crates/fabro-sandbox/Cargo.toml b/lib/crates/fabro-sandbox/Cargo.toml
+index 0f6c3f874..cdb6aad9d 100644
+--- a/lib/crates/fabro-sandbox/Cargo.toml
++++ b/lib/crates/fabro-sandbox/Cargo.toml
+@@ -9,7 +9,7 @@ description = "Sandbox trait and implementations for Fabro agent execution envir
+ [features]
+ default = ["local"]
+ local = []
+-docker = ["dep:bollard", "dep:tar", "dep:futures", "dep:fabro-github"]
++docker = ["dep:bollard", "dep:tar", "dep:fabro-github"]
+ daytona = ["dep:daytona-sdk", "dep:daytona-api-client", "dep:git2", "dep:fabro-github", "dep:fabro-config", "dep:fabro-http", "dep:reqwest-middleware", "dep:rand", "dep:tokio-tungstenite", "dep:futures-util", "dep:rustls"]
+ test-support = []
+ 
+@@ -39,10 +39,11 @@ shlex = "1"
+ # local
+ glob = { version = "0.3" }
+ 
++futures = { workspace = true }
++
+ # docker
+ bollard = { workspace = true, optional = true }
+ tar = { workspace = true, optional = true }
+-futures = { workspace = true, optional = true }
+ 
+ # daytona
+ fabro-config = { path = "../fabro-config", optional = true }
+diff --git a/lib/crates/fabro-sandbox/src/details.rs b/lib/crates/fabro-sandbox/src/details.rs
+index c9d3323df..e6b65bd9b 100644
+--- a/lib/crates/fabro-sandbox/src/details.rs
++++ b/lib/crates/fabro-sandbox/src/details.rs
+@@ -4,7 +4,7 @@ use anyhow::Result;
+ #[cfg(any(feature = "docker", feature = "daytona"))]
+ use chrono::{DateTime, Utc};
+ use fabro_types::{
+-    RunId, RunSandbox, SandboxDetails, SandboxNetwork, SandboxProvider, SandboxResources,
++    RunId, RunSandbox, SandboxDetails, SandboxNetwork, SandboxProviderKind, SandboxResources,
+     SandboxState, SandboxTimestamps,
+ };
+ 
+@@ -26,18 +26,18 @@ pub async fn sandbox_details(
+     run_id: Option<RunId>,
+ ) -> Result<SandboxDetails> {
+     match record.provider {
+-        SandboxProvider::Local => Ok(local_details(record)),
++        SandboxProviderKind::Local => Ok(local_details(record)),
+         #[cfg(feature = "docker")]
+-        SandboxProvider::Docker => docker::docker_details(record, run_id).await,
++        SandboxProviderKind::Docker => docker::docker_details(record, run_id).await,
+         #[cfg(not(feature = "docker"))]
+-        SandboxProvider::Docker => Err(anyhow::anyhow!(
++        SandboxProviderKind::Docker => Err(anyhow::anyhow!(
+             "Sandbox provider '{}' has no details implementation",
+             record.provider
+         )),
+         #[cfg(feature = "daytona")]
+-        SandboxProvider::Daytona => daytona::daytona_details(record, daytona_api_key).await,
++        SandboxProviderKind::Daytona => daytona::daytona_details(record, daytona_api_key).await,
+         #[cfg(not(feature = "daytona"))]
+-        SandboxProvider::Daytona => Err(anyhow::anyhow!(
++        SandboxProviderKind::Daytona => Err(anyhow::anyhow!(
+             "Sandbox provider '{}' has no details implementation",
+             record.provider
+         )),
+@@ -274,14 +274,15 @@ pub(crate) mod docker {
+     mod tests {
+         use bollard::models::HostConfig;
+         use fabro_types::{
+-            RunSandbox, RunSandboxRuntime, SandboxNetwork, SandboxNetworkPolicy, SandboxProvider,
++            RunSandbox, RunSandboxRuntime, SandboxNetwork, SandboxNetworkPolicy,
++            SandboxProviderKind,
+         };
+ 
+         use super::*;
+ 
+         fn record() -> RunSandbox {
+             RunSandbox {
+-                provider: SandboxProvider::Docker,
++                provider: SandboxProviderKind::Docker,
+                 image:    None,
+                 snapshot: None,
+                 runtime:  Some(RunSandboxRuntime {
+@@ -817,7 +818,7 @@ mod tests {
+     #[test]
+     fn local_details_returns_running_with_no_metadata() {
+         let record = RunSandbox {
+-            provider: SandboxProvider::Local,
++            provider: SandboxProviderKind::Local,
+             image:    None,
+             snapshot: None,
+             runtime:  Some(fabro_types::RunSandboxRuntime {
+@@ -833,7 +834,7 @@ mod tests {
+             }),
+         };
+         let details = local_details(&record);
+-        assert_eq!(details.sandbox.provider, SandboxProvider::Local);
++        assert_eq!(details.sandbox.provider, SandboxProviderKind::Local);
+         assert_eq!(details.state, SandboxState::Running);
+         let runtime = details.sandbox.runtime.as_ref().unwrap();
+         assert_eq!(runtime.id, "local:01JNQVR7M0EJ5GKAT2SC4ERS1Z");
+diff --git a/lib/crates/fabro-sandbox/src/lib.rs b/lib/crates/fabro-sandbox/src/lib.rs
+index f9baee88f..2fb0f0b4b 100644
+--- a/lib/crates/fabro-sandbox/src/lib.rs
++++ b/lib/crates/fabro-sandbox/src/lib.rs
+@@ -47,8 +47,8 @@ pub use provider::daytona::DaytonaSandboxProvider;
+ #[cfg(feature = "docker")]
+ pub use provider::docker::DockerSandboxProvider;
+ pub use provider::{
+-    LocalSandboxProvider, SandboxCreateSpec, SandboxListFilter, SandboxLookupError,
+-    SandboxProvider, SandboxProviderRegistry,
++    LocalSandboxProvider, SandboxCreateSpec, SandboxLookupError, SandboxProvider,
++    SandboxProviderRegistry,
+ };
+ pub use read_guard::ReadBeforeWriteSandbox;
+ pub use reconnect::{reconnect, reconnect_for_run, reconnect_for_run_with_callback};
+diff --git a/lib/crates/fabro-sandbox/src/managed_labels.rs b/lib/crates/fabro-sandbox/src/managed_labels.rs
+index 2841105bc..6bc900bed 100644
+--- a/lib/crates/fabro-sandbox/src/managed_labels.rs
++++ b/lib/crates/fabro-sandbox/src/managed_labels.rs
+@@ -3,8 +3,15 @@ use std::collections::HashMap;
+ use fabro_types::RunId;
+ 
+ pub(crate) const MANAGED_LABEL: &str = "sh.fabro.managed";
++pub(crate) const MANAGED_LABEL_VALUE: &str = "true";
+ pub(crate) const RUN_ID_LABEL: &str = "sh.fabro.run_id";
+ 
++/// True when the provided label map carries the Fabro managed sentinel.
++#[cfg(any(feature = "docker", feature = "daytona", test))]
++pub(crate) fn is_managed(labels: &HashMap<String, String>) -> bool {
++    labels.get(MANAGED_LABEL).map(String::as_str) == Some(MANAGED_LABEL_VALUE)
++}
++
+ #[cfg(any(feature = "docker", test))]
+ pub(crate) fn for_run(run_id: Option<&RunId>) -> HashMap<String, String> {
+     let mut labels = HashMap::new();
+diff --git a/lib/crates/fabro-sandbox/src/provider.rs b/lib/crates/fabro-sandbox/src/provider.rs
+index cfb9f09cf..b72d64efc 100644
+--- a/lib/crates/fabro-sandbox/src/provider.rs
++++ b/lib/crates/fabro-sandbox/src/provider.rs
+@@ -3,7 +3,6 @@ pub mod daytona;
+ #[cfg(feature = "docker")]
+ pub mod docker;
+ 
+-use std::fmt::Write as _;
+ use std::sync::Arc;
+ 
+ use async_trait::async_trait;
+@@ -15,15 +14,14 @@ use fabro_types::{
+     SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderKind,
+     SandboxProviderLookupError,
+ };
++use fabro_util::error::collect_chain;
++use futures::future::join_all;
+ 
+ #[cfg(feature = "daytona")]
+ use crate::daytona::DaytonaConfig;
+ #[cfg(feature = "docker")]
+ use crate::docker::DockerSandboxOptions;
+ 
+-#[derive(Debug, Clone, Default)]
+-pub struct SandboxListFilter;
+-
+ pub enum SandboxCreateSpec {
+     Local,
+     #[cfg(feature = "docker")]
+@@ -49,7 +47,7 @@ pub enum SandboxCreateSpec {
+ pub trait SandboxProvider: Send + Sync {
+     fn kind(&self) -> SandboxProviderKind;
+ 
+-    async fn list(&self, filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>>;
++    async fn list(&self) -> crate::Result<Vec<SandboxInfo>>;
+     async fn get(&self, id: &str) -> crate::Result<Option<SandboxInfo>>;
+     async fn create(&self, spec: SandboxCreateSpec) -> crate::Result<SandboxInfo>;
+     async fn delete(&self, id: &str) -> crate::Result<()>;
+@@ -74,13 +72,19 @@ impl SandboxProviderRegistry {
+     }
+ 
+     pub async fn list_managed(&self) -> SandboxListResponse {
++        let results = join_all(
++            self.providers
++                .iter()
++                .map(|provider| async move { (provider.kind(), provider.list().await) }),
++        )
++        .await;
++
+         let mut data = Vec::new();
+         let mut provider_errors = Vec::new();
+-
+-        for provider in &self.providers {
+-            match provider.list(SandboxListFilter).await {
++        for (kind, result) in results {
++            match result {
+                 Ok(mut sandboxes) => data.append(&mut sandboxes),
+-                Err(err) => provider_errors.push(provider_error(provider.kind(), &err)),
++                Err(err) => provider_errors.push(provider_error(kind, &err)),
+             }
+         }
+ 
+@@ -94,14 +98,20 @@ impl SandboxProviderRegistry {
+         &self,
+         id: &str,
+     ) -> Result<SandboxInfo, SandboxLookupError> {
++        let results = join_all(
++            self.providers
++                .iter()
++                .map(|provider| async move { (provider.kind(), provider.get(id).await) }),
++        )
++        .await;
++
+         let mut matches = Vec::new();
+         let mut provider_errors = Vec::new();
+-
+-        for provider in &self.providers {
+-            match provider.get(id).await {
++        for (kind, result) in results {
++            match result {
+                 Ok(Some(sandbox)) => matches.push(sandbox),
+                 Ok(None) => {}
+-                Err(err) => provider_errors.push(provider_error(provider.kind(), &err)),
++                Err(err) => provider_errors.push(provider_error(kind, &err)),
+             }
+         }
+ 
+@@ -150,7 +160,7 @@ impl SandboxProvider for LocalSandboxProvider {
+         SandboxProviderKind::Local
+     }
+ 
+-    async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
++    async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
+         Ok(Vec::new())
+     }
+ 
+@@ -175,122 +185,28 @@ fn provider_error(
+ ) -> SandboxProviderLookupError {
+     SandboxProviderLookupError {
+         provider,
+-        message: render_error(err),
+-    }
+-}
+-
+-fn render_error(err: &(dyn std::error::Error + 'static)) -> String {
+-    let mut message = err.to_string();
+-    let mut source = err.source();
+-    while let Some(err) = source {
+-        let _ = write!(message, ": {err}");
+-        source = err.source();
++        message: collect_chain(err).join(": "),
+     }
+-    message
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+-    use std::collections::BTreeMap;
+-
+-    use fabro_types::{SandboxNetwork, SandboxResources, SandboxState, SandboxTimestamps};
+-
+     use super::*;
+-
+-    #[derive(Clone)]
+-    enum FakeList {
+-        Ok(Vec<SandboxInfo>),
+-        Err(&'static str),
+-    }
+-
+-    #[derive(Clone)]
+-    enum FakeGet {
+-        Found(Box<SandboxInfo>),
+-        Missing,
+-        Err(&'static str),
+-    }
+-
+-    struct FakeProvider {
+-        kind: SandboxProviderKind,
+-        list: FakeList,
+-        get:  FakeGet,
+-    }
+-
+-    impl FakeProvider {
+-        fn new(kind: SandboxProviderKind, list: FakeList, get: FakeGet) -> Self {
+-            Self { kind, list, get }
+-        }
+-    }
+-
+-    #[async_trait]
+-    impl SandboxProvider for FakeProvider {
+-        fn kind(&self) -> SandboxProviderKind {
+-            self.kind
+-        }
+-
+-        async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
+-            match &self.list {
+-                FakeList::Ok(sandboxes) => Ok(sandboxes.clone()),
+-                FakeList::Err(message) => Err(crate::Error::message(*message)),
+-            }
+-        }
+-
+-        async fn get(&self, _id: &str) -> crate::Result<Option<SandboxInfo>> {
+-            match &self.get {
+-                FakeGet::Found(sandbox) => Ok(Some((**sandbox).clone())),
+-                FakeGet::Missing => Ok(None),
+-                FakeGet::Err(message) => Err(crate::Error::message(*message)),
+-            }
+-        }
+-
+-        async fn create(&self, _spec: SandboxCreateSpec) -> crate::Result<SandboxInfo> {
+-            Err(crate::Error::message("not implemented"))
+-        }
+-
+-        async fn delete(&self, _id: &str) -> crate::Result<()> {
+-            Ok(())
+-        }
+-    }
+-
+-    fn registry(providers: Vec<FakeProvider>) -> SandboxProviderRegistry {
+-        SandboxProviderRegistry::new(
+-            providers
+-                .into_iter()
+-                .map(|provider| Arc::new(provider) as Arc<dyn SandboxProvider>)
+-                .collect(),
+-        )
+-    }
+-
+-    fn info(provider: SandboxProviderKind, id: &str) -> SandboxInfo {
+-        SandboxInfo {
+-            provider,
+-            id: id.to_string(),
+-            display_name: None,
+-            state: SandboxState::Running,
+-            native_state: None,
+-            image: None,
+-            snapshot: None,
+-            region: None,
+-            web_url: None,
+-            working_directory: None,
+-            resources: SandboxResources::default(),
+-            network: SandboxNetwork::unknown(),
+-            labels: BTreeMap::new(),
+-            timestamps: SandboxTimestamps::default(),
+-        }
+-    }
++    use crate::test_support::{
++        FakeGet, FakeList, FakeSandboxProvider, fake_registry, fake_sandbox_info,
++    };
+ 
+     #[tokio::test]
+     async fn list_returns_aggregate_data_from_successful_providers() {
+-        let docker = info(SandboxProviderKind::Docker, "docker-1");
+-        let daytona = info(SandboxProviderKind::Daytona, "daytona-1");
+-        let registry = registry(vec![
+-            FakeProvider::new(
++        let docker = fake_sandbox_info(SandboxProviderKind::Docker, "docker-1");
++        let daytona = fake_sandbox_info(SandboxProviderKind::Daytona, "daytona-1");
++        let registry = fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(vec![docker.clone()]),
+                 FakeGet::Missing,
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(vec![daytona.clone()]),
+                 FakeGet::Missing,
+@@ -305,14 +221,14 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn list_includes_provider_error_metadata_when_one_provider_fails() {
+-        let docker = info(SandboxProviderKind::Docker, "docker-1");
+-        let registry = registry(vec![
+-            FakeProvider::new(
++        let docker = fake_sandbox_info(SandboxProviderKind::Docker, "docker-1");
++        let registry = fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(vec![docker.clone()]),
+                 FakeGet::Missing,
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Err("daytona unavailable"),
+                 FakeGet::Missing,
+@@ -332,14 +248,14 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn get_returns_one_matching_sandbox() {
+-        let docker = info(SandboxProviderKind::Docker, "same-id");
+-        let registry = registry(vec![
+-            FakeProvider::new(
++        let docker = fake_sandbox_info(SandboxProviderKind::Docker, "same-id");
++        let registry = fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Found(Box::new(docker.clone())),
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+@@ -354,13 +270,13 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn get_returns_not_found_when_all_providers_miss() {
+-        let registry = registry(vec![
+-            FakeProvider::new(
++        let registry = fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+@@ -377,16 +293,22 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn get_returns_conflict_when_two_providers_match() {
+-        let registry = registry(vec![
+-            FakeProvider::new(
++        let registry = fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+-                FakeGet::Found(Box::new(info(SandboxProviderKind::Docker, "same-id"))),
++                FakeGet::Found(Box::new(fake_sandbox_info(
++                    SandboxProviderKind::Docker,
++                    "same-id",
++                ))),
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+-                FakeGet::Found(Box::new(info(SandboxProviderKind::Daytona, "same-id"))),
++                FakeGet::Found(Box::new(fake_sandbox_info(
++                    SandboxProviderKind::Daytona,
++                    "same-id",
++                ))),
+             ),
+         ]);
+ 
+@@ -405,13 +327,13 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn get_returns_provider_unavailable_when_no_match_and_one_provider_fails() {
+-        let registry = registry(vec![
+-            FakeProvider::new(
++        let registry = fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Err("daytona unavailable"),
+diff --git a/lib/crates/fabro-sandbox/src/provider/daytona.rs b/lib/crates/fabro-sandbox/src/provider/daytona.rs
+index b38c48009..7295afd97 100644
+--- a/lib/crates/fabro-sandbox/src/provider/daytona.rs
++++ b/lib/crates/fabro-sandbox/src/provider/daytona.rs
+@@ -5,9 +5,9 @@ use daytona_sdk::DaytonaError;
+ use fabro_static::EnvVars;
+ use fabro_types::{SandboxInfo, SandboxProviderKind};
+ 
+-use super::{SandboxCreateSpec, SandboxListFilter, SandboxProvider};
++use super::{SandboxCreateSpec, SandboxProvider};
+ use crate::daytona::{self, DaytonaSandbox};
+-use crate::managed_labels::MANAGED_LABEL;
++use crate::managed_labels::{self, MANAGED_LABEL, MANAGED_LABEL_VALUE};
+ use crate::{Sandbox, details};
+ 
+ const DAYTONA_LIST_PAGE_SIZE: i32 = 100;
+@@ -56,9 +56,9 @@ impl SandboxProvider for DaytonaSandboxProvider {
+         SandboxProviderKind::Daytona
+     }
+ 
+-    async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
++    async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
+         let client = self.client().await?;
+-        let labels = HashMap::from([(MANAGED_LABEL.to_string(), "true".to_string())]);
++        let labels = HashMap::from([(MANAGED_LABEL.to_string(), MANAGED_LABEL_VALUE.to_string())]);
+         let mut page = 1;
+         let mut sandboxes = Vec::new();
+ 
+@@ -67,11 +67,12 @@ impl SandboxProvider for DaytonaSandboxProvider {
+                 .list(Some(&labels), Some(page), Some(DAYTONA_LIST_PAGE_SIZE))
+                 .await
+                 .map_err(|err| crate::Error::context("Failed to list Daytona sandboxes", err))?;
++            // The Daytona API already filters by the managed label above; map every
++            // returned sandbox without re-checking the label client-side.
+             sandboxes.extend(
+                 result
+                     .items
+                     .iter()
+-                    .filter(|sandbox| managed_from_sdk_sandbox(sandbox))
+                     .map(details::daytona::daytona_info_from_sdk_sandbox),
+             );
+ 
+@@ -153,7 +154,7 @@ impl SandboxProvider for DaytonaSandboxProvider {
+         };
+         if !managed_from_sdk_sandbox(&sandbox) {
+             return Err(crate::Error::message(format!(
+-                "Refusing to delete Daytona sandbox '{id}' because it is missing label {MANAGED_LABEL}=true"
++                "Refusing to delete Daytona sandbox '{id}' because it is missing label {MANAGED_LABEL}={MANAGED_LABEL_VALUE}"
+             )));
+         }
+         client.delete(&sandbox.id).await.map_err(|err| {
+@@ -163,7 +164,7 @@ impl SandboxProvider for DaytonaSandboxProvider {
+ }
+ 
+ fn managed_from_sdk_sandbox(sandbox: &daytona_sdk::Sandbox) -> bool {
+-    sandbox.labels.get(MANAGED_LABEL).map(String::as_str) == Some("true")
++    managed_labels::is_managed(&sandbox.labels)
+ }
+ 
+ fn daytona_not_found(err: &DaytonaError) -> bool {
+diff --git a/lib/crates/fabro-sandbox/src/provider/docker.rs b/lib/crates/fabro-sandbox/src/provider/docker.rs
+index fc9461ec6..13daf42c4 100644
+--- a/lib/crates/fabro-sandbox/src/provider/docker.rs
++++ b/lib/crates/fabro-sandbox/src/provider/docker.rs
+@@ -6,48 +6,24 @@ use bollard::container::{InspectContainerOptions, ListContainersOptions, RemoveC
+ use bollard::errors::Error as DockerError;
+ use bollard::models::ContainerInspectResponse;
+ use fabro_types::{SandboxInfo, SandboxProviderKind};
++use futures::future::try_join_all;
+ 
+-use super::{SandboxCreateSpec, SandboxListFilter, SandboxProvider};
+-use crate::docker::{DockerSandbox, DockerSandboxOptions};
+-use crate::managed_labels::MANAGED_LABEL;
++use super::{SandboxCreateSpec, SandboxProvider};
++use crate::docker::DockerSandbox;
++use crate::managed_labels::{self, MANAGED_LABEL, MANAGED_LABEL_VALUE};
+ use crate::{Sandbox, details};
+ 
+-#[derive(Debug, Clone)]
+-pub struct DockerSandboxProvider {
+-    _default_config: DockerSandboxOptions,
+-}
++#[derive(Debug, Clone, Default)]
++pub struct DockerSandboxProvider;
+ 
+ impl DockerSandboxProvider {
+-    pub fn new(default_config: DockerSandboxOptions) -> Self {
+-        Self {
+-            _default_config: default_config,
+-        }
++    pub fn new() -> Self {
++        Self
+     }
+ 
+     fn docker_client() -> crate::Result<Docker> {
+         Docker::connect_with_local_defaults().map_err(crate::Error::docker_connect)
+     }
+-
+-    async fn inspect(&self, id: &str) -> crate::Result<Option<ContainerInspectResponse>> {
+-        let docker = Self::docker_client()?;
+-        match docker
+-            .inspect_container(id, None::<InspectContainerOptions>)
+-            .await
+-        {
+-            Ok(inspect) => Ok(Some(inspect)),
+-            Err(err) if docker_not_found(&err) => Ok(None),
+-            Err(err) => Err(crate::Error::context(
+-                format!("Failed to inspect Docker container '{id}'"),
+-                err,
+-            )),
+-        }
+-    }
+-}
+-
+-impl Default for DockerSandboxProvider {
+-    fn default() -> Self {
+-        Self::new(DockerSandboxOptions::default())
+-    }
+ }
+ 
+ #[async_trait]
+@@ -56,10 +32,12 @@ impl SandboxProvider for DockerSandboxProvider {
+         SandboxProviderKind::Docker
+     }
+ 
+-    async fn list(&self, _filter: SandboxListFilter) -> crate::Result<Vec<SandboxInfo>> {
++    async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
+         let docker = Self::docker_client()?;
+         let mut filters = HashMap::new();
+-        filters.insert("label".to_string(), vec![format!("{MANAGED_LABEL}=true")]);
++        filters.insert("label".to_string(), vec![format!(
++            "{MANAGED_LABEL}={MANAGED_LABEL_VALUE}"
++        )]);
+         let options = ListContainersOptions::<String> {
+             all: true,
+             filters,
+@@ -70,23 +48,25 @@ impl SandboxProvider for DockerSandboxProvider {
+             .await
+             .map_err(|err| crate::Error::context("Failed to list Docker containers", err))?;
+ 
+-        let mut sandboxes = Vec::new();
+-        for container in containers {
+-            let Some(id) = container.id else {
+-                continue;
+-            };
+-            let Some(inspect) = self.inspect(&id).await? else {
+-                continue;
+-            };
+-            if managed_from_inspect(&inspect) {
+-                sandboxes.push(details::docker::docker_info_from_inspect(&inspect));
+-            }
+-        }
+-        Ok(sandboxes)
++        let ids: Vec<String> = containers.into_iter().filter_map(|c| c.id).collect();
++        // Daemon-side label filter already restricts to managed containers, so we
++        // can skip the per-inspect managed re-check. Run inspects concurrently on
++        // the shared Docker client to avoid a serial N+1 round-trip.
++        let inspects = try_join_all(
++            ids.iter()
++                .map(|id| docker.inspect_container(id, None::<InspectContainerOptions>)),
++        )
++        .await
++        .map_err(|err| crate::Error::context("Failed to inspect Docker container", err))?;
++        Ok(inspects
++            .iter()
++            .map(details::docker::docker_info_from_inspect)
++            .collect())
+     }
+ 
+     async fn get(&self, id: &str) -> crate::Result<Option<SandboxInfo>> {
+-        let Some(inspect) = self.inspect(id).await? else {
++        let docker = Self::docker_client()?;
++        let Some(inspect) = inspect_container(&docker, id).await? else {
+             return Ok(None);
+         };
+         if !managed_from_inspect(&inspect) {
+@@ -121,16 +101,16 @@ impl SandboxProvider for DockerSandboxProvider {
+     }
+ 
+     async fn delete(&self, id: &str) -> crate::Result<()> {
+-        let Some(inspect) = self.inspect(id).await? else {
++        let docker = Self::docker_client()?;
++        let Some(inspect) = inspect_container(&docker, id).await? else {
+             return Ok(());
+         };
+         if !managed_from_inspect(&inspect) {
+             return Err(crate::Error::message(format!(
+-                "Refusing to delete Docker container '{id}' because it is missing label {MANAGED_LABEL}=true"
++                "Refusing to delete Docker container '{id}' because it is missing label {MANAGED_LABEL}={MANAGED_LABEL_VALUE}"
+             )));
+         }
+ 
+-        let docker = Self::docker_client()?;
+         let container_id = inspect.id.as_deref().unwrap_or(id);
+         docker
+             .remove_container(
+@@ -150,14 +130,29 @@ impl SandboxProvider for DockerSandboxProvider {
+     }
+ }
+ 
++async fn inspect_container(
++    docker: &Docker,
++    id: &str,
++) -> crate::Result<Option<ContainerInspectResponse>> {
++    match docker
++        .inspect_container(id, None::<InspectContainerOptions>)
++        .await
++    {
++        Ok(inspect) => Ok(Some(inspect)),
++        Err(err) if docker_not_found(&err) => Ok(None),
++        Err(err) => Err(crate::Error::context(
++            format!("Failed to inspect Docker container '{id}'"),
++            err,
++        )),
++    }
++}
++
+ fn managed_from_inspect(inspect: &ContainerInspectResponse) -> bool {
+     inspect
+         .config
+         .as_ref()
+         .and_then(|config| config.labels.as_ref())
+-        .and_then(|labels| labels.get(MANAGED_LABEL))
+-        .map(String::as_str)
+-        == Some("true")
++        .is_some_and(managed_labels::is_managed)
+ }
+ 
+ fn docker_not_found(error: &DockerError) -> bool {
+diff --git a/lib/crates/fabro-sandbox/src/reconnect.rs b/lib/crates/fabro-sandbox/src/reconnect.rs
+index 1032f42fd..c71b6dc4e 100644
+--- a/lib/crates/fabro-sandbox/src/reconnect.rs
++++ b/lib/crates/fabro-sandbox/src/reconnect.rs
+@@ -5,7 +5,7 @@ use std::path::PathBuf;
+     reason = "Feature-gated branches consume these imports when optional backends are enabled."
+ )]
+ use anyhow::{Context, Result, bail};
+-use fabro_types::{RunId, RunSandbox, SandboxProvider};
++use fabro_types::{RunId, RunSandbox, SandboxProviderKind};
+ 
+ use crate::SandboxEventCallback;
+ #[cfg(feature = "daytona")]
+@@ -57,7 +57,7 @@ pub async fn reconnect_for_run_with_callback(
+         .as_ref()
+         .context("run sandbox missing runtime metadata")?;
+     match record.provider {
+-        SandboxProvider::Local => {
++        SandboxProviderKind::Local => {
+             let mut sandbox = LocalSandbox::new(PathBuf::from(&runtime.working_directory));
+             if let Some(callback) = event_callback {
+                 sandbox.set_event_callback(callback);
+@@ -65,7 +65,7 @@ pub async fn reconnect_for_run_with_callback(
+             Ok(Box::new(sandbox))
+         }
+         #[cfg(feature = "docker")]
+-        SandboxProvider::Docker => {
++        SandboxProviderKind::Docker => {
+             let repo_cloned = runtime
+                 .repo_cloned
+                 .context("Docker run sandbox missing repo_cloned metadata")?;
+@@ -85,9 +85,9 @@ pub async fn reconnect_for_run_with_callback(
+             Ok(Box::new(sandbox))
+         }
+         #[cfg(not(feature = "docker"))]
+-        SandboxProvider::Docker => bail!("Docker sandbox support is not enabled"),
++        SandboxProviderKind::Docker => bail!("Docker sandbox support is not enabled"),
+         #[cfg(feature = "daytona")]
+-        SandboxProvider::Daytona => {
++        SandboxProviderKind::Daytona => {
+             let repo_cloned = runtime
+                 .repo_cloned
+                 .context("Daytona run sandbox missing repo_cloned metadata")?;
+@@ -108,6 +108,6 @@ pub async fn reconnect_for_run_with_callback(
+             Ok(Box::new(sandbox))
+         }
+         #[cfg(not(feature = "daytona"))]
+-        SandboxProvider::Daytona => bail!("Daytona sandbox support is not enabled"),
++        SandboxProviderKind::Daytona => bail!("Daytona sandbox support is not enabled"),
+     }
+ }
+diff --git a/lib/crates/fabro-sandbox/src/sandbox_spec.rs b/lib/crates/fabro-sandbox/src/sandbox_spec.rs
+index a8d251f5a..12c4bf000 100644
+--- a/lib/crates/fabro-sandbox/src/sandbox_spec.rs
++++ b/lib/crates/fabro-sandbox/src/sandbox_spec.rs
+@@ -9,7 +9,7 @@ use fabro_github::GitHubCredentials;
+     unused_imports,
+     reason = "Daytona-enabled builds persist RunId in the sandbox spec."
+ )]
+-use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProvider};
++use fabro_types::{RunId, RunSandbox, RunSandboxRuntime, SandboxProviderKind};
+ 
+ #[cfg(any(feature = "docker", feature = "daytona"))]
+ use crate::clone_source;
+@@ -45,21 +45,21 @@ pub enum SandboxSpec {
+ }
+ 
+ impl SandboxSpec {
+-    pub fn provider(&self) -> SandboxProvider {
++    pub fn provider(&self) -> SandboxProviderKind {
+         match self {
+-            Self::Local { .. } => SandboxProvider::Local,
++            Self::Local { .. } => SandboxProviderKind::Local,
+             #[cfg(feature = "docker")]
+-            Self::Docker { .. } => SandboxProvider::Docker,
++            Self::Docker { .. } => SandboxProviderKind::Docker,
+             #[cfg(feature = "daytona")]
+-            Self::Daytona { .. } => SandboxProvider::Daytona,
++            Self::Daytona { .. } => SandboxProviderKind::Daytona,
+         }
+     }
+ 
+     pub fn provider_name(&self) -> &'static str {
+         match self.provider() {
+-            SandboxProvider::Local => "local",
+-            SandboxProvider::Docker => "docker",
+-            SandboxProvider::Daytona => "daytona",
++            SandboxProviderKind::Local => "local",
++            SandboxProviderKind::Docker => "docker",
++            SandboxProviderKind::Daytona => "daytona",
+         }
+     }
+ 
+diff --git a/lib/crates/fabro-sandbox/src/terminal.rs b/lib/crates/fabro-sandbox/src/terminal.rs
+index 34fc59748..67dfa29b6 100644
+--- a/lib/crates/fabro-sandbox/src/terminal.rs
++++ b/lib/crates/fabro-sandbox/src/terminal.rs
+@@ -1,7 +1,7 @@
+ use async_trait::async_trait;
+ #[cfg(feature = "daytona")]
+ use fabro_static::EnvVars;
+-use fabro_types::{RunId, SandboxProvider};
++use fabro_types::{RunId, SandboxProviderKind};
+ 
+ use crate::RunSandbox;
+ #[cfg(any(feature = "daytona", feature = "docker"))]
+@@ -55,7 +55,7 @@ pub async fn open_terminal_for_run(
+ 
+     match record.provider {
+         #[cfg(feature = "daytona")]
+-        SandboxProvider::Daytona => {
++        SandboxProviderKind::Daytona => {
+             let repo_cloned = runtime.repo_cloned.ok_or_else(|| {
+                 crate::Error::message("Daytona run sandbox is missing clone metadata")
+             })?;
+@@ -82,11 +82,11 @@ pub async fn open_terminal_for_run(
+             Ok(Box::new(session))
+         }
+         #[cfg(not(feature = "daytona"))]
+-        SandboxProvider::Daytona => Err(crate::Error::message(
++        SandboxProviderKind::Daytona => Err(crate::Error::message(
+             "Daytona sandbox support is not enabled",
+         )),
+         #[cfg(feature = "docker")]
+-        SandboxProvider::Docker => {
++        SandboxProviderKind::Docker => {
+             let repo_cloned = runtime.repo_cloned.ok_or_else(|| {
+                 crate::Error::message("Docker run sandbox is missing clone metadata")
+             })?;
+@@ -104,10 +104,10 @@ pub async fn open_terminal_for_run(
+             Ok(Box::new(session))
+         }
+         #[cfg(not(feature = "docker"))]
+-        SandboxProvider::Docker => Err(crate::Error::message(
++        SandboxProviderKind::Docker => Err(crate::Error::message(
+             "Docker sandbox support is not enabled",
+         )),
+-        SandboxProvider::Local => Err(crate::Error::message(
++        SandboxProviderKind::Local => Err(crate::Error::message(
+             "Local sandboxes do not support embedded terminals",
+         )),
+     }
+diff --git a/lib/crates/fabro-sandbox/src/test_support.rs b/lib/crates/fabro-sandbox/src/test_support.rs
+index 6158aab23..1593c9032 100644
+--- a/lib/crates/fabro-sandbox/src/test_support.rs
++++ b/lib/crates/fabro-sandbox/src/test_support.rs
+@@ -560,3 +560,103 @@ impl Sandbox for MutableMockSandbox {
+         "Linux 6.1.0".into()
+     }
+ }
++
++// --- FakeSandboxProvider ---
++
++pub use fake_provider::{FakeGet, FakeList, FakeSandboxProvider, fake_registry, fake_sandbox_info};
++
++mod fake_provider {
++    use std::collections::BTreeMap;
++    use std::sync::Arc;
++
++    use async_trait::async_trait;
++    use fabro_types::{
++        SandboxInfo, SandboxNetwork, SandboxProviderKind, SandboxResources, SandboxState,
++        SandboxTimestamps,
++    };
++
++    use crate::provider::{SandboxCreateSpec, SandboxProvider, SandboxProviderRegistry};
++
++    #[derive(Clone)]
++    pub enum FakeList {
++        Ok(Vec<SandboxInfo>),
++        Err(&'static str),
++    }
++
++    #[derive(Clone)]
++    pub enum FakeGet {
++        Found(Box<SandboxInfo>),
++        Missing,
++        Err(&'static str),
++    }
++
++    pub struct FakeSandboxProvider {
++        kind: SandboxProviderKind,
++        list: FakeList,
++        get:  FakeGet,
++    }
++
++    impl FakeSandboxProvider {
++        pub fn new(kind: SandboxProviderKind, list: FakeList, get: FakeGet) -> Self {
++            Self { kind, list, get }
++        }
++    }
++
++    #[async_trait]
++    impl SandboxProvider for FakeSandboxProvider {
++        fn kind(&self) -> SandboxProviderKind {
++            self.kind
++        }
++
++        async fn list(&self) -> crate::Result<Vec<SandboxInfo>> {
++            match &self.list {
++                FakeList::Ok(sandboxes) => Ok(sandboxes.clone()),
++                FakeList::Err(message) => Err(crate::Error::message(*message)),
++            }
++        }
++
++        async fn get(&self, _id: &str) -> crate::Result<Option<SandboxInfo>> {
++            match &self.get {
++                FakeGet::Found(sandbox) => Ok(Some((**sandbox).clone())),
++                FakeGet::Missing => Ok(None),
++                FakeGet::Err(message) => Err(crate::Error::message(*message)),
++            }
++        }
++
++        async fn create(&self, _spec: SandboxCreateSpec) -> crate::Result<SandboxInfo> {
++            Err(crate::Error::message("not implemented"))
++        }
++
++        async fn delete(&self, _id: &str) -> crate::Result<()> {
++            Ok(())
++        }
++    }
++
++    pub fn fake_registry(providers: Vec<FakeSandboxProvider>) -> SandboxProviderRegistry {
++        SandboxProviderRegistry::new(
++            providers
++                .into_iter()
++                .map(|provider| Arc::new(provider) as Arc<dyn SandboxProvider>)
++                .collect(),
++        )
++    }
++
++    pub fn fake_sandbox_info(provider: SandboxProviderKind, id: &str) -> SandboxInfo {
++        SandboxInfo {
++            provider,
++            id: id.to_string(),
++            display_name: None,
++            state: SandboxState::Running,
++            native_state: None,
++            image: None,
++            snapshot: None,
++            region: None,
++            web_url: None,
++            working_directory: None,
++            resources: SandboxResources::default(),
++            network: SandboxNetwork::unknown(),
++            labels: BTreeMap::new(),
++            timestamps: SandboxTimestamps::default(),
++        }
++    }
++}
+diff --git a/lib/crates/fabro-server/src/run_manifest.rs b/lib/crates/fabro-server/src/run_manifest.rs
+index ff898bea0..a004872cb 100644
+--- a/lib/crates/fabro-server/src/run_manifest.rs
++++ b/lib/crates/fabro-server/src/run_manifest.rs
+@@ -26,7 +26,7 @@ use fabro_static::EnvVars;
+ use fabro_types::settings::cli::OutputVerbosity;
+ use fabro_types::settings::interp::InterpString;
+ use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
+-use fabro_types::{ManifestPath, RunId, SandboxProvider, ServerSettings, WorkflowSettings};
++use fabro_types::{ManifestPath, RunId, SandboxProviderKind, ServerSettings, WorkflowSettings};
+ use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
+ use fabro_validate::Severity;
+ use fabro_workflow::Error as WorkflowError;
+@@ -632,7 +632,7 @@ fn base_preflight_checks(prepared: &PreparedManifest, graph: &Graph) -> Vec<Chec
+ 
+ pub(crate) fn sandbox_provider_policy_error(
+     server_settings: &ServerSettings,
+-    provider: SandboxProvider,
++    provider: SandboxProviderKind,
+ ) -> Option<String> {
+     let enabled = server_settings
+         .server
+@@ -647,8 +647,8 @@ pub(crate) fn sandbox_provider_policy_error(
+     })
+ }
+ 
+-pub(crate) fn effective_sandbox_provider(settings: &RunNamespace) -> SandboxProvider {
+-    SandboxProvider::from(settings.environment.provider).effective_for(settings.execution.mode)
++pub(crate) fn effective_sandbox_provider(settings: &RunNamespace) -> SandboxProviderKind {
++    SandboxProviderKind::from(settings.environment.provider).effective_for(settings.execution.mode)
+ }
+ 
+ fn resolve_daytona_config(settings: &RunNamespace) -> DaytonaConfig {
+@@ -665,10 +665,10 @@ struct GitRemoteRefCheck {
+     branch:     Option<String>,
+ }
+ 
+-fn clone_disabled_for_provider(provider: SandboxProvider, resolved_run: &RunNamespace) -> bool {
++fn clone_disabled_for_provider(provider: SandboxProviderKind, resolved_run: &RunNamespace) -> bool {
+     match provider {
+-        SandboxProvider::Docker | SandboxProvider::Daytona => !resolved_run.clone.enabled,
+-        SandboxProvider::Local => false,
++        SandboxProviderKind::Docker | SandboxProviderKind::Daytona => !resolved_run.clone.enabled,
++        SandboxProviderKind::Local => false,
+     }
+ }
+ 
+@@ -742,7 +742,7 @@ fn repository_access_details(request: &GitRemoteRefCheck) -> Vec<CheckDetail> {
+ 
+ async fn run_repository_access_check(
+     checks: &mut Vec<CheckResult>,
+-    sandbox_provider: SandboxProvider,
++    sandbox_provider: SandboxProviderKind,
+     prepared: &PreparedManifest,
+     resolved_run: &RunNamespace,
+     github_app: Option<fabro_github::GitHubCredentials>,
+@@ -760,7 +760,7 @@ async fn run_repository_access_check(
+ 
+ async fn run_repository_access_check_with<F, Fut>(
+     checks: &mut Vec<CheckResult>,
+-    sandbox_provider: SandboxProvider,
++    sandbox_provider: SandboxProviderKind,
+     prepared: &PreparedManifest,
+     resolved_run: &RunNamespace,
+     github_app: Option<fabro_github::GitHubCredentials>,
+@@ -876,7 +876,7 @@ async fn check_git_remote_ref(
+ }
+ 
+ fn preflight_sandbox_spec(
+-    sandbox_provider: SandboxProvider,
++    sandbox_provider: SandboxProviderKind,
+     prepared: &PreparedManifest,
+     resolved_run: &RunNamespace,
+     github_app: Option<fabro_github::GitHubCredentials>,
+@@ -889,10 +889,10 @@ fn preflight_sandbox_spec(
+     let clone_branch = prepared.git.as_ref().map(|git| git.branch.clone());
+ 
+     match sandbox_provider {
+-        SandboxProvider::Local => SandboxSpec::Local {
++        SandboxProviderKind::Local => SandboxSpec::Local {
+             working_directory: prepared.source_directory.clone(),
+         },
+-        SandboxProvider::Docker => {
++        SandboxProviderKind::Docker => {
+             let mut config = resolve_docker_config(resolved_run);
+             config.skip_clone = true;
+             SandboxSpec::Docker {
+@@ -903,7 +903,7 @@ fn preflight_sandbox_spec(
+                 clone_branch,
+             }
+         }
+-        SandboxProvider::Daytona => {
++        SandboxProviderKind::Daytona => {
+             let mut config = resolve_daytona_config(resolved_run);
+             config.skip_clone = true;
+             SandboxSpec::Daytona {
+@@ -920,7 +920,7 @@ fn preflight_sandbox_spec(
+ 
+ async fn run_sandbox_check(
+     checks: &mut Vec<CheckResult>,
+-    sandbox_provider: SandboxProvider,
++    sandbox_provider: SandboxProviderKind,
+     prepared: &PreparedManifest,
+     resolved_run: &RunNamespace,
+     github_app: Option<fabro_github::GitHubCredentials>,
+@@ -934,7 +934,7 @@ async fn run_sandbox_check(
+         daytona_api_key,
+     );
+     let sandbox_result: Result<Arc<dyn Sandbox>, String> = spec.build(None).await.map_err(|err| {
+-        if matches!(sandbox_provider, SandboxProvider::Daytona) {
++        if matches!(sandbox_provider, SandboxProviderKind::Daytona) {
+             format!("Daytona sandbox creation failed: {err}")
+         } else {
+             err.to_string()
+@@ -1468,7 +1468,7 @@ mod tests {
+     }
+ 
+     fn prepared_and_resolved_for_sandbox(
+-        provider: SandboxProvider,
++        provider: SandboxProviderKind,
+         clone_enabled: bool,
+         git: Option<types::GitContext>,
+     ) -> (PreparedManifest, RunNamespace) {
+@@ -1630,7 +1630,7 @@ dockerfile = { path = "Dockerfile" }
+     #[tokio::test]
+     async fn repository_access_check_skips_when_clone_is_disabled() {
+         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             false,
+             Some(git_context("https://github.com/acme/widgets", "main")),
+         );
+@@ -1640,7 +1640,7 @@ dockerfile = { path = "Dockerfile" }
+ 
+         let ok = run_repository_access_check_with(
+             &mut checks,
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             &prepared,
+             &resolved,
+             None,
+@@ -1659,7 +1659,7 @@ dockerfile = { path = "Dockerfile" }
+     #[tokio::test]
+     async fn repository_access_check_rejects_non_github_origins_before_remote_probe() {
+         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             true,
+             Some(git_context("https://gitlab.com/acme/widgets", "main")),
+         );
+@@ -1669,7 +1669,7 @@ dockerfile = { path = "Dockerfile" }
+ 
+         let ok = run_repository_access_check_with(
+             &mut checks,
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             &prepared,
+             &resolved,
+             None,
+@@ -1697,7 +1697,7 @@ dockerfile = { path = "Dockerfile" }
+     #[tokio::test]
+     async fn repository_access_check_probes_normalized_github_branch() {
+         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             true,
+             Some(git_context(
+                 "git@github.com:acme/widgets.git",
+@@ -1710,7 +1710,7 @@ dockerfile = { path = "Dockerfile" }
+ 
+         let ok = run_repository_access_check_with(
+             &mut checks,
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             &prepared,
+             &resolved,
+             None,
+@@ -1734,7 +1734,7 @@ dockerfile = { path = "Dockerfile" }
+     #[tokio::test]
+     async fn repository_access_check_surfaces_remote_probe_failure() {
+         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             true,
+             Some(git_context("https://github.com/acme/widgets", "missing")),
+         );
+@@ -1742,7 +1742,7 @@ dockerfile = { path = "Dockerfile" }
+ 
+         let ok = run_repository_access_check_with(
+             &mut checks,
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             &prepared,
+             &resolved,
+             None,
+@@ -1766,13 +1766,18 @@ dockerfile = { path = "Dockerfile" }
+     #[test]
+     fn preflight_sandbox_spec_disables_docker_clone_but_preserves_clone_metadata() {
+         let (prepared, resolved) = prepared_and_resolved_for_sandbox(
+-            SandboxProvider::Docker,
++            SandboxProviderKind::Docker,
+             true,
+             Some(git_context("https://github.com/acme/widgets", "main")),
+         );
+ 
+-        let spec =
+-            preflight_sandbox_spec(SandboxProvider::Docker, &prepared, &resolved, None, None);
++        let spec = preflight_sandbox_spec(
++            SandboxProviderKind::Docker,
++            &prepared,
++            &resolved,
++            None,
++            None,
++        );
+ 
+         match spec {
+             SandboxSpec::Docker {
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index be14a88e1..c290687a3 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -64,11 +64,10 @@ use fabro_model::{BilledTokenCounts, Catalog, ModelRef, ModelTestMode, ProviderI
+ use fabro_redact::redact_jsonl_line;
+ use fabro_sandbox::daytona::{self, DaytonaSandbox};
+ use fabro_sandbox::details::sandbox_details;
+-use fabro_sandbox::provider::SandboxProvider as RuntimeSandboxProvider;
+ use fabro_sandbox::reconnect::reconnect_for_run;
+ use fabro_sandbox::{
+-    DaytonaSandboxProvider, DockerSandboxOptions, DockerSandboxProvider, LocalSandboxProvider,
+-    Sandbox, SandboxProviderRegistry, from_environment,
++    DaytonaSandboxProvider, DockerSandboxProvider, LocalSandboxProvider, Sandbox, SandboxProvider,
++    SandboxProviderRegistry,
+ };
+ use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
+ use fabro_slack::config::{
+@@ -93,7 +92,7 @@ use fabro_types::settings::{InterpString, RunNamespace};
+ use fabro_types::{
+     AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
+     PairMessageId, PairTarget, PendingReason, Principal, PullRequestLink, QuestionType, RunBlobId,
+-    RunControlAction, RunEvent, RunId, RunRunnableSource, SandboxProvider, ServerSettings,
++    RunControlAction, RunEvent, RunId, RunRunnableSource, SandboxProviderKind, ServerSettings,
+     SessionCapability, StageModelUsage,
+ };
+ use fabro_util::error::{
+@@ -2012,7 +2011,7 @@ fn system_sandbox_provider(
+     manifest_run_settings: &std::result::Result<RunNamespace, SharedError>,
+ ) -> String {
+     manifest_run_settings.as_ref().map_or_else(
+-        |_| SandboxProvider::default().to_string(),
++        |_| SandboxProviderKind::default().to_string(),
+         |settings| settings.environment.provider.to_string(),
+     )
+ }
+@@ -2062,42 +2061,31 @@ fn worker_token_keys_from_server_secrets(
+ 
+ fn build_sandbox_provider_registry(
+     server_settings: &ServerSettings,
+-    manifest_run_settings: Option<&RunNamespace>,
+-    vault: &Vault,
++    daytona_api_key: Option<String>,
+     env_lookup: &EnvLookup,
+     http_client: Option<fabro_http::HttpClient>,
+ ) -> SandboxProviderRegistry {
+     let provider_settings = &server_settings.server.sandbox.providers;
+-    let mut providers: Vec<Arc<dyn RuntimeSandboxProvider>> = Vec::new();
++    let mut providers: Vec<Arc<dyn SandboxProvider>> = Vec::new();
+ 
+     if provider_settings.local.enabled {
+         providers.push(Arc::new(LocalSandboxProvider));
+     }
+ 
+     if provider_settings.docker.enabled {
+-        let default_config =
+-            manifest_run_settings.map_or_else(DockerSandboxOptions::default, |settings| {
+-                from_environment::docker_config_from_environment(
+-                    &settings.environment,
+-                    !settings.clone.enabled,
+-                )
+-            });
+-        providers.push(Arc::new(DockerSandboxProvider::new(default_config)));
+-    }
+-
+-    if provider_settings.daytona.enabled {
+-        let api_key = vault.get(EnvVars::DAYTONA_API_KEY).map(str::to_string);
+-        if api_key.is_some() {
+-            let api_url = env_lookup(EnvVars::DAYTONA_API_URL)
+-                .or_else(|| env_lookup(EnvVars::DAYTONA_SERVER_URL));
+-            let organization_id = env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
+-            providers.push(Arc::new(DaytonaSandboxProvider::new(
+-                api_key,
+-                api_url,
+-                organization_id,
+-                http_client,
+-            )));
+-        }
++        providers.push(Arc::new(DockerSandboxProvider::new()));
++    }
++
++    if provider_settings.daytona.enabled && daytona_api_key.is_some() {
++        let api_url = env_lookup(EnvVars::DAYTONA_API_URL)
++            .or_else(|| env_lookup(EnvVars::DAYTONA_SERVER_URL));
++        let organization_id = env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
++        providers.push(Arc::new(DaytonaSandboxProvider::new(
++            daytona_api_key,
++            api_url,
++            organization_id,
++            http_client,
++        )));
+     }
+ 
+     SandboxProviderRegistry::new(providers)
+@@ -2125,6 +2113,9 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+         Some(vault) => vault,
+         None => load_startup_vault(&vault_path)?,
+     };
++    // Read vault secrets needed for synchronous setup before we wrap the vault in
++    // an async lock for the rest of AppState.
++    let daytona_api_key = vault.get(EnvVars::DAYTONA_API_KEY).map(str::to_string);
+     let vault = Arc::new(AsyncRwLock::new(vault));
+     let llm_source: Arc<dyn CredentialSource> =
+         Arc::new(VaultCredentialSource::vault_only(Arc::clone(&vault)));
+@@ -2141,11 +2132,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+     let sandbox_provider_registry = sandbox_provider_registry.unwrap_or_else(|| {
+         build_sandbox_provider_registry(
+             current_server_settings.as_ref(),
+-            current_manifest_run_settings.as_ref().ok(),
+-            vault
+-                .try_read()
+-                .as_deref()
+-                .expect("startup vault should not be locked while building app state"),
++            daytona_api_key,
+             &env_lookup,
+             http_client.clone(),
+         )
+diff --git a/lib/crates/fabro-server/src/server/handler/sandbox.rs b/lib/crates/fabro-server/src/server/handler/sandbox.rs
+index b8cf8a668..3bad166d4 100644
+--- a/lib/crates/fabro-server/src/server/handler/sandbox.rs
++++ b/lib/crates/fabro-server/src/server/handler/sandbox.rs
+@@ -5,7 +5,7 @@ use std::sync::Arc;
+ 
+ use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
+ use fabro_sandbox::{TerminalSize, open_terminal_for_run};
+-use fabro_types::{SandboxProvider, SandboxServiceDiscoverySource, SandboxServiceListMeta};
++use fabro_types::{SandboxProviderKind, SandboxServiceDiscoverySource, SandboxServiceListMeta};
+ use futures_util::FutureExt;
+ use futures_util::future::BoxFuture;
+ 
+@@ -400,7 +400,7 @@ async fn create_ssh_access(
+     };
+ 
+     match record.provider {
+-        SandboxProvider::Daytona => {
++        SandboxProviderKind::Daytona => {
+             let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
+                 Ok(sandbox) => sandbox,
+                 Err(response) => return response,
+@@ -414,7 +414,7 @@ async fn create_ssh_access(
+                 }
+             }
+         }
+-        SandboxProvider::Docker => {
++        SandboxProviderKind::Docker => {
+             let sandbox = match reconnect_run_sandbox(&state, &id).await {
+                 Ok(sandbox) => sandbox,
+                 Err(response) => return response,
+@@ -433,7 +433,7 @@ async fn create_ssh_access(
+                 }
+             }
+         }
+-        SandboxProvider::Local => ApiError::new(
++        SandboxProviderKind::Local => ApiError::new(
+             StatusCode::CONFLICT,
+             "Sandbox provider does not support access commands.",
+         )
+@@ -454,7 +454,7 @@ async fn create_sandbox_vnc_preview(
+         Ok(record) => record,
+         Err(response) => return response,
+     };
+-    if record.provider != SandboxProvider::Daytona {
++    if record.provider != SandboxProviderKind::Daytona {
+         return ApiError::new(
+             StatusCode::NOT_IMPLEMENTED,
+             "Sandbox provider does not support VNC previews.",
+@@ -613,7 +613,7 @@ struct SandboxServiceDiscovery {
+     source:   SandboxServiceDiscoverySource,
+ }
+ 
+-fn parse_sandbox_services(output: &str, provider: SandboxProvider) -> SandboxServiceDiscovery {
++fn parse_sandbox_services(output: &str, provider: SandboxProviderKind) -> SandboxServiceDiscovery {
+     if output
+         .lines()
+         .any(|line| line.trim_start().starts_with("FABRO_PROC_NET_TCP "))
+@@ -630,7 +630,7 @@ fn parse_sandbox_services(output: &str, provider: SandboxProvider) -> SandboxSer
+     }
+ }
+ 
+-fn parse_ss_listening_services(output: &str, provider: SandboxProvider) -> Vec<SandboxService> {
++fn parse_ss_listening_services(output: &str, provider: SandboxProviderKind) -> Vec<SandboxService> {
+     let mut services = BTreeMap::<u16, SandboxService>::new();
+     for line in output
+         .lines()
+@@ -663,7 +663,7 @@ enum ProcNetFamily {
+ 
+ fn parse_proc_net_listening_services(
+     output: &str,
+-    provider: SandboxProvider,
++    provider: SandboxProviderKind,
+ ) -> Vec<SandboxService> {
+     let mut services = BTreeMap::<u16, SandboxService>::new();
+     let mut family = None;
+@@ -743,7 +743,7 @@ fn parse_proc_net_ipv6(value: &str) -> Option<Ipv6Addr> {
+ 
+ fn push_service(
+     services: &mut BTreeMap<u16, SandboxService>,
+-    provider: SandboxProvider,
++    provider: SandboxProviderKind,
+     port: u16,
+     address: String,
+     process: Option<String>,
+@@ -760,8 +760,8 @@ fn push_service(
+     }
+ }
+ 
+-fn preview_supported(provider: SandboxProvider, port: u16) -> bool {
+-    provider == SandboxProvider::Daytona && (3000..=9999).contains(&port)
++fn preview_supported(provider: SandboxProviderKind, port: u16) -> bool {
++    provider == SandboxProviderKind::Daytona && (3000..=9999).contains(&port)
+ }
+ 
+ fn push_unique(values: &mut Vec<String>, value: String) {
+@@ -866,7 +866,7 @@ async fn reconnect_daytona_sandbox(
+     run_id: &RunId,
+ ) -> Result<DaytonaSandbox, Response> {
+     let record = load_run_sandbox(state, run_id).await?;
+-    if record.provider != SandboxProvider::Daytona {
++    if record.provider != SandboxProviderKind::Daytona {
+         return Err(ApiError::new(
+             StatusCode::CONFLICT,
+             "Sandbox provider does not support this capability.",
+@@ -1001,7 +1001,7 @@ LISTEN 0 4096 0.0.0.0:5173 0.0.0.0:* users:(("vite",pid=84,fd=19))
+ LISTEN 0 4096 [::]:8080 [::]:* users:(("server",pid=126,fd=9))
+ LISTEN 0 4096 [::1]:2500 [::]:* users:(("debug",pid=168,fd=7))
+ "#,
+-            SandboxProvider::Daytona,
++            SandboxProviderKind::Daytona,
+         );
+ 
+         assert_eq!(services.len(), 4);
+@@ -1035,7 +1035,7 @@ not enough fields
+ LISTEN 0 4096 127.0.0.1:0 0.0.0.0:* users:(("zero",pid=1,fd=2))
+ LISTEN 0 4096 127.0.0.1:65536 0.0.0.0:* users:(("large",pid=1,fd=2))
+ "#,
+-            SandboxProvider::Daytona,
++            SandboxProviderKind::Daytona,
+         );
+ 
+         assert!(services.is_empty());
+@@ -1050,7 +1050,7 @@ LISTEN 0 4096 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
+ LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=42,fd=23))
+ LISTEN 0 4096 [::]:3000 [::]:* users:(("vite",pid=84,fd=19))
+ "#,
+-            SandboxProvider::Daytona,
++            SandboxProviderKind::Daytona,
+         );
+ 
+         assert_eq!(services, vec![SandboxService {
+@@ -1082,7 +1082,7 @@ FABRO_PROC_NET_TCP /proc/net/tcp6
+    0: 00000000000000000000000000000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 44444
+    1: 00000000000000000000000001000000:09C4 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000   501        0 55555
+ ",
+-            SandboxProvider::Daytona,
++            SandboxProviderKind::Daytona,
+         );
+ 
+         assert_eq!(discovery.source, SandboxServiceDiscoverySource::Procfs);
+@@ -1116,11 +1116,11 @@ FABRO_PROC_NET_TCP /proc/net/tcp6
+ 
+     #[test]
+     fn preview_support_is_daytona_only_for_documented_range() {
+-        assert!(!preview_supported(SandboxProvider::Daytona, 2500));
+-        assert!(preview_supported(SandboxProvider::Daytona, 3000));
+-        assert!(preview_supported(SandboxProvider::Daytona, 9999));
+-        assert!(!preview_supported(SandboxProvider::Daytona, 10000));
+-        assert!(!preview_supported(SandboxProvider::Docker, 3000));
++        assert!(!preview_supported(SandboxProviderKind::Daytona, 2500));
++        assert!(preview_supported(SandboxProviderKind::Daytona, 3000));
++        assert!(preview_supported(SandboxProviderKind::Daytona, 9999));
++        assert!(!preview_supported(SandboxProviderKind::Daytona, 10000));
++        assert!(!preview_supported(SandboxProviderKind::Docker, 3000));
+     }
+ 
+     #[test]
+diff --git a/lib/crates/fabro-server/src/server/handler/sandboxes.rs b/lib/crates/fabro-server/src/server/handler/sandboxes.rs
+index 9e9aa9603..2d4cf9a90 100644
+--- a/lib/crates/fabro-server/src/server/handler/sandboxes.rs
++++ b/lib/crates/fabro-server/src/server/handler/sandboxes.rs
+@@ -77,107 +77,18 @@ fn provider_list(providers: &[SandboxProviderKind]) -> String {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use std::collections::BTreeMap;
+-    use std::sync::Arc;
+-
+-    use async_trait::async_trait;
+     use axum::body::{Body, to_bytes};
+     use axum::http::{Request, StatusCode};
+-    use fabro_sandbox::provider::{SandboxCreateSpec, SandboxListFilter};
+-    use fabro_sandbox::{SandboxProvider as SandboxProviderTrait, SandboxProviderRegistry};
+-    use fabro_types::{
+-        SandboxInfo, SandboxNetwork, SandboxProviderKind, SandboxResources, SandboxState,
+-        SandboxTimestamps,
++    use fabro_sandbox::SandboxProviderRegistry;
++    use fabro_sandbox::test_support::{
++        FakeGet, FakeList, FakeSandboxProvider, fake_registry, fake_sandbox_info,
+     };
++    use fabro_types::SandboxProviderKind;
+     use serde_json::{Value, json};
+     use tower::ServiceExt;
+ 
+     use crate::test_support::{TestAppStateBuilder, build_test_router};
+ 
+-    #[derive(Clone)]
+-    enum FakeList {
+-        Ok(Vec<SandboxInfo>),
+-    }
+-
+-    #[derive(Clone)]
+-    enum FakeGet {
+-        Found(Box<SandboxInfo>),
+-        Missing,
+-        Err(&'static str),
+-    }
+-
+-    struct FakeProvider {
+-        kind: SandboxProviderKind,
+-        list: FakeList,
+-        get:  FakeGet,
+-    }
+-
+-    impl FakeProvider {
+-        fn new(kind: SandboxProviderKind, list: FakeList, get: FakeGet) -> Self {
+-            Self { kind, list, get }
+-        }
+-    }
+-
+-    #[async_trait]
+-    impl SandboxProviderTrait for FakeProvider {
+-        fn kind(&self) -> SandboxProviderKind {
+-            self.kind
+-        }
+-
+-        async fn list(
+-            &self,
+-            _filter: SandboxListFilter,
+-        ) -> fabro_sandbox::Result<Vec<SandboxInfo>> {
+-            match &self.list {
+-                FakeList::Ok(sandboxes) => Ok(sandboxes.clone()),
+-            }
+-        }
+-
+-        async fn get(&self, _id: &str) -> fabro_sandbox::Result<Option<SandboxInfo>> {
+-            match &self.get {
+-                FakeGet::Found(sandbox) => Ok(Some((**sandbox).clone())),
+-                FakeGet::Missing => Ok(None),
+-                FakeGet::Err(message) => Err(fabro_sandbox::Error::message(*message)),
+-            }
+-        }
+-
+-        async fn create(&self, _spec: SandboxCreateSpec) -> fabro_sandbox::Result<SandboxInfo> {
+-            Err(fabro_sandbox::Error::message("not implemented"))
+-        }
+-
+-        async fn delete(&self, _id: &str) -> fabro_sandbox::Result<()> {
+-            Ok(())
+-        }
+-    }
+-
+-    fn info(provider: SandboxProviderKind, id: &str) -> SandboxInfo {
+-        SandboxInfo {
+-            provider,
+-            id: id.to_string(),
+-            display_name: Some(format!("{provider}-{id}")),
+-            state: SandboxState::Running,
+-            native_state: Some("running".to_string()),
+-            image: Some("buildpack-deps:noble".to_string()),
+-            snapshot: None,
+-            region: None,
+-            web_url: None,
+-            working_directory: Some("/workspace".to_string()),
+-            resources: SandboxResources::default(),
+-            network: SandboxNetwork::unknown(),
+-            labels: BTreeMap::from([("sh.fabro.managed".to_string(), "true".to_string())]),
+-            timestamps: SandboxTimestamps::default(),
+-        }
+-    }
+-
+-    fn registry(providers: Vec<FakeProvider>) -> SandboxProviderRegistry {
+-        SandboxProviderRegistry::new(
+-            providers
+-                .into_iter()
+-                .map(|provider| Arc::new(provider) as Arc<dyn SandboxProviderTrait>)
+-                .collect(),
+-        )
+-    }
+-
+     fn app_with_registry(registry: SandboxProviderRegistry) -> axum::Router {
+         let state = TestAppStateBuilder::new()
+             .sandbox_provider_registry(registry)
+@@ -202,8 +113,8 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn list_returns_provider_backed_data_without_run_projection_state() {
+-        let docker = info(SandboxProviderKind::Docker, "docker-native-id");
+-        let app = app_with_registry(registry(vec![FakeProvider::new(
++        let docker = fake_sandbox_info(SandboxProviderKind::Docker, "docker-native-id");
++        let app = app_with_registry(fake_registry(vec![FakeSandboxProvider::new(
+             SandboxProviderKind::Docker,
+             FakeList::Ok(vec![docker]),
+             FakeGet::Missing,
+@@ -220,14 +131,14 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn retrieve_searches_all_configured_providers() {
+-        let daytona = info(SandboxProviderKind::Daytona, "native-id");
+-        let app = app_with_registry(registry(vec![
+-            FakeProvider::new(
++        let daytona = fake_sandbox_info(SandboxProviderKind::Daytona, "native-id");
++        let app = app_with_registry(fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Found(Box::new(daytona)),
+@@ -247,13 +158,13 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn no_matching_sandbox_returns_404() {
+-        let app = app_with_registry(registry(vec![
+-            FakeProvider::new(
++        let app = app_with_registry(fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+@@ -270,16 +181,22 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn duplicate_native_ids_return_409() {
+-        let app = app_with_registry(registry(vec![
+-            FakeProvider::new(
++        let app = app_with_registry(fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+-                FakeGet::Found(Box::new(info(SandboxProviderKind::Docker, "same-id"))),
++                FakeGet::Found(Box::new(fake_sandbox_info(
++                    SandboxProviderKind::Docker,
++                    "same-id",
++                ))),
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+-                FakeGet::Found(Box::new(info(SandboxProviderKind::Daytona, "same-id"))),
++                FakeGet::Found(Box::new(fake_sandbox_info(
++                    SandboxProviderKind::Daytona,
++                    "same-id",
++                ))),
+             ),
+         ]));
+ 
+@@ -300,13 +217,13 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn provider_lookup_uncertainty_returns_502() {
+-        let app = app_with_registry(registry(vec![
+-            FakeProvider::new(
++        let app = app_with_registry(fake_registry(vec![
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Docker,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Missing,
+             ),
+-            FakeProvider::new(
++            FakeSandboxProvider::new(
+                 SandboxProviderKind::Daytona,
+                 FakeList::Ok(Vec::new()),
+                 FakeGet::Err("daytona unavailable"),
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index 0cb9be7e7..6379fb3eb 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -21,7 +21,7 @@ use fabro_types::settings::ServerAuthMethod;
+ use fabro_types::{
+     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
+     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
+-    SandboxProvider, StageContextWindowBreakdownItem, StageContextWindowCategory,
++    SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
+     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
+     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
+     WorkflowSettings, fixtures,
+@@ -961,7 +961,7 @@ id = "missing"
+ 
+     assert_eq!(
+         system_sandbox_provider(&manifest_run_settings),
+-        SandboxProvider::default().to_string()
++        SandboxProviderKind::default().to_string()
+     );
+ }
+ 
+@@ -980,7 +980,7 @@ enabled = false
+     );
+ 
+     assert_eq!(
+-        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProvider::Daytona)
++        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProviderKind::Daytona)
+             .as_deref(),
+         Some(
+             "sandbox provider \"daytona\" is disabled by server.sandbox.providers.daytona.enabled"
+@@ -11173,7 +11173,7 @@ async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId
+             definition_blob: None,
+         },
+         workflow_event::Event::SandboxInitialized {
+-            provider:          SandboxProvider::Local,
++            provider:          SandboxProviderKind::Local,
+             id:                "sandbox-preserve-1".to_string(),
+             working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
+             repo_cloned:       None,
+@@ -11924,7 +11924,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::SandboxInitialized {
+-            provider:          SandboxProvider::Docker,
++            provider:          SandboxProviderKind::Docker,
+             id:                "missing-sandbox".to_string(),
+             working_directory: "/tmp/fabro-missing-sandbox".to_string(),
+             repo_cloned:       Some(false),
+@@ -13793,7 +13793,7 @@ async fn list_runs_includes_live_metadata_from_run_state() {
+         workflow_event::Event::RunStarting,
+         workflow_event::Event::RunRunning,
+         workflow_event::Event::SandboxInitialized {
+-            provider:          SandboxProvider::Local,
++            provider:          SandboxProviderKind::Local,
+             id:                "sb-test".to_string(),
+             working_directory: "/sandbox/workdir".to_string(),
+             repo_cloned:       None,
+@@ -13872,7 +13872,7 @@ async fn list_runs_page_limit_preserves_metadata_for_paged_items() {
+             workflow_event::Event::RunStarting,
+             workflow_event::Event::RunRunning,
+             workflow_event::Event::SandboxInitialized {
+-                provider:          SandboxProvider::Local,
++                provider:          SandboxProviderKind::Local,
+                 id:                sandbox_id.to_string(),
+                 working_directory: "/sandbox/workdir".to_string(),
+                 repo_cloned:       None,
+diff --git a/lib/crates/fabro-store/src/run_state.rs b/lib/crates/fabro-store/src/run_state.rs
+index 18aa1993c..552891d2e 100644
+--- a/lib/crates/fabro-store/src/run_state.rs
++++ b/lib/crates/fabro-store/src/run_state.rs
+@@ -14,7 +14,7 @@ use fabro_types::{
+     PullRequestLink, RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary,
+     RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin,
+     RunProjection, RunSandbox, RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps,
+-    SandboxProvider, StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome,
++    SandboxProviderKind, StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome,
+     StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus, TodoListKind,
+     TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
+ };
+@@ -796,7 +796,7 @@ fn projection_from_created(event: &EventEnvelope) -> Result<RunProjection> {
+ }
+ 
+ fn planned_sandbox(settings: &RunEnvironmentSettings) -> RunSandbox {
+-    let provider = SandboxProvider::from(settings.provider);
++    let provider = SandboxProviderKind::from(settings.provider);
+     RunSandbox {
+         provider,
+         image: (settings.provider == EnvironmentProvider::Docker)
+diff --git a/lib/crates/fabro-store/tests/serializable_projection.rs b/lib/crates/fabro-store/tests/serializable_projection.rs
+index 2707ca353..f6aa256fd 100644
+--- a/lib/crates/fabro-store/tests/serializable_projection.rs
++++ b/lib/crates/fabro-store/tests/serializable_projection.rs
+@@ -6,7 +6,7 @@ use fabro_types::graph::Graph;
+ use fabro_types::run::RunSpec;
+ use fabro_types::{
+     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
+-    QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProvider,
++    QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProviderKind,
+     StageCompletion, StageModelUsage, StageOutcome, StartRecord, WorkflowSettings, first_event_seq,
+     fixtures,
+ };
+@@ -99,7 +99,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
+         diff:       RunDiff::default(),
+     });
+     projection.sandbox = Some(RunSandbox {
+-        provider: SandboxProvider::Local,
++        provider: SandboxProviderKind::Local,
+         image:    None,
+         snapshot: None,
+         runtime:  Some(RunSandboxRuntime {
+diff --git a/lib/crates/fabro-types/src/lib.rs b/lib/crates/fabro-types/src/lib.rs
+index 7e5a471be..af4ae44e8 100644
+--- a/lib/crates/fabro-types/src/lib.rs
++++ b/lib/crates/fabro-types/src/lib.rs
+@@ -127,7 +127,7 @@ pub use sandbox_details::{
+ pub use sandbox_inventory::{
+     SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxProviderLookupError,
+ };
+-pub use sandbox_provider::{SandboxProvider, SandboxProvider as SandboxProviderKind};
++pub use sandbox_provider::SandboxProviderKind;
+ pub use sandbox_services::{
+     SandboxService, SandboxServiceDiscoverySource, SandboxServiceListMeta,
+     SandboxServiceListResponse,
+diff --git a/lib/crates/fabro-types/src/run_event/infra.rs b/lib/crates/fabro-types/src/run_event/infra.rs
+index adb8f364e..e6673ff24 100644
+--- a/lib/crates/fabro-types/src/run_event/infra.rs
++++ b/lib/crates/fabro-types/src/run_event/infra.rs
+@@ -1,6 +1,6 @@
+ use serde::{Deserialize, Serialize};
+ 
+-use crate::SandboxProvider;
++use crate::SandboxProviderKind;
+ 
+ #[derive(
+     Debug,
+@@ -329,7 +329,7 @@ pub struct GitCloneFailedProps {
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub struct SandboxInitializedProps {
+     pub working_directory: String,
+-    pub provider:          SandboxProvider,
++    pub provider:          SandboxProviderKind,
+     pub id:                String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub repo_cloned:       Option<bool>,
+diff --git a/lib/crates/fabro-types/src/run_sandbox.rs b/lib/crates/fabro-types/src/run_sandbox.rs
+index 808dfde24..b2aedd829 100644
+--- a/lib/crates/fabro-types/src/run_sandbox.rs
++++ b/lib/crates/fabro-types/src/run_sandbox.rs
+@@ -1,10 +1,10 @@
+ use serde::{Deserialize, Serialize};
+ 
+-use crate::SandboxProvider;
++use crate::SandboxProviderKind;
+ 
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+ pub struct RunSandbox {
+-    pub provider: SandboxProvider,
++    pub provider: SandboxProviderKind,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub image:    Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+diff --git a/lib/crates/fabro-types/src/sandbox_details.rs b/lib/crates/fabro-types/src/sandbox_details.rs
+index ecbf21a12..8723b00eb 100644
+--- a/lib/crates/fabro-types/src/sandbox_details.rs
++++ b/lib/crates/fabro-types/src/sandbox_details.rs
+@@ -188,7 +188,7 @@ mod tests {
+     fn serializes_with_snake_case_state() {
+         let details = SandboxDetails {
+             sandbox:      RunSandbox {
+-                provider: crate::SandboxProvider::Docker,
++                provider: crate::SandboxProviderKind::Docker,
+                 image:    Some("ghcr.io/fabro/sandbox:latest".to_string()),
+                 snapshot: None,
+                 runtime:  Some(crate::RunSandboxRuntime {
+@@ -282,7 +282,7 @@ mod tests {
+         }))
+         .unwrap();
+ 
+-        assert_eq!(details.sandbox.provider, crate::SandboxProvider::Local);
++        assert_eq!(details.sandbox.provider, crate::SandboxProviderKind::Local);
+         assert_eq!(
+             details
+                 .sandbox
+diff --git a/lib/crates/fabro-types/src/sandbox_provider.rs b/lib/crates/fabro-types/src/sandbox_provider.rs
+index 1034fe2b2..49e3969b6 100644
+--- a/lib/crates/fabro-types/src/sandbox_provider.rs
++++ b/lib/crates/fabro-types/src/sandbox_provider.rs
+@@ -3,13 +3,13 @@ use strum::{Display, EnumString};
+ 
+ use crate::settings::run::RunMode;
+ 
+-/// Sandbox provider for agent tool operations.
++/// Sandbox provider discriminator for agent tool operations.
+ #[derive(
+     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Display, EnumString,
+ )]
+ #[serde(rename_all = "lowercase")]
+ #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
+-pub enum SandboxProvider {
++pub enum SandboxProviderKind {
+     /// Run tools on the local host.
+     #[default]
+     Local,
+@@ -19,7 +19,7 @@ pub enum SandboxProvider {
+     Daytona,
+ }
+ 
+-impl SandboxProvider {
++impl SandboxProviderKind {
+     /// True only for Local. Used by dry-run to force local execution.
+     /// NOT the same as "runs on the host" (Docker is host-adjacent but not
+     /// dry-run compatible).
+@@ -48,38 +48,38 @@ impl SandboxProvider {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::SandboxProvider;
++    use super::SandboxProviderKind;
+ 
+     #[test]
+     fn sandbox_provider_default_is_local() {
+-        assert_eq!(SandboxProvider::default(), SandboxProvider::Local);
++        assert_eq!(SandboxProviderKind::default(), SandboxProviderKind::Local);
+     }
+ 
+     #[test]
+     fn sandbox_provider_from_str() {
+         assert_eq!(
+-            "local".parse::<SandboxProvider>().unwrap(),
+-            SandboxProvider::Local
++            "local".parse::<SandboxProviderKind>().unwrap(),
++            SandboxProviderKind::Local
+         );
+         assert_eq!(
+-            "docker".parse::<SandboxProvider>().unwrap(),
+-            SandboxProvider::Docker
++            "docker".parse::<SandboxProviderKind>().unwrap(),
++            SandboxProviderKind::Docker
+         );
+         assert_eq!(
+-            "daytona".parse::<SandboxProvider>().unwrap(),
+-            SandboxProvider::Daytona
++            "daytona".parse::<SandboxProviderKind>().unwrap(),
++            SandboxProviderKind::Daytona
+         );
+         assert_eq!(
+-            "LOCAL".parse::<SandboxProvider>().unwrap(),
+-            SandboxProvider::Local
++            "LOCAL".parse::<SandboxProviderKind>().unwrap(),
++            SandboxProviderKind::Local
+         );
+-        assert!("invalid".parse::<SandboxProvider>().is_err());
++        assert!("invalid".parse::<SandboxProviderKind>().is_err());
+     }
+ 
+     #[test]
+     fn sandbox_provider_display() {
+-        assert_eq!(SandboxProvider::Local.to_string(), "local");
+-        assert_eq!(SandboxProvider::Docker.to_string(), "docker");
+-        assert_eq!(SandboxProvider::Daytona.to_string(), "daytona");
++        assert_eq!(SandboxProviderKind::Local.to_string(), "local");
++        assert_eq!(SandboxProviderKind::Docker.to_string(), "docker");
++        assert_eq!(SandboxProviderKind::Daytona.to_string(), "daytona");
+     }
+ }
+diff --git a/lib/crates/fabro-types/src/settings/run.rs b/lib/crates/fabro-types/src/settings/run.rs
+index 473d8b809..a4ff1132c 100644
+--- a/lib/crates/fabro-types/src/settings/run.rs
++++ b/lib/crates/fabro-types/src/settings/run.rs
+@@ -323,7 +323,7 @@ impl EnvironmentProvider {
+     }
+ }
+ 
+-impl From<EnvironmentProvider> for crate::SandboxProvider {
++impl From<EnvironmentProvider> for crate::SandboxProviderKind {
+     fn from(value: EnvironmentProvider) -> Self {
+         match value {
+             EnvironmentProvider::Local => Self::Local,
+diff --git a/lib/crates/fabro-types/src/settings/server.rs b/lib/crates/fabro-types/src/settings/server.rs
+index c6fe71305..cccbc77e1 100644
+--- a/lib/crates/fabro-types/src/settings/server.rs
++++ b/lib/crates/fabro-types/src/settings/server.rs
+@@ -150,11 +150,14 @@ pub struct ServerSandboxProvidersSettings {
+ impl ServerSandboxProvidersSettings {
+     /// Per-provider policy entry.
+     #[must_use]
+-    pub fn for_provider(&self, provider: crate::SandboxProvider) -> &ServerSandboxProviderSettings {
++    pub fn for_provider(
++        &self,
++        provider: crate::SandboxProviderKind,
++    ) -> &ServerSandboxProviderSettings {
+         match provider {
+-            crate::SandboxProvider::Local => &self.local,
+-            crate::SandboxProvider::Docker => &self.docker,
+-            crate::SandboxProvider::Daytona => &self.daytona,
++            crate::SandboxProviderKind::Local => &self.local,
++            crate::SandboxProviderKind::Docker => &self.docker,
++            crate::SandboxProviderKind::Daytona => &self.daytona,
+         }
+     }
+ }
+diff --git a/lib/crates/fabro-types/tests/sandbox_model_serde.rs b/lib/crates/fabro-types/tests/sandbox_model_serde.rs
+index 0260a8132..4db0f34b2 100644
+--- a/lib/crates/fabro-types/tests/sandbox_model_serde.rs
++++ b/lib/crates/fabro-types/tests/sandbox_model_serde.rs
+@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
+ 
+ use chrono::{TimeZone, Utc};
+ use fabro_types::{
+-    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxProvider,
++    RunSandbox, RunSandboxRuntime, SandboxDetails, SandboxNetwork, SandboxProviderKind,
+     SandboxResources, SandboxState, SandboxTimestamps,
+ };
+ use serde_json::json;
+@@ -10,7 +10,7 @@ use serde_json::json;
+ #[test]
+ fn run_sandbox_serializes_canonical_identity_without_identifier() {
+     let sandbox = RunSandbox {
+-        provider: SandboxProvider::Docker,
++        provider: SandboxProviderKind::Docker,
+         image:    None,
+         snapshot: None,
+         runtime:  Some(RunSandboxRuntime {
+@@ -52,7 +52,7 @@ fn run_sandbox_serializes_canonical_identity_without_identifier() {
+ fn sandbox_details_requires_canonical_id_and_working_directory() {
+     let details = SandboxDetails {
+         sandbox:      RunSandbox {
+-            provider: SandboxProvider::Daytona,
++            provider: SandboxProviderKind::Daytona,
+             image:    Some("ubuntu:24.04".to_string()),
+             snapshot: None,
+             runtime:  Some(RunSandboxRuntime {
+@@ -116,16 +116,16 @@ fn sandbox_details_requires_canonical_id_and_working_directory() {
+ #[test]
+ fn sandbox_provider_rejects_unknown_values() {
+     assert_eq!(
+-        serde_json::from_value::<SandboxProvider>(json!("local")).unwrap(),
+-        SandboxProvider::Local
++        serde_json::from_value::<SandboxProviderKind>(json!("local")).unwrap(),
++        SandboxProviderKind::Local
+     );
+     assert_eq!(
+-        serde_json::from_value::<SandboxProvider>(json!("docker")).unwrap(),
+-        SandboxProvider::Docker
++        serde_json::from_value::<SandboxProviderKind>(json!("docker")).unwrap(),
++        SandboxProviderKind::Docker
+     );
+     assert_eq!(
+-        serde_json::from_value::<SandboxProvider>(json!("daytona")).unwrap(),
+-        SandboxProvider::Daytona
++        serde_json::from_value::<SandboxProviderKind>(json!("daytona")).unwrap(),
++        SandboxProviderKind::Daytona
+     );
+-    assert!(serde_json::from_value::<SandboxProvider>(json!("other")).is_err());
++    assert!(serde_json::from_value::<SandboxProviderKind>(json!("other")).is_err());
+ }
+diff --git a/lib/crates/fabro-workflow/src/event/events.rs b/lib/crates/fabro-workflow/src/event/events.rs
+index a38b184bb..cf458c121 100644
+--- a/lib/crates/fabro-workflow/src/event/events.rs
++++ b/lib/crates/fabro-workflow/src/event/events.rs
+@@ -5,7 +5,7 @@ use ::fabro_types::{
+     ForkSourceRef, GitContext, PairId, PairMessageId, PairSystemMessageKind, PairTarget,
+     ParallelBranchId, PendingReason, PermissionLevel, Principal, PullRequestLink, RunBlobId,
+     RunFailure, RunId, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason, RunProvenance,
+-    RunRunnableSource, RunTiming, SandboxProvider, StageId, StageTiming, SuccessReason,
++    RunRunnableSource, RunTiming, SandboxProviderKind, StageId, StageTiming, SuccessReason,
+     run_event as fabro_types,
+ };
+ use fabro_agent::{AgentEvent, SandboxEvent};
+@@ -506,7 +506,7 @@ pub enum Event {
+     /// Emitted after the sandbox has been initialized (by engine lifecycle).
+     SandboxInitialized {
+         working_directory: String,
+-        provider:          SandboxProvider,
++        provider:          SandboxProviderKind,
+         id:                String,
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         repo_cloned:       Option<bool>,
+diff --git a/lib/crates/fabro-workflow/src/operations/retry.rs b/lib/crates/fabro-workflow/src/operations/retry.rs
+index 9a9d3c705..6551687c5 100644
+--- a/lib/crates/fabro-workflow/src/operations/retry.rs
++++ b/lib/crates/fabro-workflow/src/operations/retry.rs
+@@ -301,7 +301,7 @@ mod tests {
+         .await
+         .unwrap();
+         event::append_event(&source_store, &source_run_id, &Event::SandboxInitialized {
+-            provider:          fabro_types::SandboxProvider::Local,
++            provider:          fabro_types::SandboxProviderKind::Local,
+             id:                "sandbox-source".to_string(),
+             working_directory: "/tmp/source".to_string(),
+             repo_cloned:       None,
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index 5fe6edd5b..ce9e26c9f 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -22,7 +22,7 @@ use fabro_types::settings::run::{
+     TlsMode as ResolvedTlsMode,
+ };
+ use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
+-use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProvider};
++use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
+ use fabro_vault::Vault;
+ use tokio::runtime::Handle;
+ use tokio::sync::RwLock as AsyncRwLock;
+@@ -350,17 +350,17 @@ impl RunSession {
+             .collect();
+ 
+         let sandbox = match sandbox_provider {
+-            SandboxProvider::Local => SandboxSpec::Local {
++            SandboxProviderKind::Local => SandboxSpec::Local {
+                 working_directory: working_directory.clone(),
+             },
+-            SandboxProvider::Docker => SandboxSpec::Docker {
++            SandboxProviderKind::Docker => SandboxSpec::Docker {
+                 config:           resolve_docker_config(resolved),
+                 github_app:       services.github_app.clone(),
+                 run_id:           Some(record.run_id),
+                 clone_origin_url: record.repo_origin_url().map(str::to_string),
+                 clone_branch:     record.base_branch().map(str::to_string),
+             },
+-            SandboxProvider::Daytona => {
++            SandboxProviderKind::Daytona => {
+                 let api_key = match &services.vault {
+                     Some(v) => v
+                         .read()
+@@ -516,8 +516,8 @@ async fn load_accepted_run_definition(
+     serde_json::from_slice(&bytes).map_err(|err| Error::Parse(err.to_string()))
+ }
+ 
+-fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> SandboxProvider {
+-    SandboxProvider::from(settings.environment.provider)
++fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> SandboxProviderKind {
++    SandboxProviderKind::from(settings.environment.provider)
+ }
+ 
+ fn resolve_daytona_config(settings: &ResolvedRunSettings) -> DaytonaConfig {
+diff --git a/lib/crates/fabro-workflow/tests/it/cp_integration.rs b/lib/crates/fabro-workflow/tests/it/cp_integration.rs
+index e90b54a93..60aafd9bb 100644
+--- a/lib/crates/fabro-workflow/tests/it/cp_integration.rs
++++ b/lib/crates/fabro-workflow/tests/it/cp_integration.rs
+@@ -15,7 +15,7 @@
+ )]
+ 
+ use fabro_sandbox::reconnect::reconnect;
+-use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProvider};
++use fabro_types::{RunSandbox, RunSandboxRuntime, SandboxProviderKind};
+ 
+ const DOCKER_MANAGED_LABEL: &str = "sh.fabro.managed";
+ const DOCKER_CP_IMAGE: &str = "buildpack-deps:noble";
+@@ -26,7 +26,7 @@ const DOCKER_CP_IMAGE: &str = "buildpack-deps:noble";
+ 
+ fn local_record(working_directory: &std::path::Path) -> RunSandbox {
+     RunSandbox {
+-        provider: SandboxProvider::Local,
++        provider: SandboxProviderKind::Local,
+         image:    None,
+         snapshot: None,
+         runtime:  Some(RunSandboxRuntime {
+@@ -137,7 +137,7 @@ async fn local_cp_creates_parent_dirs() {
+ 
+ fn docker_record(container_id: &str) -> RunSandbox {
+     RunSandbox {
+-        provider: SandboxProvider::Docker,
++        provider: SandboxProviderKind::Docker,
+         image:    None,
+         snapshot: None,
+         runtime:  Some(RunSandboxRuntime {
+diff --git a/lib/crates/fabro-workflow/tests/it/daytona_integration.rs b/lib/crates/fabro-workflow/tests/it/daytona_integration.rs
+index 0115f23df..0c8bd171d 100644
+--- a/lib/crates/fabro-workflow/tests/it/daytona_integration.rs
++++ b/lib/crates/fabro-workflow/tests/it/daytona_integration.rs
+@@ -1704,7 +1704,7 @@ async fn daytona_toolbox_idle_diagnostic() {
+ #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
+ async fn daytona_cp_upload_download_round_trip() {
+     use fabro_sandbox::reconnect::reconnect;
+-    use fabro_types::{RunSandbox, SandboxProvider};
++    use fabro_types::{RunSandbox, SandboxProviderKind};
+ 
+     // 1. Create and initialize a real Daytona sandbox
+     let env = create_env().await;
+@@ -1718,7 +1718,7 @@ async fn daytona_cp_upload_download_round_trip() {
+ 
+     // 2. Build a RunSandbox (same as `fabro run` would persist)
+     let record = RunSandbox {
+-        provider: SandboxProvider::Daytona,
++        provider: SandboxProviderKind::Daytona,
+         image:    None,
+         snapshot: None,
+         runtime:  Some(fabro_types::RunSandboxRuntime {
+diff --git a/lib/packages/fabro-api-client/src/.openapi-generator/FILES b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+index 16f8027dc..806b50531 100644
+--- a/lib/packages/fabro-api-client/src/.openapi-generator/FILES
++++ b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+@@ -375,7 +375,6 @@ models/sandbox-network-policy.ts
+ models/sandbox-network.ts
+ models/sandbox-provider-kind.ts
+ models/sandbox-provider-lookup-error.ts
+-models/sandbox-provider.ts
+ models/sandbox-resources.ts
+ models/sandbox-service-discovery-source.ts
+ models/sandbox-service-list-meta.ts
+diff --git a/lib/packages/fabro-api-client/src/models/delete-run-sandbox.ts b/lib/packages/fabro-api-client/src/models/delete-run-sandbox.ts
+index cc8410346..349ce716d 100644
+--- a/lib/packages/fabro-api-client/src/models/delete-run-sandbox.ts
++++ b/lib/packages/fabro-api-client/src/models/delete-run-sandbox.ts
+@@ -15,9 +15,9 @@
+ 
+ // May contain unused imports in some cases
+ // @ts-ignore
+-import type { SandboxProvider } from './sandbox-provider';
++import type { SandboxProviderKind } from './sandbox-provider-kind';
+ 
+ export interface DeleteRunSandbox {
+-    'provider': SandboxProvider;
++    'provider': SandboxProviderKind;
+     'id': string;
+ }
+diff --git a/lib/packages/fabro-api-client/src/models/index.ts b/lib/packages/fabro-api-client/src/models/index.ts
+index 26a9ed72c..1d4fb24cc 100644
+--- a/lib/packages/fabro-api-client/src/models/index.ts
++++ b/lib/packages/fabro-api-client/src/models/index.ts
+@@ -348,7 +348,6 @@ export * from './sandbox-list-response';
+ export * from './sandbox-network';
+ export * from './sandbox-network-policy';
+ export * from './sandbox-network-policy-mode';
+-export * from './sandbox-provider';
+ export * from './sandbox-provider-kind';
+ export * from './sandbox-provider-lookup-error';
+ export * from './sandbox-resources';
+diff --git a/lib/packages/fabro-api-client/src/models/run-sandbox.ts b/lib/packages/fabro-api-client/src/models/run-sandbox.ts
+index a06c1ad64..7e5102b1b 100644
+--- a/lib/packages/fabro-api-client/src/models/run-sandbox.ts
++++ b/lib/packages/fabro-api-client/src/models/run-sandbox.ts
+@@ -18,13 +18,13 @@
+ import type { RunSandboxRuntime } from './run-sandbox-runtime';
+ // May contain unused imports in some cases
+ // @ts-ignore
+-import type { SandboxProvider } from './sandbox-provider';
++import type { SandboxProviderKind } from './sandbox-provider-kind';
+ 
+ /**
+  * Canonical sandbox environment record for a run.
+  */
+ export interface RunSandbox {
+-    'provider': SandboxProvider;
++    'provider': SandboxProviderKind;
+     'image': string | null;
+     'snapshot': string | null;
+     'runtime': RunSandboxRuntime | null;
+diff --git a/lib/packages/fabro-api-client/src/models/sandbox-provider-kind.ts b/lib/packages/fabro-api-client/src/models/sandbox-provider-kind.ts
+index cd01d4243..57f0c222c 100644
+--- a/lib/packages/fabro-api-client/src/models/sandbox-provider-kind.ts
++++ b/lib/packages/fabro-api-client/src/models/sandbox-provider-kind.ts
+@@ -15,7 +15,7 @@
+ 
+ 
+ /**
+- * Sandbox provider inventory discriminator.
++ * Sandbox provider discriminator.
+  */
+ 
+ export const SandboxProviderKind = {
