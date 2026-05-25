@@ -9,6 +9,7 @@ import type {
   EventEnvelope,
   ListRunsDirectionEnum,
   ListRunsSortEnum,
+  Model,
   PaginatedRunCommitList,
   PaginatedRunFileList,
   PaginatedRunList,
@@ -435,6 +436,24 @@ export function useProviders() {
   return useSWR<ProviderList>(
     queryKeys.providers.list(),
     () => apiData(() => modelsApi.listProviders()),
+    immutableOptions,
+  );
+}
+
+export function useModels(provider: string, query: string) {
+  return useSWR<PaginatedEnvelope<Model>>(
+    queryKeys.models.list(provider, query),
+    () =>
+      fetchAllPages("models", (limit, offset) =>
+        apiData(() =>
+          modelsApi.listModels(
+            provider || undefined,
+            query || undefined,
+            limit,
+            offset,
+          ),
+        ),
+      ),
     immutableOptions,
   );
 }

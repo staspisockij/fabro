@@ -102,6 +102,10 @@ export const queryKeys = {
   providers: {
     list: () => ["providers", "list"] as const,
   },
+  models: {
+    list: (provider: string, query: string) =>
+      ["models", "list", provider, query] as const,
+  },
   secrets: {
     list: () => ["secrets", "list"] as const,
   },

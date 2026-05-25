@@ -1,7 +1,8 @@
 import { ChevronDownIcon, ChevronUpDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
-import type { ListRunsDirectionEnum, ListRunsSortEnum } from "@qltysh/fabro-api-client";
 
-export function SortHeader({
+export type SortDirection = "asc" | "desc";
+
+export function SortHeader<TKey extends string>({
   label,
   sortKey,
   activeSort,
@@ -10,11 +11,11 @@ export function SortHeader({
   onClick,
 }: {
   label:      string;
-  sortKey:    ListRunsSortEnum;
-  activeSort: ListRunsSortEnum;
-  direction:  ListRunsDirectionEnum;
+  sortKey:    TKey;
+  activeSort: TKey;
+  direction:  SortDirection;
   align?:     "left" | "right";
-  onClick:    (key: ListRunsSortEnum) => void;
+  onClick:    (key: TKey) => void;
 }) {
   const isActive = activeSort === sortKey;
   const ariaSort: "ascending" | "descending" | "none" = isActive
