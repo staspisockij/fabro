@@ -1,0 +1,13 @@
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/model.rs b/lib/crates/fabro-cli/tests/it/cmd/model.rs
+index 5dcf9b7b5..247f2e00b 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/model.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/model.rs
+@@ -120,7 +120,7 @@ fn list_query_aliases() {
+     exit_code: 0
+     ----- stdout -----
+     MODEL                PROVIDER  ALIASES      CONTEXT          COST       SPEED 
+-     gpt-5.3-codex        openai    codex             1m  $1.8 / $14.0   100 tok/s 
++     gpt-5.3-codex        openai    codex           272k  $1.8 / $14.0   100 tok/s 
+      gpt-5.3-codex-spark  openai    codex-spark     131k         - / -  1000 tok/s
+     ----- stderr -----
+     ");
