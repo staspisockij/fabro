@@ -1,6 +1,35 @@
 import type { ListRunsDirectionEnum, ListRunsSortEnum } from "@qltysh/fabro-api-client";
 
 import { parseHiddenColumns, serializeHiddenColumns } from "./toggleable-column";
+import type { ToggleableColumn } from "./toggleable-column";
+
+// Columns hidden by default in both the main runs list and the Children
+// sub-tab. Users can still reveal them via the column picker.
+export const DEFAULT_HIDDEN_RUN_LIST_COLUMNS: readonly ToggleableColumn[] = [
+  "updated",
+  "changes",
+];
+
+function defaultHideString(): string {
+  return serializeHiddenColumns(new Set(DEFAULT_HIDDEN_RUN_LIST_COLUMNS)) ?? "";
+}
+
+// Read the `hide` URL param honouring the convention that an absent param
+// means "use defaults" while an explicit empty value means "show every
+// column". Both forms persist round-trips through the column picker.
+export function hiddenColumnsFromSearchParams(
+  searchParams: URLSearchParams,
+): Set<ToggleableColumn> {
+  const raw = searchParams.get("hide");
+  if (raw == null) return new Set(DEFAULT_HIDDEN_RUN_LIST_COLUMNS);
+  return parseHiddenColumns(raw);
+}
+
+function readHideField(searchParams: URLSearchParams): string {
+  const raw = searchParams.get("hide");
+  if (raw == null) return defaultHideString();
+  return serializeHiddenColumns(parseHiddenColumns(raw)) ?? "";
+}
 
 export type ViewMode = "columns" | "list";
 
@@ -111,7 +140,7 @@ export function defaultRunsWorkspacePreferences(): RunsWorkspacePreferences {
     sort:      "created_at",
     direction: "desc",
     size:      DEFAULT_LIST_PAGE_SIZE,
-    hide:      "",
+    hide:      defaultHideString(),
     page:      1,
   };
 }
@@ -144,7 +173,6 @@ function normalizeStoredRunsWorkspacePreferences(value: unknown): RunsWorkspaceP
     return defaultRunsWorkspacePreferences();
   }
 
-  const hiddenColumns = parseHiddenColumns(stringValue(record.hide));
   const size = record.size;
 
   return {
@@ -158,9 +186,18 @@ function normalizeStoredRunsWorkspacePreferences(value: unknown): RunsWorkspaceP
     sort:      parseSort(stringValue(record.sort)),
     direction: parseDirection(stringValue(record.direction)),
     size:      parsePageSize(typeof size === "number" || typeof size === "string" ? String(size) : null),
-    hide:      serializeHiddenColumns(hiddenColumns) ?? "",
+    hide:      normalizeStoredHide(stringValue(record.hide)),
     page:      1,
   };
+}
+
+// Stored records from before the default-hidden-columns change have no `hide`
+// field. Treat the absence as "use the new defaults" so existing users pick up
+// the new default automatically. An explicit empty string means the user
+// chose to show every column, so preserve it.
+function normalizeStoredHide(stored: string | null): string {
+  if (stored == null) return defaultHideString();
+  return serializeHiddenColumns(parseHiddenColumns(stored)) ?? "";
 }
 
 export function runsWorkspacePreferencesFromSearchParams(
@@ -177,7 +214,7 @@ export function runsWorkspacePreferencesFromSearchParams(
     sort:      parseSort(searchParams.get("sort")),
     direction: parseDirection(searchParams.get("direction")),
     size:      parsePageSize(searchParams.get("size")),
-    hide:      serializeHiddenColumns(parseHiddenColumns(searchParams.get("hide"))) ?? "",
+    hide:      readHideField(searchParams),
     page:      parsePage(searchParams.get("page")),
   };
 }
@@ -195,7 +232,7 @@ export function runsWorkspacePreferencesToSearchParams(
   if (preferences.sort !== "created_at") params.set("sort", preferences.sort);
   if (preferences.direction === "asc") params.set("direction", "asc");
   if (preferences.size !== DEFAULT_LIST_PAGE_SIZE) params.set("size", String(preferences.size));
-  if (preferences.hide !== "") params.set("hide", preferences.hide);
+  if (preferences.hide !== defaultHideString()) params.set("hide", preferences.hide);
   if (preferences.page > 1) params.set("page", String(preferences.page));
   return params;
 }
@@ -281,7 +318,7 @@ export function defaultChildRunsListPreferences(): ChildRunsListPreferences {
     sort:      "created_at",
     direction: "desc",
     size:      DEFAULT_LIST_PAGE_SIZE,
-    hide:      "",
+    hide:      defaultHideString(),
     page:      1,
   };
 }
@@ -292,7 +329,6 @@ function normalizeStoredChildRunsListPreferences(value: unknown): ChildRunsListP
     return defaultChildRunsListPreferences();
   }
 
-  const hiddenColumns = parseHiddenColumns(stringValue(record.hide));
   const size = record.size;
 
   return {
@@ -303,7 +339,7 @@ function normalizeStoredChildRunsListPreferences(value: unknown): ChildRunsListP
     sort:      parseSort(stringValue(record.sort)),
     direction: parseDirection(stringValue(record.direction)),
     size:      parsePageSize(typeof size === "number" || typeof size === "string" ? String(size) : null),
-    hide:      serializeHiddenColumns(hiddenColumns) ?? "",
+    hide:      normalizeStoredHide(stringValue(record.hide)),
     page:      1,
   };
 }
@@ -319,7 +355,7 @@ export function childRunsListPreferencesFromSearchParams(
     sort:      parseSort(searchParams.get("sort")),
     direction: parseDirection(searchParams.get("direction")),
     size:      parsePageSize(searchParams.get("size")),
-    hide:      serializeHiddenColumns(parseHiddenColumns(searchParams.get("hide"))) ?? "",
+    hide:      readHideField(searchParams),
     page:      parsePage(searchParams.get("page")),
   };
 }
@@ -334,7 +370,7 @@ export function childRunsListPreferencesToSearchParams(
   if (preferences.sort !== "created_at") params.set("sort", preferences.sort);
   if (preferences.direction === "asc") params.set("direction", "asc");
   if (preferences.size !== DEFAULT_LIST_PAGE_SIZE) params.set("size", String(preferences.size));
-  if (preferences.hide !== "") params.set("hide", preferences.hide);
+  if (preferences.hide !== defaultHideString()) params.set("hide", preferences.hide);
   if (preferences.page > 1) params.set("page", String(preferences.page));
   return params;
 }

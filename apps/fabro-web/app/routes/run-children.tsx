@@ -11,6 +11,7 @@ import {
   childRunsListPreferencesToSearchParams,
   createdCutoffMsFor,
   createdFilterOptions,
+  hiddenColumnsFromSearchParams,
   parseCreatedFilter,
   parseDirection,
   parsePage,
@@ -21,7 +22,7 @@ import {
 } from "../components/runs-list/preferences";
 import type { ChildRunsListPreferences, CreatedFilter } from "../components/runs-list/preferences";
 import { RunsListView } from "../components/runs-list/runs-list-view";
-import { parseHiddenColumns, serializeHiddenColumns } from "../components/runs-list/toggleable-column";
+import { serializeHiddenColumns } from "../components/runs-list/toggleable-column";
 import type { ToggleableColumn } from "../components/runs-list/toggleable-column";
 import { SECONDARY_BUTTON_CLASS } from "../components/ui";
 import { ApiError } from "../lib/api-client";
@@ -48,7 +49,7 @@ export default function RunChildren() {
   const page = parsePage(searchParams.get("page"));
   const pageSize = parsePageSize(searchParams.get("size"));
   const hiddenColumns = useMemo(
-    () => parseHiddenColumns(searchParams.get("hide")),
+    () => hiddenColumnsFromSearchParams(searchParams),
     [searchParams],
   );
 

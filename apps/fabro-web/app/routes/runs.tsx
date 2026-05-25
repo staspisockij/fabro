@@ -34,6 +34,7 @@ import { FilterButton } from "../components/runs-list/filter-button";
 import {
   createdCutoffMsFor,
   createdFilterOptions,
+  hiddenColumnsFromSearchParams,
   parseCreatedFilter,
   parseDirection,
   parsePage,
@@ -51,7 +52,7 @@ import type {
   ViewMode,
 } from "../components/runs-list/preferences";
 import { RunsListView } from "../components/runs-list/runs-list-view";
-import { parseHiddenColumns, serializeHiddenColumns } from "../components/runs-list/toggleable-column";
+import { serializeHiddenColumns } from "../components/runs-list/toggleable-column";
 import type { ToggleableColumn } from "../components/runs-list/toggleable-column";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
@@ -746,7 +747,7 @@ export default function Runs() {
   const page = parsePage(searchParams.get("page"));
   const pageSize = parsePageSize(searchParams.get("size"));
   const hiddenColumns = useMemo(
-    () => parseHiddenColumns(searchParams.get("hide")),
+    () => hiddenColumnsFromSearchParams(searchParams),
     [searchParams],
   );
 

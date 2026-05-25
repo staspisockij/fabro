@@ -112,11 +112,6 @@ export function RunTableRow({
           <span className={`font-mono text-xs ${statusDisplay.text}`}>{run.statusLabel}</span>
         </span>
       </td>
-      {show("elapsed") && (
-        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-fg-muted">
-          {run.elapsed}
-        </td>
-      )}
       {show("repo") && (
         <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs font-medium text-teal-500">
           {run.repo}
@@ -162,6 +157,11 @@ export function RunTableRow({
           title={run.lastEventAt ?? undefined}
         >
           {run.lastEventAt != null ? formatRelativeTime(run.lastEventAt) : ""}
+        </td>
+      )}
+      {show("elapsed") && (
+        <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted">
+          {run.elapsed}
         </td>
       )}
       {show("changes") && (

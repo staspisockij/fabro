@@ -134,9 +134,6 @@ export function RunsListView({
                   />
                 </th>
                 <SortHeader label="Status" sortKey="status" activeSort={sort} direction={direction} onClick={onSortClick} />
-                {show("elapsed") && (
-                  <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} onClick={onSortClick} />
-                )}
                 {show("repo") && (
                   <SortHeader label="Repo" sortKey="repo" activeSort={sort} direction={direction} onClick={onSortClick} />
                 )}
@@ -149,6 +146,9 @@ export function RunsListView({
                 )}
                 {show("updated") && (
                   <SortHeader label="Updated" sortKey="updated_at" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
+                )}
+                {show("elapsed") && (
+                  <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
                 )}
                 {show("changes") && (
                   <SortHeader label="Changes" sortKey="changes" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
