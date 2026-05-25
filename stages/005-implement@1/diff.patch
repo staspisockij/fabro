@@ -1,0 +1,3697 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 9372c2503..0b87ce747 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2559,6 +2559,7 @@ name = "fabro-vault"
+ version = "0.244.0-nightly.0"
+ dependencies = [
+  "chrono",
++ "fabro-static",
+  "fabro-types",
+  "serde",
+  "serde_json",
+diff --git a/docs/internal/server-secrets-strategy.md b/docs/internal/server-secrets-strategy.md
+index 1c092c3e5..904830d66 100644
+--- a/docs/internal/server-secrets-strategy.md
++++ b/docs/internal/server-secrets-strategy.md
+@@ -4,24 +4,35 @@ This document defines how Fabro handles server-level secrets.
+ 
+ ## Core Rules
+ 
+-- `ServerSecrets` is the canonical server-secret reader.
+-- It reads from `process env` and `<storage>/server.env`.
++- `ServerSecrets` is the canonical reader for **bootstrap** server secrets only.
++- It reads bootstrap secrets from `process env` and `<storage>/server.env`.
+ - Resolution is snapshot-based: env and file are read once at construction, then treated as immutable for the life of the process.
+ - `process env` wins over `server.env` on conflicts.
++- Optional integration secrets are vault-only in server runtime. Do not add optional server integrations to `ServerSecrets` or read them from process env.
+ - `fabro server start` never generates secrets. Missing required secrets are a startup error.
+ - `std::env::set_var` and `std::env::remove_var` are banned workspace-wide. Tests are not exempt. Enforced by clippy via `disallowed_methods` in `clippy.toml`; intentional exceptions must be annotated with a scoped `#[expect(clippy::disallowed_methods, reason = "...")]` at the call site.
+ 
+-## Active Server Secrets
++## Bootstrap Server Secrets
+ 
+-These values belong to the server runtime and are read via `state.server_secret(...)`:
++These values may be read via `state.server_secret(...)` because the server can need them before optional integrations are available:
+ 
+ | Secret | Used by |
+ |---|---|
+ | `SESSION_SECRET` | Cookie encryption and JWT signing derivation |
+ | `FABRO_DEV_TOKEN` | Dev-token user auth when `server.auth.methods` includes `dev-token` |
+-| `GITHUB_APP_PRIVATE_KEY` | GitHub App credentials |
+-| `GITHUB_APP_WEBHOOK_SECRET` | GitHub webhook verification |
+-| `GITHUB_APP_CLIENT_SECRET` | GitHub OAuth login |
++| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` | Static S3 object-store credentials for server storage builders |
++
++These optional integration secrets are **not** server bootstrap secrets. They are read from the vault only:
++
++- LLM provider API keys and OAuth credential records
++- `GITHUB_TOKEN`
++- `GITHUB_APP_PRIVATE_KEY`
++- `GITHUB_APP_CLIENT_SECRET`
++- `GITHUB_APP_WEBHOOK_SECRET`
++- `FABRO_SLACK_APP_TOKEN`
++- `FABRO_SLACK_BOT_TOKEN`
++- `DAYTONA_API_KEY`
++- `BRAVE_SEARCH_API_KEY`
+ 
+ `FABRO_JWT_PRIVATE_KEY` and `FABRO_JWT_PUBLIC_KEY` are removed. `SESSION_SECRET` is the single auth root.
+ 
+@@ -31,28 +42,32 @@ These values belong to the server runtime and are read via `state.server_secret(
+ - Required-at-startup secrets are:
+   - `SESSION_SECRET`
+   - `FABRO_DEV_TOKEN` when dev-token auth is enabled
+-  - `GITHUB_APP_CLIENT_SECRET` when GitHub auth is enabled
+-- Other server secrets remain lazy/feature-specific rather than universal boot blockers.
++  - `GITHUB_APP_CLIENT_SECRET` from the vault when GitHub auth is enabled
++- Requiredness is independent from source. GitHub auth can require a vault secret at startup even though it is not a bootstrap `ServerSecrets` value.
++- Other optional integration secrets remain lazy/feature-specific rather than universal boot blockers.
+ 
+ ## Provisioning
+ 
+-Server secrets come from one of two sources:
++Bootstrap secrets come from one of two sources:
+ 
+ - Platform env for 12-factor deployments
+ - `server.env` written by install flows
+ 
++Optional integration secrets are provisioned into the vault, usually with `fabro secret set` or `fabro install`.
++
+ There is no compatibility layer for removed secrets and no startup-time secret generation.
+ 
+ ## Subprocess Boundaries
+ 
+ - Worker and render-graph subprocesses start from `env_clear()` and re-add only explicit allowlisted variables.
+-- Authority-bearing values are re-injected intentionally. For worker subprocesses this is `FABRO_WORKER_TOKEN`, not user auth state such as `FABRO_DEV_TOKEN` or `auth.json`.
++- Authority-bearing values are re-injected intentionally. For worker subprocesses this is `FABRO_WORKER_TOKEN`, plus any explicitly required internal value such as a vault-derived `GITHUB_APP_PRIVATE_KEY`; it is not user auth state such as `FABRO_DEV_TOKEN` or `auth.json`.
+ - The worker reads `FABRO_WORKER_TOKEN` from its env at startup (in `main()` before Tokio initializes) and immediately calls `std::env::remove_var` to scrub it. The token then flows through function arguments to `runner::execute`. Every descendant process (hooks, sandbox commands, devcontainer setup, MCP stdio, etc.) therefore inherits a worker env that no longer contains the bearer, so an unscrubbed spawn site cannot leak it.
+ - The daemon child inherits the parent env unchanged except for output-format hygiene (`FABRO_JSON` removal).
+ 
+ ## Tests
+ 
+-- In-process tests must inject server secrets with construction-time stubs (`EnvSource`, `StubEnv`) or by writing `server.env`.
++- In-process tests must inject bootstrap server secrets with construction-time stubs (`EnvSource`, `StubEnv`) or by writing `server.env`.
++- In-process tests for optional integrations must write the vault and must not rely on process env or `server.env`.
+ - Subprocess tests must set child env with `Command::env`.
+ - Tests must not mutate the process-wide environment.
+ 
+@@ -63,7 +78,8 @@ There is no compatibility layer for removed secrets and no startup-time secret g
+ 
+ ## Adding A New Server Secret
+ 
+-1. Provision it through platform env or install-written `server.env`.
+-2. Read it through `state.server_secret(...)`.
+-3. Decide explicitly whether startup should fail when it is absent.
+-4. If a worker or render subprocess needs it, re-inject it explicitly rather than broadening inheritance casually.
++1. Classify it in `fabro-static` as `Bootstrap` or `OptionalVault`.
++2. For bootstrap secrets, provision through platform env or install-written `server.env`, then read through `state.server_secret(...)`.
++3. For optional integration secrets, provision through the vault and read through `state.vault_secret(...)`.
++4. Decide explicitly whether startup should fail when it is absent.
++5. If a worker or render subprocess needs it, re-inject it explicitly rather than broadening inheritance casually.
+diff --git a/docs/plans/2026-04-22-003-refactor-lock-down-server-secrets-plan.md b/docs/plans/2026-04-22-003-refactor-lock-down-server-secrets-plan.md
+index cf02593b0..3b25b429e 100644
+--- a/docs/plans/2026-04-22-003-refactor-lock-down-server-secrets-plan.md
++++ b/docs/plans/2026-04-22-003-refactor-lock-down-server-secrets-plan.md
+@@ -72,7 +72,7 @@ Both install flows (CLI `fabro install` and web install via `/install/finish`) w
+ **Out of scope:**
+ 
+ - **Vault + `ProviderCredentials`** (`secrets.json`, REST-managed, runtime-mutable). Different lifecycle.
+-- **`vault_or_env` for run-level credentials** (`GITHUB_TOKEN`, `DAYTONA_API_KEY`). Same env-as-source pattern, different track.
++- **Legacy vault-or-process-env helper for run-level credentials** (`GITHUB_TOKEN`, `DAYTONA_API_KEY`). Same env-as-source pattern, different track at the time of this plan.
+ - **`{{ env.FOO }}` config interpolation.** Operator-supplied templating, different feature.
+ - **Workflow-stage env (Sandbox).** Stages run inside `Sandbox` (local/Docker/Daytona); their env is configured by the workflow definition + Sandbox config. Anything a workflow stage needs to execute (e.g. `git push` requiring `GITHUB_TOKEN`) routes via Vault → Sandbox, not subprocess inheritance.
+ - **`validate_api_key` `set_var` in `provider_auth.rs`.** Vault-side smell, deferred.
+@@ -431,7 +431,7 @@ Strategy doc covers:
+ - **Worker and render-graph env:** `env_clear` + strict fail-closed allowlist. Daemon child inherits parent env (12-factor pattern). New worker env entries require demonstrated need + intentional addition.
+ - **Install while running:** allowed only through the shared install orchestration which owns restart/handoff. Manual `server.env` edits still require restart discipline.
+ - **Rotation:** restart required. Live rotation intentionally not supported. Compliance-driven N+1 rotation (overlap windows) is a known limitation tracked as follow-up.
+-- **Out of scope (with reasons):** Vault + `ProviderCredentials`, `vault_or_env` for run-level credentials (different track), `{{ env.FOO }}` config interpolation, workflow-stage env (Sandbox's job), `validate_api_key` `set_var` smell, Tailscale spawns, `bun --watch-web`.
++- **Out of scope (with reasons):** Vault + `ProviderCredentials`, the legacy vault-or-process-env helper for run-level credentials (different track at the time), `{{ env.FOO }}` config interpolation, workflow-stage env (Sandbox's job), `validate_api_key` `set_var` smell, Tailscale spawns, `bun --watch-web`.
+ - **Adding a new server-level secret:** (1) provision via the install orchestration or platform env; (2) consume via `state.server_secret(...)`; (3) do not touch env in any other layer; (4) decide if it joins the startup-critical set (most don't).
+ - **Adding a new worker env var:** add to the worker list in `spawn_env.rs` with a one-line reason and a failing-without test that proves need.
+ 
+@@ -446,7 +446,7 @@ Strategy doc covers:
+ - **State lifecycle:** `ServerSecrets` snapshot built once at boot from env+file; both immutable for process lifetime. Rotating any in-scope secret requires restart. Install flows MAY update `server.env` while a server is running when they own restart/handoff via the shared install orchestration (Unit 5).
+ - **Subprocess env:** workers and render-graph processes inherit only an explicit fail-closed allowlist. Daemon child inherits parent env — that's how 12-factor SESSION_SECRET reaches the daemon.
+ - **API surface:** no public API change. `state.server_secret(...)` signature unchanged. `ServerSecrets::with_env_lookup` removed; replaced by `load(path, &dyn EnvSource)`. `/install/finish` API contract unchanged (no `restart_required` flag, no new fields).
+-- **Unchanged invariants:** `ProviderCredentials`, Vault REST API, `vault_or_env` for run-level credentials, `{{ env.FOO }}` interpolation, workflow stages (configured by `Sandbox`) all behave exactly as before.
++- **Unchanged invariants at the time:** `ProviderCredentials`, Vault REST API, the legacy vault-or-process-env helper for run-level credentials, `{{ env.FOO }}` interpolation, workflow stages (configured by `Sandbox`) all behaved exactly as before. Later secrets-rationalization work moved optional server integration secrets to vault-only lookup.
+ 
+ ## Risks & Dependencies
+ 
+diff --git a/docs/public/administration/deploy-railway.mdx b/docs/public/administration/deploy-railway.mdx
+index a6082f107..9a52facc9 100644
+--- a/docs/public/administration/deploy-railway.mdx
++++ b/docs/public/administration/deploy-railway.mdx
+@@ -31,18 +31,19 @@ Railway sets `$PORT` automatically and expects the container to bind to it. The
+ 
+ If you override the port in **Service → Settings → Networking → Target Port**, match the value to `$PORT`.
+ 
+-### 3. Set required environment variables
++### 3. Set bootstrap environment variables
+ 
+-Add variables in **Service → Variables** as needed. The [Server Configuration](/administration/server-configuration) reference has the full list; the minimum useful set:
++Add variables in **Service → Variables** as needed. The [Server Configuration](/administration/server-configuration) reference has the full list. Railway process env is for bootstrap values only:
+ 
+ | Variable | Purpose |
+ |---|---|
+-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / ... | At least one LLM provider key for the models you'll run |
+ | `FABRO_DEV_TOKEN` | Optional — pre-set the dev token instead of reading the one written to `/storage` on first boot |
+ | `SESSION_SECRET` | 64-character hex string; required when the web UI is enabled |
+-| `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Only if you enable GitHub OAuth or the GitHub App integration |
++| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Optional static S3 object-store credentials |
+ 
+-No `.env` file is auto-loaded inside the container; everything comes from Railway's environment.
++Do not put optional integration secrets in Railway variables for server runtime. After the server is running, add LLM provider keys, Slack, Daytona, Brave Search, `GITHUB_TOKEN`, and GitHub App secrets to the server vault with `fabro secret set`, `fabro provider login`, or `fabro install`.
++
++No `.env` file is auto-loaded inside the container; bootstrap variables come from Railway's environment.
+ 
+ ## Accessing your Fabro server
+ 
+diff --git a/docs/public/administration/security.mdx b/docs/public/administration/security.mdx
+index 437c2b5ac..e2c14b1f1 100644
+--- a/docs/public/administration/security.mdx
++++ b/docs/public/administration/security.mdx
+@@ -36,7 +36,7 @@ Fabro is single-tenant software designed for small, trusted teams. The following
+ ### Secrets
+ 
+ - **Keep API keys out of sandboxes.** The local sandbox strips environment variables ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`, but Docker and Daytona sandboxes provide stronger isolation — only explicitly configured variables are passed through.
+-- **Use server-owned secrets or process env vars for credentials.** For server-backed workflows, persist credentials with `fabro provider login` / `fabro secret set`, which stores them under the server data directory. Do not commit secrets to version control.
++- **Use the server vault for optional integration credentials.** For server-backed workflows, persist LLM provider keys, Slack, Daytona, Brave Search, GitHub token, and GitHub App secrets with `fabro provider login`, `fabro secret set`, or `fabro install`. Process env and `server.env` are reserved for bootstrap secrets such as `SESSION_SECRET`, `FABRO_DEV_TOKEN`, and object-store credentials. Do not commit secrets to version control.
+ - **Rotate the session secret.** The `SESSION_SECRET` environment variable encrypts web app sessions. Rotate it periodically and use a strong random value.
+ 
+ ### Execution
+diff --git a/docs/public/administration/self-host-docker.mdx b/docs/public/administration/self-host-docker.mdx
+index ae7db0062..c9382f9dc 100644
+--- a/docs/public/administration/self-host-docker.mdx
++++ b/docs/public/administration/self-host-docker.mdx
+@@ -16,18 +16,18 @@ The supported deployment artifact is the official Fabro image at `ghcr.io/fabro-
+ | **Image** | `ghcr.io/fabro-sh/fabro:nightly` (multi-arch; pin a version for production) |
+ | **Persistent volume** | Mount at `/storage`. Stores run history, checkpoints, sessions, the dev token, and JWT keys. |
+ | **Port** | The container binds to `$PORT` (default `32276`). Expose it. |
+-| **LLM provider key** | At least one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, ... |
++| **LLM provider key** | Add at least one provider key during the install wizard or later with `fabro secret set` / `fabro provider login`. |
+ | **Replicas** | One. The server expects exclusive ownership of `/storage`. |
+ 
+ ## Quickstart with docker compose
+ 
+-The repo ships a `docker-compose.yaml` at the root. Clone the repo (or copy the file), create a `.env` with at least one provider key, and start it:
++The repo ships a `docker-compose.yaml` at the root. Clone the repo (or copy the file), create a `.env` for bootstrap settings if needed, and start it:
+ 
+ ```bash
+ git clone https://github.com/fabro-sh/fabro.git
+ cd fabro
+ cp .env.example .env
+-# edit .env and set at least ANTHROPIC_API_KEY (or another provider key)
++# edit .env for bootstrap values such as SESSION_SECRET or FABRO_DEV_TOKEN if needed
+ docker compose up -d
+ ```
+ 
+@@ -59,15 +59,9 @@ docker compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
+ 
+ Leave `FABRO_DOMAIN` unset to serve plain HTTP on `localhost`.
+ 
+-## Required environment variables
++## Bootstrap environment variables
+ 
+-At minimum, set one LLM provider key in `.env`:
+-
+-```bash title=".env"
+-ANTHROPIC_API_KEY=sk-ant-...
+-```
+-
+-For the web UI you also need a session secret:
++For the web UI you need a session secret unless install mode is generating the initial local configuration:
+ 
+ ```bash
+ SESSION_SECRET=<64-character hex string>
+@@ -75,13 +69,20 @@ SESSION_SECRET=<64-character hex string>
+ 
+ Generate one with `openssl rand -hex 32`.
+ 
++`server.env` and container process env are for bootstrap values only:
++
++| Variable | Purpose |
++|---|---|
++| `SESSION_SECRET` | Session encryption secret |
++| `FABRO_DEV_TOKEN` | Optional — pre-set the dev token instead of reading the one written to `/storage` on first boot |
++| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Optional static S3 object-store credentials |
++
++Do not put optional integration secrets in `.env` for server runtime. Configure LLM provider keys, Slack, Daytona, Brave Search, `GITHUB_TOKEN`, and GitHub App secrets in the vault with `fabro secret set`, `fabro provider login`, or `fabro install`.
++
+ Optional:
+ 
+ | Variable | Purpose |
+ |---|---|
+-| `FABRO_DEV_TOKEN` | Pre-set the dev token instead of reading the one written to `/storage` on first boot |
+-| `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Only if you enable GitHub OAuth or the GitHub App integration |
+-| `FABRO_SLACK_APP_TOKEN`, `FABRO_SLACK_BOT_TOKEN` | Only if you enable the Slack integration for human interviews or run lifecycle notifications |
+ | `FABRO_DOMAIN` | Public hostname when using the Caddy reverse-proxy overlay |
+ 
+ See [Server Configuration](/administration/server-configuration) for the full settings reference, and [`.env.example`](https://github.com/fabro-sh/fabro/blob/main/.env.example) for the complete list.
+@@ -90,11 +91,11 @@ See [Server Configuration](/administration/server-configuration) for the full se
+ 
+ The same image works on any container orchestrator that supports the requirements above. Common patterns:
+ 
+-- **AWS ECS / Fargate** — Task definition referencing `ghcr.io/fabro-sh/fabro:nightly`, EFS volume mounted at `/storage`, port `32276` published, environment variables for keys.
++- **AWS ECS / Fargate** — Task definition referencing `ghcr.io/fabro-sh/fabro:nightly`, EFS volume mounted at `/storage`, port `32276` published, environment variables for bootstrap values, and vault-backed optional integration secrets.
+ - **Google Cloud Run** — Cloud Run with a backed volume mount at `/storage`. Pin minimum instances to 1; scale-to-zero interrupts running workflows.
+ - **Kubernetes** — One-replica `StatefulSet` (not Deployment) with a `PersistentVolumeClaim` mounted at `/storage`. Expose via Service + Ingress.
+ 
+-In all cases: single replica, persistent `/storage`, expose `$PORT`, set provider keys.
++In all cases: single replica, persistent `/storage`, expose `$PORT`, and configure optional integration secrets in the vault.
+ 
+ ## Pinning a version
+ 
+diff --git a/docs/public/administration/server-configuration.mdx b/docs/public/administration/server-configuration.mdx
+index 8d8e6ee2b..68362ffcf 100644
+--- a/docs/public/administration/server-configuration.mdx
++++ b/docs/public/administration/server-configuration.mdx
+@@ -286,7 +286,7 @@ Customize the git author identity used for checkpoint commits. When not set, def
+ 
+ ### `[server.integrations.github]` section
+ 
+-Configure GitHub integration auth. `strategy = "token"` is the default and uses a stored `GITHUB_TOKEN` from the vault (with `GH_TOKEN` as a fallback). `strategy = "app"` enables the GitHub App flow and browser OAuth; webhook delivery is configured separately under `[server.integrations.github.webhooks]`.
++Configure GitHub integration auth. `strategy = "token"` is the default and uses a stored `GITHUB_TOKEN` from the vault. `strategy = "app"` enables the GitHub App flow and browser OAuth; webhook delivery is configured separately under `[server.integrations.github.webhooks]`.
+ 
+ ```toml title="settings.toml"
+ [server.integrations.github]
+@@ -330,30 +330,39 @@ Configure checkpoint behavior for all runs.
+ 
+ ## Secrets and environment variables
+ 
+-Fabro splits secrets into two scopes:
++Fabro splits server-runtime secrets into two scopes:
+ 
+-- Server runtime secrets live in `<data_dir>/server.env` and resolve with precedence `process env -> server.env`.
+-- Workflow-visible secrets live in `<data_dir>/vaults/default/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
++- Bootstrap secrets live in process env or `<data_dir>/server.env` and resolve with precedence `process env -> server.env`.
++- Optional integration secrets live in `<data_dir>/vaults/default/secrets.json` (the vault). Anything stored in the vault may be used by workflows.
+ 
+-For the auth model above, the main server runtime secrets are:
++`server.env` is only for bootstrap/runtime values the server may need before optional integrations are loaded:
+ 
+ - `SESSION_SECRET` when the web UI is enabled
+ - `FABRO_DEV_TOKEN` when `"dev-token"` auth is enabled
+-- `GITHUB_APP_CLIENT_SECRET` when `"github"` auth is enabled
+-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` when the install wizard or a manual config uses
++- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` when a manual config uses
+   static S3 object-store credentials
+ 
++`server.env` is not used for Slack, Daytona, Brave Search, LLM provider keys, `GITHUB_TOKEN`, or GitHub App private key/client secret/webhook secret. Configure those optional integrations with `fabro secret set`, `fabro provider login`, or `fabro install`.
++
+ Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
+ 
+ ### LLM provider keys
+ 
+-Fabro's built-in provider access resolves these from the process environment first, then an exact-name vault token or OAuth entry.
++Server-backed workflows resolve built-in provider credentials from exact-name vault tokens or OAuth entries. Add them with `fabro provider login` or `fabro secret set`:
++
++```bash
++fabro secret set ANTHROPIC_API_KEY sk-ant-...
++fabro secret set OPENAI_API_KEY sk-...
++fabro secret set GEMINI_API_KEY AI...
++```
++
++Standalone CLI/library usage can still opt into env-backed credential sources explicitly, but the Fabro server runtime does not read provider keys from process env or `server.env`.
+ 
+ | Variable | Provider |
+ |---|---|
+ | `ANTHROPIC_API_KEY` | Anthropic (Claude) |
+ | `OPENAI_API_KEY` | OpenAI (GPT) |
+-| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Google (Gemini) |
++| `GEMINI_API_KEY` | Google (Gemini) |
+ | `KIMI_API_KEY` | Kimi |
+ | `ZAI_API_KEY` | Zai (GLM) |
+ | `MINIMAX_API_KEY` | Minimax |
+@@ -361,6 +370,13 @@ Fabro's built-in provider access resolves these from the process environment fir
+ 
+ ### Sandbox and tools
+ 
++These optional server integrations are vault-only:
++
++```bash
++fabro secret set DAYTONA_API_KEY dtn_...
++fabro secret set BRAVE_SEARCH_API_KEY BSA...
++```
++
+ | Variable | Description |
+ |---|---|
+ | `DAYTONA_API_KEY` | Daytona cloud sandbox API key |
+@@ -373,6 +389,7 @@ Fabro resolves these from `process env -> server.env`.
+ | Variable | Description |
+ |---|---|
+ | `SESSION_SECRET` | Session encryption secret (64-character hex string) |
++| `FABRO_DEV_TOKEN` | Optional fixed development auth token |
+ 
+ ### Object store runtime secrets (optional)
+ 
+@@ -382,6 +399,7 @@ Fabro resolves these from `process env -> server.env`.
+ |---|---|
+ | `AWS_ACCESS_KEY_ID` | Static AWS access key ID for S3-backed `[server.slatedb]` / `[server.artifacts]` |
+ | `AWS_SECRET_ACCESS_KEY` | Matching static AWS secret access key |
++| `AWS_SESSION_TOKEN` | Optional matching AWS session token for temporary static credentials |
+ 
+ The browser install wizard can write these into `server.env` for the AWS S3 manual-credential
+ path. It does not support manual STS/session-token input; use runtime credentials instead for ECS,
+@@ -402,13 +420,19 @@ remains the fallback if you no longer trust the host boundary.
+ 
+ ### GitHub integration (optional)
+ 
++GitHub token mode is vault-only:
++
++```bash
++fabro secret set GITHUB_TOKEN ghp_...
++```
++
+ | Variable | Description |
+ |---|---|
+-| `GITHUB_TOKEN` | GitHub personal access token, stored by `fabro install` when `strategy = "token"`. Also accepts `GH_TOKEN` as a fallback. |
++| `GITHUB_TOKEN` | GitHub personal access token, stored by `fabro install` when `strategy = "token"` |
+ 
+ ### GitHub App extras (optional)
+ 
+-Fabro resolves these from `process env -> server.env`.
++GitHub App mode stores these secrets in the vault. `fabro install` writes them automatically when it registers an app; do not put them in `server.env`.
+ 
+ | Variable | Description |
+ |---|---|
+@@ -420,7 +444,12 @@ Fabro resolves these from `process env -> server.env`.
+ 
+ Slack credentials are server-level secrets. They enable one Slack connection that is shared by human interview prompts and run lifecycle notifications. `server.integrations.slack.default_channel` is optional and is used only as the default destination for interview prompts; lifecycle notifications use `[run.notifications.<name>.slack].channel` in run or workflow configuration.
+ 
+-Fabro resolves these from `process env -> server.env`. If both are present, startup logs `Slack integration enabled` and then the Slack Socket Mode connection status. If either is missing or empty, startup logs `Slack integration disabled; missing credentials` with the missing variable names.
++Fabro resolves these from the vault only. If both are present, startup logs `Slack integration enabled` and then the Slack Socket Mode connection status. If either is missing or empty, startup logs `Slack integration disabled; missing credentials` with the missing variable names.
++
++```bash
++fabro secret set FABRO_SLACK_BOT_TOKEN xoxb-...
++fabro secret set FABRO_SLACK_APP_TOKEN xapp-...
++```
+ 
+ | Variable | Description |
+ |---|---|
+diff --git a/docs/public/administration/troubleshooting.mdx b/docs/public/administration/troubleshooting.mdx
+index f6a231d04..a228c5ab8 100644
+--- a/docs/public/administration/troubleshooting.mdx
++++ b/docs/public/administration/troubleshooting.mdx
+@@ -27,11 +27,11 @@ LLM provider probe failures are reported as errors. Use `--verbose` to see the u
+ 
+ **Server exited after I finished the install wizard** — Expected. The server writes `~/.fabro/settings.toml` and exits cleanly at the end of the wizard. Start it again with `fabro server start` to boot in configured mode, or run it under a supervisor with a restart policy (for example docker-compose `restart: unless-stopped`, systemd, or Railway's restart-on-exit) so the second start happens automatically.
+ 
+-**"No API key configured"** — Set at least one provider key with `fabro provider login` or `fabro secret set`, or export it in the server process environment. Run `fabro doctor` to verify connectivity.
++**"No API key configured"** — For server-backed runs, set at least one provider key in the server vault with `fabro provider login` or `fabro secret set`. Standalone local CLI/library runs can use env-backed credential sources explicitly. Run `fabro doctor` to verify server connectivity.
+ 
+ **Stall watchdog timeouts** — If runs are cancelled unexpectedly, the agent may be stuck or the LLM provider may be slow. Check `FABRO_LOG=debug` output for `Agent.LlmRetry` events. Increase `stall_timeout` in the graph if needed, or add [fallback providers](/core-concepts/models) to handle outages.
+ 
+-**Sandbox creation failures** — For Docker: ensure the Docker daemon is running and the configured image exists. For Daytona: verify `DAYTONA_API_KEY` is set, includes `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`, and that the `gh` CLI is authenticated. For Exe: verify your SSH keys are configured for `exe.dev` and that `ssh exe.dev` connects successfully.
++**Sandbox creation failures** — For Docker: ensure the Docker daemon is running and the configured image exists. For Daytona: verify `DAYTONA_API_KEY` is stored in the server vault, includes `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`, and that GitHub access is configured. For Exe: verify your SSH keys are configured for `exe.dev` and that `ssh exe.dev` connects successfully.
+ 
+ **Port already in use** — Change the port with `fabro server start --port 3001` or stop the conflicting process.
+ 
+diff --git a/docs/public/agents/tools.mdx b/docs/public/agents/tools.mdx
+index e317673b6..0c34df80c 100644
+--- a/docs/public/agents/tools.mdx
++++ b/docs/public/agents/tools.mdx
+@@ -130,7 +130,7 @@ Searches the web using the Brave Search API.
+ | `query` | string | yes | Search query |
+ | `max_results` | integer | no | Maximum results (default: 5, max: 20) |
+ 
+-Requires the `BRAVE_SEARCH_API_KEY` environment variable. Returns numbered results with title, URL, and description.
++Requires `BRAVE_SEARCH_API_KEY` to be configured for the current runtime. Server-backed sessions read it from the server vault (`fabro secret set BRAVE_SEARCH_API_KEY <key>`); standalone local agent runs can pass it from the invoking shell. Returns numbered results with title, URL, and description.
+ 
+ ### web_fetch
+ 
+diff --git a/docs/public/changelog/2026-04-13.mdx b/docs/public/changelog/2026-04-13.mdx
+index 3b23acaea..221c89740 100644
+--- a/docs/public/changelog/2026-04-13.mdx
++++ b/docs/public/changelog/2026-04-13.mdx
+@@ -18,7 +18,7 @@ Local CLI-managed servers previously started with no authentication. Now, `fabro
+ <Warning>
+ **`GITHUB_CLI_TOKEN` renamed to `GITHUB_TOKEN`.** The environment variable and vault secret for GitHub token auth have been renamed. The `gh_cli` strategy is now called `token`, reflecting that at runtime it's just a stored token — not tied to the `gh` CLI.
+ 
+-To migrate: replace `GITHUB_CLI_TOKEN` with `GITHUB_TOKEN` in your environment or vault configuration. `GH_TOKEN` is also accepted as a fallback.
++To migrate: replace `GITHUB_CLI_TOKEN` with `GITHUB_TOKEN` in your environment or vault configuration. Current server runtimes read `GITHUB_TOKEN` from the vault.
+ </Warning>
+ 
+ ## More
+diff --git a/docs/public/changelog/2026-05-18.mdx b/docs/public/changelog/2026-05-18.mdx
+index 1776e60f9..c5ffbfb1e 100644
+--- a/docs/public/changelog/2026-05-18.mdx
++++ b/docs/public/changelog/2026-05-18.mdx
+@@ -34,7 +34,7 @@ This removes the old CLI runtime path and prevents ACP execution from accidental
+ 
+ ## Explicit vault-backed provider credentials
+ 
+-Fabro now separates process environment credentials from server-owned vault credentials. Provider auth configuration can try process env first, vault entries second, or any explicit order you choose.
++Fabro now separates process environment credentials from server-owned vault credentials. Provider auth configuration can declare env and vault refs explicitly; current server runtimes use vault-backed provider credentials, while standalone library/CLI flows can opt into env-backed sources.
+ 
+ ```toml
+ [llm.providers.proxy.auth]
+@@ -63,7 +63,7 @@ OpenAI Codex OAuth credentials now live under `vault:OPENAI_CODEX`, and provider
+ </Accordion>
+ 
+ <Accordion title="Improvements">
+-- Provider catalogs now check process environment credentials first, then same-name vault entries where configured
++- Provider catalogs now declare process-env and vault credential refs explicitly
+ - Web stage model extraction now follows the new API/ACP event contract
+ - Settings are now split into General, Integrations, Security, and Storage pages instead of one oversized overview
+ </Accordion>
+diff --git a/docs/public/core-concepts/models.mdx b/docs/public/core-concepts/models.mdx
+index c92d89824..fb2d3ed71 100644
+--- a/docs/public/core-concepts/models.mdx
++++ b/docs/public/core-concepts/models.mdx
+@@ -35,7 +35,7 @@ No single model is best at everything. Fabro lets you assign the right model to
+ | `minimax-m2.5` | minimax | `minimax` | 197K | $0.30 / $1.20 | 45 tok/s |
+ | `mercury-2` | inception | `mercury` | 131K | $0.25 / $0.75 | 1000 tok/s |
+ 
+-Each provider requires its own API key set via environment variable or matching vault token (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the [Quick Start](/getting-started/quick-start) for setup.
++Each provider requires its own API key. Server-backed workflows read provider credentials from the server vault (for example `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` set with `fabro secret set` or `fabro provider login`). Standalone SDK/CLI flows can opt into env-backed credential sources explicitly. See the [Quick Start](/getting-started/quick-start) for setup.
+ 
+ ## Configuring providers and models
+ 
+diff --git a/docs/public/getting-started/quick-start.mdx b/docs/public/getting-started/quick-start.mdx
+index 9de4f2f06..b9a9ecdb2 100644
+--- a/docs/public/getting-started/quick-start.mdx
++++ b/docs/public/getting-started/quick-start.mdx
+@@ -65,7 +65,7 @@ This creates `.fabro/project.toml` and a starter workflow under `.fabro/workflow
+ 
+ ## Configure API keys
+ 
+-Add at least one LLM provider key:
++For local CLI runs, export at least one LLM provider key in your shell:
+ 
+ ```bash
+ ANTHROPIC_API_KEY=sk-ant-...
+@@ -75,6 +75,12 @@ GEMINI_API_KEY=AI...
+ 
+ <Note>
+ You only need one provider key to get started. Add more to enable multi-model workflows.
++
++For server-backed runs, store provider keys in the server vault instead:
++
++```bash
++fabro secret set ANTHROPIC_API_KEY sk-ant-...
++```
+ </Note>
+ 
+ ## Run your first workflow
+diff --git a/docs/public/integrations/brave-search.mdx b/docs/public/integrations/brave-search.mdx
+index 7d7463875..6a0b645ed 100644
+--- a/docs/public/integrations/brave-search.mdx
++++ b/docs/public/integrations/brave-search.mdx
+@@ -23,6 +23,8 @@ fabro doctor
+ 
+ The doctor output should show **Brave Search** as "connected". If the key is missing, web search is reported as a warning — workflows still run, but `web_search` calls return an error.
+ 
++The Fabro server reads this key from the vault only. It does not read `BRAVE_SEARCH_API_KEY` from process env or `server.env`.
++
+ ## How it works
+ 
+ Agents call the `web_search` tool with a query string. Fabro sends the query to the Brave Web Search API (`/res/v1/web/search`) and returns numbered results with title, URL, and description:
+@@ -37,7 +39,7 @@ Agents call the `web_search` tool with a query string. Fabro sends the query to
+    The Rust book
+ ```
+ 
+-If `BRAVE_SEARCH_API_KEY` is not set, the tool returns an error explaining that the key is required. The agent can then fall back to other approaches.
++If `BRAVE_SEARCH_API_KEY` is not configured in the vault, the tool returns an error explaining that the key is required. The agent can then fall back to other approaches.
+ 
+ See the [`web_search` tool reference](/agents/tools#web_search) for parameters and details.
+ 
+@@ -73,7 +75,7 @@ digraph Research {
+ 
+ ## Troubleshooting
+ 
+-**"BRAVE_SEARCH_API_KEY environment variable is not set"** — Add the key with `fabro secret set` or export it in the server process environment. Run `fabro doctor` to verify.
++**"BRAVE_SEARCH_API_KEY is not configured"** — Add the key with `fabro secret set BRAVE_SEARCH_API_KEY <key>`. Run `fabro doctor` to verify.
+ 
+ **"Brave Search API returned status 401"** — The API key is invalid or expired. Generate a new key from the [Brave Search API dashboard](https://brave.com/search/api/).
+ 
+diff --git a/docs/public/integrations/daytona.mdx b/docs/public/integrations/daytona.mdx
+index 35e514bbf..1cce4969b 100644
+--- a/docs/public/integrations/daytona.mdx
++++ b/docs/public/integrations/daytona.mdx
+@@ -17,11 +17,17 @@ description: "Run Fabro workflows in sandboxed Daytona cloud environments"
+ 
+ ## Prerequisites
+ 
+-- A `DAYTONA_API_KEY` environment variable (get one from [app.daytona.io](https://app.daytona.io))
++- A `DAYTONA_API_KEY` saved in the Fabro server vault (get one from [app.daytona.io](https://app.daytona.io))
+ - GitHub access configured via the default `token` strategy or a [GitHub App](/integrations/github) (required for private repository cloning and checkpoint pushing)
+ 
+ The Daytona key must include the snapshot and sandbox scopes Fabro uses to create and clean up environments: `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`. Fabro validates these scopes during install, when you run `fabro secret set DAYTONA_API_KEY`, and in `fabro doctor`.
+ 
++```bash
++fabro secret set DAYTONA_API_KEY <key>
++```
++
++The Fabro server runtime reads the Daytona API key from the vault only. It does not read `DAYTONA_API_KEY` from process env or `server.env`; non-secret Daytona settings such as API URL or organization ID remain normal configuration.
++
+ ## Configuration
+ 
+ Select a Daytona environment in your run config TOML or via CLI flag:
+@@ -204,7 +210,7 @@ See [Server Configuration](/administration/server-configuration) for details.
+ 
+ ### "Failed to create Daytona sandbox"
+ 
+-The `DAYTONA_API_KEY` environment variable is missing, invalid, or missing the required snapshot/sandbox scopes. Store it with `fabro secret set DAYTONA_API_KEY ...` or export it in the server process environment, then run `fabro doctor` to verify that Daytona reports the key as valid.
++The `DAYTONA_API_KEY` vault secret is missing, invalid, or missing the required snapshot/sandbox scopes. Store it with `fabro secret set DAYTONA_API_KEY ...`, then run `fabro doctor` to verify that Daytona reports the key as valid.
+ 
+ If doctor reports missing scopes, regenerate the Daytona key with `write:snapshots`, `delete:snapshots`, `write:sandboxes`, and `delete:sandboxes`, then save it again with `fabro secret set DAYTONA_API_KEY`.
+ 
+diff --git a/docs/public/integrations/github.mdx b/docs/public/integrations/github.mdx
+index 67cf7e51f..ba6039d5b 100644
+--- a/docs/public/integrations/github.mdx
++++ b/docs/public/integrations/github.mdx
+@@ -67,7 +67,7 @@ The installer:
+ 2. Opens GitHub in your browser so you can review the manifest and click **Create GitHub App**.
+ 3. Receives GitHub's temporary callback on localhost, exchanges it for permanent app credentials, and writes:
+    - `app_id`, `client_id`, and `slug` to `~/.fabro/settings.toml`
+-   - `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to `<data_dir>/server.env`
++   - `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to the server vault
+ 4. Prints the resulting app slug so you can install the app on the repositories Fabro should access.
+ 
+ After setup completes, restart the Fabro server before attempting browser login.
+@@ -90,9 +90,9 @@ The GitHub App check verifies five fields:
+ |---|---|
+ | `server.integrations.github.app_id` | `~/.fabro/settings.toml` |
+ | `server.integrations.github.client_id` | `~/.fabro/settings.toml` |
+-| `GITHUB_APP_CLIENT_SECRET` | `<data_dir>/server.env` |
+-| `GITHUB_APP_WEBHOOK_SECRET` | `<data_dir>/server.env` |
+-| `GITHUB_APP_PRIVATE_KEY` | `<data_dir>/server.env` |
++| `GITHUB_APP_CLIENT_SECRET` | server vault |
++| `GITHUB_APP_WEBHOOK_SECRET` | server vault |
++| `GITHUB_APP_PRIVATE_KEY` | server vault |
+ 
+ If all five are set, the check passes. If none are set, it warns (GitHub integration is optional). If some are set but others are missing, it errors with the specific missing fields.
+ 
+@@ -115,9 +115,9 @@ slug = "fabro-a3f2"
+ | `client_id` | OAuth Client ID for the app |
+ | `slug` | App slug, used for linking to the GitHub App settings page |
+ 
+-### `server.env`
++### Server vault
+ 
+-Fabro stores the GitHub App secrets in `<data_dir>/server.env` under these keys:
++Fabro stores the GitHub App secrets in the server vault under these keys:
+ 
+ - `GITHUB_APP_CLIENT_SECRET`
+ - `GITHUB_APP_WEBHOOK_SECRET`
+@@ -125,6 +125,14 @@ Fabro stores the GitHub App secrets in `<data_dir>/server.env` under these keys:
+ 
+ The private key is stored as base64-encoded PEM. Fabro also accepts raw PEM format (starting with `-----BEGIN`).
+ 
++Install mode writes these automatically. If you rotate them manually, use `fabro secret set` on the server:
++
++```bash
++fabro secret set GITHUB_APP_CLIENT_SECRET <client-secret>
++fabro secret set GITHUB_APP_WEBHOOK_SECRET <webhook-secret>
++fabro secret set --type file GITHUB_APP_PRIVATE_KEY <private-key-pem-or-base64>
++```
++
+ ### Webhook delivery strategies
+ 
+ Fabro receives GitHub webhooks on `POST /api/v1/webhooks/github` whenever `GITHUB_APP_WEBHOOK_SECRET` is configured. The webhook `strategy` controls how that route becomes reachable from GitHub:
+@@ -164,10 +172,16 @@ This walks through just the GitHub setup steps — choosing a strategy, register
+ Choose **GitHub CLI** in `fabro install` to use the default local-user flow. The installer:
+ 
+ 1. Runs `gh auth token`
+-2. Stores the token as `GITHUB_TOKEN`
++2. Stores the token as vault secret `GITHUB_TOKEN`
+ 3. Writes `strategy = "token"` under `[server.integrations.github]`
+ 
+-After install, Fabro reads `GITHUB_TOKEN` from the vault or environment (with `GH_TOKEN` as a fallback). Token updates after install are the user's responsibility. Short-lived GitHub installation tokens (`ghs_*`) are rejected as static tokens; use a PAT for `token` mode, or use GitHub App mode so Fabro can refresh installation tokens for you.
++After install, Fabro reads `GITHUB_TOKEN` from the server vault only. To update it after install, run:
++
++```bash
++fabro secret set GITHUB_TOKEN <token>
++```
++
++Short-lived GitHub installation tokens (`ghs_*`) are rejected as static tokens; use a PAT for `token` mode, or use GitHub App mode so Fabro can refresh installation tokens for you.
+ 
+ In this mode, Fabro disables the embedded web UI and browser auth routes. Machine API routes and `/health` continue to work.
+ 
+@@ -268,7 +282,7 @@ The app is installed but doesn't have access to this specific repository. Update
+ 
+ ### "GitHub App authentication failed"
+ 
+-The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run `fabro install` on the server host or verify the values match your GitHub App.
++The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` vault secret is incorrect. Re-run `fabro install` on the server host or verify the values match your GitHub App.
+ 
+ ### Clone fails for private repositories
+ 
+diff --git a/docs/public/integrations/litellm.mdx b/docs/public/integrations/litellm.mdx
+index 7e9102dde..7f1891f8d 100644
+--- a/docs/public/integrations/litellm.mdx
++++ b/docs/public/integrations/litellm.mdx
+@@ -45,7 +45,7 @@ reasoning = false
+ 
+ ## Configure credentials
+ 
+-The LiteLLM provider checks `LITELLM_API_KEY` from the Fabro process environment first, then the `vault:LITELLM_API_KEY` server secret.
++For server-backed runs, store `LITELLM_API_KEY` in the Fabro server vault.
+ 
+ For a server-owned secret:
+ 
+@@ -53,7 +53,7 @@ For a server-owned secret:
+ fabro secret set LITELLM_API_KEY sk-proxy-key
+ ```
+ 
+-For a process environment variable:
++Standalone local SDK/CLI runs can still use an env-backed credential source explicitly:
+ 
+ ```bash
+ export LITELLM_API_KEY=sk-proxy-key
+@@ -115,7 +115,7 @@ Only one model for a provider should set `default = true`. You may also mark one
+ 
+ ## Troubleshooting
+ 
+-**"No API key configured"** — Set `vault:LITELLM_API_KEY` with `fabro secret set LITELLM_API_KEY ...` or export `LITELLM_API_KEY` in the Fabro process environment.
++**"No API key configured"** — For server-backed runs, set `vault:LITELLM_API_KEY` with `fabro secret set LITELLM_API_KEY ...`. For standalone local usage, export `LITELLM_API_KEY` in the invoking shell and use an env-backed credential source.
+ 
+ **Connection refused** — Confirm the LiteLLM proxy is running and that `base_url` is reachable from the Fabro process. For Docker deployments, `localhost` means the Fabro container unless you point it at a host or service name.
+ 
+diff --git a/docs/public/integrations/slack.mdx b/docs/public/integrations/slack.mdx
+index bbeb0a719..3b17f6135 100644
+--- a/docs/public/integrations/slack.mdx
++++ b/docs/public/integrations/slack.mdx
+@@ -98,24 +98,16 @@ If you add scopes or event subscriptions after installing the app, reinstall it
+ 
+ ### 7. Configure Fabro
+ 
+-Add both tokens where the Fabro server process can read server runtime secrets. Fabro resolves Slack credentials in this order:
+-
+-1. Process environment
+-2. `<data_dir>/server.env`
+-
+-Fabro does not auto-load `.env` files for local server processes. For a default local server, put the tokens in `~/.fabro/storage/server.env`:
++Add both tokens to the Fabro server vault:
+ 
+ ```bash
+-mkdir -p ~/.fabro/storage
+-cat >> ~/.fabro/storage/server.env <<'EOF'
+-FABRO_SLACK_BOT_TOKEN=xoxb-your-bot-token
+-FABRO_SLACK_APP_TOKEN=xapp-your-app-token
+-EOF
++fabro secret set FABRO_SLACK_BOT_TOKEN xoxb-your-bot-token
++fabro secret set FABRO_SLACK_APP_TOKEN xapp-your-app-token
+ ```
+ 
+-For Docker Compose, `.env` works because Compose loads it into the container process environment. For systemd, Railway, ECS, Kubernetes, or another process manager, configure the same variables as process environment variables.
++The server runtime does not read Slack tokens from process env or `server.env`. `server.env` is reserved for bootstrap secrets such as `SESSION_SECRET`, `FABRO_DEV_TOKEN`, and object-store credentials.
+ 
+-Restart the server after changing either `server.env` or the process environment.
++Restart the server after changing Slack credentials so the Socket Mode connection is recreated with the new tokens.
+ 
+ Optionally, set a default interview channel in your [server configuration](/administration/server-configuration):
+ 
+diff --git a/docs/public/reference/server-operations.mdx b/docs/public/reference/server-operations.mdx
+index 00c4c6efb..5f956c0e4 100644
+--- a/docs/public/reference/server-operations.mdx
++++ b/docs/public/reference/server-operations.mdx
+@@ -21,7 +21,7 @@ This starts the server on a Unix socket at `~/.fabro/fabro.sock` by default. Use
+ 
+ If `~/.fabro/settings.toml` does not yet exist, `fabro server start` enters **install mode**: it prints an install URL and a one-time install token, attempts to open the URL in your default browser, and serves a web wizard that walks you through configuring your server URL, shared object store, LLM provider, and GitHub integration.
+ 
+-The LLM step can be completed with one or more provider keys, or explicitly skipped so you can finish server setup first and add model credentials later. A skipped LLM step writes no LLM vault credentials; LLM-dependent workflows keep failing with provider-not-configured errors until credentials are added.
++The LLM step can be completed with one or more provider keys, or explicitly skipped so you can finish server setup first and add model credentials later. A skipped LLM step writes no LLM vault credentials; LLM-dependent workflows keep failing with provider-not-configured errors until credentials are added. Optional integration secrets collected by install mode, including LLM keys and GitHub App secrets, are written to the server vault rather than `server.env`.
+ 
+ When Fabro can construct a direct install URL, the token is embedded in the URL and also printed on its own line for copying. If you open the server root through a reverse proxy or another machine, paste the printed install token when prompted.
+ 
+diff --git a/lib/crates/fabro-agent/src/cli.rs b/lib/crates/fabro-agent/src/cli.rs
+index e3e874803..fcbc6016d 100644
+--- a/lib/crates/fabro-agent/src/cli.rs
++++ b/lib/crates/fabro-agent/src/cli.rs
+@@ -21,13 +21,14 @@ use fabro_mcp::config::McpServerSettings;
+ #[cfg(test)]
+ use fabro_model::catalog::LlmCatalogSettings;
+ use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
++use fabro_static::EnvVars;
+ use fabro_util::terminal::Styles;
+ use fabro_vault::Vault;
+ use tokio::io::{AsyncWriteExt, stdout};
+ use tokio::signal;
+ use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
+ 
+-use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
++use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback, ToolSecrets};
+ use crate::error::InterruptReason;
+ use crate::subagent::{SessionFactory, SubAgentManager};
+ use crate::tool_permissions::{is_auto_approved, tool_category};
+@@ -37,6 +38,16 @@ use crate::{
+     OpenAiProfile, Sandbox, Session, SessionOptions,
+ };
+ 
++#[expect(
++    clippy::disallowed_methods,
++    reason = "Standalone agent CLI explicitly passes the Brave Search process-env credential into tool configuration."
++)]
++fn cli_tool_secrets() -> ToolSecrets {
++    ToolSecrets {
++        brave_search_api_key: std::env::var(EnvVars::BRAVE_SEARCH_API_KEY).ok(),
++    }
++}
++
+ /// Public arguments for the agent command, usable from an external CLI.
+ #[derive(Args)]
+ pub struct AgentArgs {
+@@ -579,6 +590,7 @@ pub async fn run_with_args_and_client_and_catalog(
+         permission_level: Some(permissions),
+         skill_dirs: args.skills_dir.map(|d| vec![d]),
+         mcp_servers,
++        tool_secrets: cli_tool_secrets(),
+         ..SessionOptions::default()
+     };
+ 
+@@ -595,6 +607,7 @@ pub async fn run_with_args_and_client_and_catalog(
+     let factory_env = Arc::clone(&env);
+     let factory_hooks = config.tool_hooks.clone();
+     let factory_permission_level = config.permission_level;
++    let factory_tool_secrets = config.tool_secrets.clone();
+     let factory: SessionFactory = Arc::new(move || {
+         let child_summarizer = Some(build_summarizer(
+             &factory_provider_id,
+@@ -616,6 +629,7 @@ pub async fn run_with_args_and_client_and_catalog(
+             SessionOptions {
+                 tool_hooks: factory_hooks.clone(),
+                 permission_level: factory_permission_level,
++                tool_secrets: factory_tool_secrets.clone(),
+                 ..SessionOptions::default()
+             },
+             None,
+diff --git a/lib/crates/fabro-agent/src/config.rs b/lib/crates/fabro-agent/src/config.rs
+index fb6bb52ab..c54d49f01 100644
+--- a/lib/crates/fabro-agent/src/config.rs
++++ b/lib/crates/fabro-agent/src/config.rs
+@@ -99,6 +99,11 @@ impl ToolHookCallback for ToolApprovalAdapter {
+     async fn post_tool_use_failure(&self, _tool_name: &str, _tool_call_id: &str, _error: &str) {}
+ }
+ 
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub struct ToolSecrets {
++    pub brave_search_api_key: Option<String>,
++}
++
+ #[derive(Clone)]
+ pub struct SessionOptions {
+     pub max_turns: usize,
+@@ -134,6 +139,8 @@ pub struct SessionOptions {
+     pub skill_dirs: Option<Vec<String>>,
+     /// MCP server configurations to connect to on session startup.
+     pub mcp_servers: Vec<McpServerSettings>,
++    /// Secret values supplied by the runtime boundary for native tools.
++    pub tool_secrets: ToolSecrets,
+     /// Wall-clock timeout for the entire `process_input` call.
+     /// When set, the session's cancel token is triggered after this duration.
+     pub wall_clock_timeout: Option<Duration>,
+@@ -177,6 +184,10 @@ impl std::fmt::Debug for SessionOptions {
+             .field("compaction_preserve_turns", &self.compaction_preserve_turns)
+             .field("skill_dirs", &self.skill_dirs)
+             .field("mcp_servers", &self.mcp_servers.len())
++            .field(
++                "brave_search_configured",
++                &self.tool_secrets.brave_search_api_key.is_some(),
++            )
+             .field("wall_clock_timeout", &self.wall_clock_timeout)
+             .finish()
+     }
+@@ -208,6 +219,7 @@ impl Default for SessionOptions {
+             compaction_preserve_turns: 6,
+             skill_dirs: None,
+             mcp_servers: Vec::new(),
++            tool_secrets: ToolSecrets::default(),
+             wall_clock_timeout: None,
+         }
+     }
+@@ -286,9 +298,25 @@ mod tests {
+             ToolExposureMode::AutoApprovedOnly
+         );
+         assert!(config.mcp_servers.is_empty());
++        assert_eq!(config.tool_secrets, ToolSecrets::default());
+         assert!(config.wall_clock_timeout.is_none());
+     }
+ 
++    #[test]
++    fn session_options_debug_redacts_tool_secret_values() {
++        let config = SessionOptions {
++            tool_secrets: ToolSecrets {
++                brave_search_api_key: Some("brave-secret-value".to_string()),
++            },
++            ..SessionOptions::default()
++        };
++
++        let debug = format!("{config:?}");
++
++        assert!(debug.contains("brave_search_configured: true"));
++        assert!(!debug.contains("brave-secret-value"));
++    }
++
+     #[test]
+     fn default_config_has_compaction_enabled() {
+         let config = SessionOptions::default();
+diff --git a/lib/crates/fabro-agent/src/lib.rs b/lib/crates/fabro-agent/src/lib.rs
+index 4ebc19fe6..e91695865 100644
+--- a/lib/crates/fabro-agent/src/lib.rs
++++ b/lib/crates/fabro-agent/src/lib.rs
+@@ -35,7 +35,7 @@ pub mod types;
+ pub use agent_profile::AgentProfile;
+ pub use config::{
+     SessionOptions, ToolAccess, ToolAccessPolicy, ToolApprovalAdapter, ToolExposureMode,
+-    ToolHookCallback, ToolHookDecision,
++    ToolHookCallback, ToolHookDecision, ToolSecrets,
+ };
+ #[cfg(feature = "docker")]
+ pub use docker_sandbox::{DockerSandbox, DockerSandboxOptions};
+diff --git a/lib/crates/fabro-agent/src/tools.rs b/lib/crates/fabro-agent/src/tools.rs
+index 2f032a2b6..1df8089ec 100644
+--- a/lib/crates/fabro-agent/src/tools.rs
++++ b/lib/crates/fabro-agent/src/tools.rs
+@@ -61,7 +61,9 @@ pub fn register_core_tools(
+     registry.register(make_shell_tool_with_config(config));
+     registry.register(make_grep_tool());
+     registry.register(make_glob_tool());
+-    registry.register(make_web_search_tool());
++    registry.register(make_web_search_tool_with_api_key(
++        config.tool_secrets.brave_search_api_key.clone(),
++    ));
+     registry.register(make_web_fetch_tool(summarizer));
+ }
+ 
+@@ -514,15 +516,6 @@ fn format_brave_results(body: &serde_json::Value) -> String {
+     output
+ }
+ 
+-#[must_use]
+-#[expect(
+-    clippy::disallowed_methods,
+-    reason = "Web search tool setup reads the documented Brave API key override from process env."
+-)]
+-pub(crate) fn make_web_search_tool() -> RegisteredTool {
+-    make_web_search_tool_with_api_key(std::env::var(EnvVars::BRAVE_SEARCH_API_KEY).ok())
+-}
+-
+ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool {
+     use std::sync::OnceLock;
+     static CLIENT: OnceLock<fabro_http::HttpClient> = OnceLock::new();
+@@ -544,10 +537,7 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool
+             let api_key = api_key.clone();
+             Box::pin(async move {
+                 let api_key = api_key.ok_or_else(|| {
+-                    format!(
+-                        "{} environment variable is not set",
+-                        EnvVars::BRAVE_SEARCH_API_KEY
+-                    )
++                    format!("{} is not configured", EnvVars::BRAVE_SEARCH_API_KEY)
+                 })?;
+ 
+                 let query = required_str(&args, "query")?;
+@@ -702,6 +692,7 @@ mod tests {
+     use tokio_util::sync::CancellationToken;
+ 
+     use super::*;
++    use crate::config::ToolSecrets;
+     use crate::sandbox::*;
+     use crate::test_support::MockSandbox;
+     use crate::tool_registry::ToolContext;
+@@ -1355,10 +1346,7 @@ mod tests {
+         })
+         .await;
+         let err = result.unwrap_err();
+-        assert!(
+-            err.contains("BRAVE_SEARCH_API_KEY"),
+-            "error should mention BRAVE_SEARCH_API_KEY, got: {err}"
+-        );
++        assert_eq!(err, "BRAVE_SEARCH_API_KEY is not configured");
+     }
+ 
+     #[tokio::test]
+@@ -1382,6 +1370,40 @@ mod tests {
+         );
+     }
+ 
++    #[tokio::test]
++    async fn register_core_tools_passes_configured_brave_search_key() {
++        let mut registry = ToolRegistry::new();
++        let config = SessionOptions {
++            tool_secrets: ToolSecrets {
++                brave_search_api_key: Some("fake-key".to_string()),
++            },
++            ..SessionOptions::default()
++        };
++
++        register_core_tools(&mut registry, &config, None);
++
++        let tool = registry
++            .get("web_search")
++            .expect("web_search should be registered");
++        let env: Arc<dyn Sandbox> = Arc::new(MockSandbox::default());
++        let result = (tool.executor)(serde_json::json!({}), ToolContext {
++            env,
++            cancel: CancellationToken::new(),
++            tool_env_provider: None,
++            session_id: None,
++            root_session_id: None,
++            tool_call_id: None,
++            agent_event_emitter: None,
++        })
++        .await;
++
++        let err = result.unwrap_err();
++        assert!(
++            err.contains("query"),
++            "configured key should allow validation to reach query parsing, got: {err}"
++        );
++    }
++
+     #[test]
+     fn format_brave_results_formats_results() {
+         let body = serde_json::json!({
+diff --git a/lib/crates/fabro-auth/src/vault_source.rs b/lib/crates/fabro-auth/src/vault_source.rs
+index 26068b5ab..a78cf9428 100644
+--- a/lib/crates/fabro-auth/src/vault_source.rs
++++ b/lib/crates/fabro-auth/src/vault_source.rs
+@@ -30,6 +30,11 @@ impl VaultCredentialSource {
+         let resolver = CredentialResolver::with_env_lookup(Arc::clone(&vault), env_lookup);
+         Self { vault, resolver }
+     }
++
++    #[must_use]
++    pub fn vault_only(vault: Arc<AsyncRwLock<Vault>>) -> Self {
++        Self::with_env_lookup(vault, |_| None)
++    }
+ }
+ 
+ impl std::fmt::Debug for VaultCredentialSource {
+@@ -151,4 +156,32 @@ mod tests {
+             ProviderId::openai()
+         ]);
+     }
++
++    #[tokio::test]
++    async fn vault_only_ignores_env_lookup_values() {
++        let env_dir = tempfile::tempdir().unwrap();
++        let vault_only_dir = tempfile::tempdir().unwrap();
++        let catalog = default_catalog();
++        let env_backed = VaultCredentialSource::with_env_lookup(
++            Arc::new(AsyncRwLock::new(
++                Vault::load(env_dir.path().join("secrets.json")).unwrap(),
++            )),
++            |name| (name == "OPENAI_API_KEY").then(|| "env-openai-key".to_string()),
++        );
++        assert_eq!(env_backed.configured_providers(&catalog).await, vec![
++            ProviderId::openai()
++        ]);
++
++        let vault_only = VaultCredentialSource::vault_only(Arc::new(AsyncRwLock::new(
++            Vault::load(vault_only_dir.path().join("secrets.json")).unwrap(),
++        )));
++
++        assert!(
++            vault_only.configured_providers(&catalog).await.is_empty(),
++            "vault_only must not resolve env-backed provider keys"
++        );
++        let resolved = vault_only.resolve(&catalog).await.unwrap();
++        assert!(resolved.credentials.is_empty());
++        assert!(resolved.auth_issues.is_empty());
++    }
+ }
+diff --git a/lib/crates/fabro-cli/src/commands/install.rs b/lib/crates/fabro-cli/src/commands/install.rs
+index c3442f96f..6dcb670b0 100644
+--- a/lib/crates/fabro-cli/src/commands/install.rs
++++ b/lib/crates/fabro-cli/src/commands/install.rs
+@@ -1179,7 +1179,22 @@ async fn setup_github_app(
+ async fn persist_vault_secrets_via_server(
+     client: &server_client::Client,
+     secrets: &[CreateSecretRequest],
++    removals: &[&'static str],
+ ) -> Result<()> {
++    if !removals.is_empty() {
++        let existing = client
++            .list_secrets()
++            .await?
++            .into_iter()
++            .map(|secret| secret.name)
++            .collect::<Vec<_>>();
++        for name in removals {
++            if existing.iter().any(|existing_name| existing_name == name) {
++                client.delete_secret_by_name(name).await?;
++            }
++        }
++    }
++
+     for secret in secrets {
+         client
+             .create_secret(CreateSecretRequest {
+@@ -1197,11 +1212,12 @@ async fn persist_vault_secrets_via_server(
+ async fn persist_vault_secrets_with(
+     storage_dir: &Path,
+     secrets: &[CreateSecretRequest],
++    removals: &[&'static str],
+     server_was_running: bool,
+     connect_server: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<server_client::Client>>,
+     stop_server: impl for<'a> Fn(&'a Path, Duration) -> BoxFuture<'a, bool>,
+ ) -> Result<()> {
+-    if secrets.is_empty() {
++    if secrets.is_empty() && removals.is_empty() {
+         return Ok(());
+     }
+ 
+@@ -1214,7 +1230,7 @@ async fn persist_vault_secrets_with(
+             return Err(err);
+         }
+     };
+-    let result = persist_vault_secrets_via_server(&client, secrets).await;
++    let result = persist_vault_secrets_via_server(&client, secrets, removals).await;
+     if !server_was_running {
+         stop_server(storage_dir, Duration::from_secs(5)).await;
+     }
+@@ -1238,6 +1254,20 @@ fn credential_secret_request(result: &LoginResult) -> Result<CreateSecretRequest
+     }
+ }
+ 
++fn github_app_secret_request(key: String, value: String) -> CreateSecretRequest {
++    let type_ = if key == GITHUB_APP_PRIVATE_KEY_KEY {
++        ApiSecretType::File
++    } else {
++        ApiSecretType::Token
++    };
++    CreateSecretRequest {
++        name: key,
++        value,
++        type_,
++        description: None,
++    }
++}
++
+ fn server_env_updates(secrets: &[(String, String)]) -> Vec<envfile::EnvFileUpdate> {
+     secrets
+         .iter()
+@@ -1261,7 +1291,9 @@ fn server_env_removals(keys: &[&'static str]) -> Vec<envfile::EnvFileRemoval> {
+ async fn persist_install_outputs(
+     storage_dir: &Path,
+     server_env_secrets: &[(String, String)],
++    server_env_remove: &[&'static str],
+     vault_secrets: &[CreateSecretRequest],
++    vault_remove: &[&'static str],
+     settings_write: Option<PendingSettingsWrite<'_>>,
+     dev_token_write: Option<PendingDevTokenWrite>,
+     server_was_running: bool,
+@@ -1275,8 +1307,9 @@ async fn persist_install_outputs(
+     persist_cli_install_outputs_with(
+         storage_dir,
+         server_env_updates(server_env_secrets),
+-        Vec::new(),
++        server_env_removals(server_env_remove),
+         vault_secrets,
++        vault_remove,
+         settings_write,
+         dev_token_write,
+         server_was_running,
+@@ -1300,7 +1333,7 @@ struct PendingGitHubInstallWrite<'a> {
+     settings_write:    PendingSettingsWrite<'a>,
+     server_env_set:    Vec<(String, String)>,
+     server_env_remove: Vec<&'static str>,
+-    vault_set:         Vec<(String, String)>,
++    vault_set:         Vec<VaultSecretWrite>,
+     vault_remove:      Vec<&'static str>,
+ }
+ 
+@@ -1317,16 +1350,7 @@ fn persist_github_install_changes(
+         server_env_writes: server_env_updates(&writes.server_env_set),
+         server_env_removals: server_env_removals(&writes.server_env_remove),
+         dev_token_write: None,
+-        vault_writes: writes
+-            .vault_set
+-            .iter()
+-            .map(|(key, value)| VaultSecretWrite {
+-                name:        key.clone(),
+-                value:       value.clone(),
+-                secret_type: VaultSecretType::Token,
+-                description: None,
+-            })
+-            .collect(),
++        vault_writes: writes.vault_set.clone(),
+         vault_removals: writes
+             .vault_remove
+             .iter()
+@@ -1363,6 +1387,7 @@ async fn persist_cli_install_outputs_with(
+     server_env_writes: Vec<envfile::EnvFileUpdate>,
+     server_env_removals: Vec<envfile::EnvFileRemoval>,
+     vault_secrets: &[CreateSecretRequest],
++    vault_removals: &[&'static str],
+     settings_write: Option<PendingSettingsWrite<'_>>,
+     dev_token_write: Option<PendingDevTokenWrite>,
+     server_was_running: bool,
+@@ -1386,6 +1411,7 @@ async fn persist_cli_install_outputs_with(
+     let persist_result = persist_vault_secrets_with(
+         storage_dir,
+         vault_secrets,
++        vault_removals,
+         server_was_running,
+         connect_server,
+         stop_server,
+@@ -1578,7 +1604,7 @@ async fn run_install_github_inner(
+         .context("failed to parse existing settings.toml")?;
+ 
+     let selection = choose_install_github_selection(args, github_args, &s, printer).await?;
+-    let mut server_env_set = Vec::new();
++    let server_env_set = Vec::new();
+     let mut server_env_remove = Vec::new();
+     let mut vault_set = Vec::new();
+     let mut vault_remove = Vec::new();
+@@ -1586,8 +1612,19 @@ async fn run_install_github_inner(
+     match selection {
+         GitHubInstallSelection::Token { token } => {
+             write_token_settings(&mut doc)?;
+-            vault_set.push((GITHUB_TOKEN_SECRET_KEY.to_string(), token));
++            vault_set.push(VaultSecretWrite {
++                name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
++                value:       token,
++                secret_type: VaultSecretType::Token,
++                description: None,
++            });
+             server_env_remove.extend([
++                GITHUB_TOKEN_SECRET_KEY,
++                GITHUB_APP_PRIVATE_KEY_KEY,
++                GITHUB_APP_CLIENT_SECRET_KEY,
++                GITHUB_APP_WEBHOOK_SECRET_KEY,
++            ]);
++            vault_remove.extend([
+                 GITHUB_APP_PRIVATE_KEY_KEY,
+                 GITHUB_APP_CLIENT_SECRET_KEY,
+                 GITHUB_APP_WEBHOOK_SECRET_KEY,
+@@ -1598,6 +1635,7 @@ async fn run_install_github_inner(
+                 "GitHub App install requires an authenticated GitHub username; run `gh auth login` and rerun `fabro install github`",
+             )?;
+             server_env_remove.extend([
++                GITHUB_TOKEN_SECRET_KEY,
+                 GITHUB_APP_PRIVATE_KEY_KEY,
+                 GITHUB_APP_CLIENT_SECRET_KEY,
+                 GITHUB_APP_WEBHOOK_SECRET_KEY,
+@@ -1616,8 +1654,27 @@ async fn run_install_github_inner(
+                 printer,
+             )
+             .await?;
+-            server_env_set.extend(registration.env_pairs);
++            let webhook_configured = registration
++                .env_pairs
++                .iter()
++                .any(|(key, _)| key == GITHUB_APP_WEBHOOK_SECRET_KEY);
++            for (key, value) in registration.env_pairs {
++                let secret_type = if key == GITHUB_APP_PRIVATE_KEY_KEY {
++                    VaultSecretType::File
++                } else {
++                    VaultSecretType::Token
++                };
++                vault_set.push(VaultSecretWrite {
++                    name: key,
++                    value,
++                    secret_type,
++                    description: None,
++                });
++            }
+             vault_remove.push(GITHUB_TOKEN_SECRET_KEY);
++            if !webhook_configured {
++                vault_remove.push(GITHUB_APP_WEBHOOK_SECRET_KEY);
++            }
+             write_github_app_settings(
+                 &mut doc,
+                 &registration.app_id,
+@@ -1758,6 +1815,8 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
+ 
+     let mut vault_secrets: Vec<CreateSecretRequest> = Vec::new();
+     let mut server_env_pairs: Vec<(String, String)> = Vec::new();
++    let mut server_env_remove: Vec<&'static str> = Vec::new();
++    let mut vault_remove: Vec<&'static str> = Vec::new();
+     let llm_selection = input_source
+         .collect_llm_selection(&facts, &s, printer)
+         .await?;
+@@ -1779,11 +1838,22 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
+                 s.green.apply_to("✔")
+             );
+             vault_secrets.push(CreateSecretRequest {
+-                name:        "GITHUB_TOKEN".to_string(),
++                name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
+                 value:       token,
+                 type_:       ApiSecretType::Token,
+                 description: None,
+             });
++            server_env_remove.extend([
++                GITHUB_TOKEN_SECRET_KEY,
++                GITHUB_APP_PRIVATE_KEY_KEY,
++                GITHUB_APP_CLIENT_SECRET_KEY,
++                GITHUB_APP_WEBHOOK_SECRET_KEY,
++            ]);
++            vault_remove.extend([
++                GITHUB_APP_PRIVATE_KEY_KEY,
++                GITHUB_APP_CLIENT_SECRET_KEY,
++                GITHUB_APP_WEBHOOK_SECRET_KEY,
++            ]);
+             Some(PendingGitHubSettings::Token)
+         }
+         GitHubInstallSelection::App { owner, username } => {
+@@ -1810,7 +1880,26 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
+                 s.green.apply_to("✔"),
+                 registration.slug
+             );
+-            server_env_pairs.extend(registration.env_pairs.iter().cloned());
++            let webhook_configured = registration
++                .env_pairs
++                .iter()
++                .any(|(key, _)| key == GITHUB_APP_WEBHOOK_SECRET_KEY);
++            vault_secrets.extend(
++                registration
++                    .env_pairs
++                    .into_iter()
++                    .map(|(key, value)| github_app_secret_request(key, value)),
++            );
++            server_env_remove.extend([
++                GITHUB_TOKEN_SECRET_KEY,
++                GITHUB_APP_PRIVATE_KEY_KEY,
++                GITHUB_APP_CLIENT_SECRET_KEY,
++                GITHUB_APP_WEBHOOK_SECRET_KEY,
++            ]);
++            vault_remove.push(GITHUB_TOKEN_SECRET_KEY);
++            if !webhook_configured {
++                vault_remove.push(GITHUB_APP_WEBHOOK_SECRET_KEY);
++            }
+             Some(PendingGitHubSettings::App {
+                 app_id:            registration.app_id,
+                 slug:              registration.slug,
+@@ -1924,7 +2013,9 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
+     persist_install_outputs(
+         &storage_dir,
+         &server_env_pairs,
++        &server_env_remove,
+         &vault_secrets,
++        &vault_remove,
+         Some(PendingSettingsWrite {
+             path:              &config_path,
+             contents:          settings_toml.as_str(),
+@@ -2073,7 +2164,7 @@ mod tests {
+     use std::sync::atomic::{AtomicBool, Ordering};
+ 
+     use fabro_vault::Vault;
+-    use httpmock::Method::POST;
++    use httpmock::Method::{DELETE, GET, POST};
+     use httpmock::MockServer;
+ 
+     use super::*;
+@@ -2615,6 +2706,7 @@ client_id = "client-id"
+         persist_vault_secrets_with(
+             dir.path(),
+             &vault_secrets,
++            &[],
+             false,
+             |_| {
+                 let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
+@@ -2674,6 +2766,7 @@ client_id = "client-id"
+         persist_vault_secrets_with(
+             dir.path(),
+             &vault_secrets,
++            &[],
+             true,
+             |_| {
+                 let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
+@@ -2697,6 +2790,95 @@ client_id = "client-id"
+         assert!(!stop_called.load(Ordering::SeqCst));
+     }
+ 
++    #[tokio::test]
++    async fn persist_vault_secrets_with_removes_existing_stale_secrets() {
++        let dir = tempfile::tempdir().unwrap();
++        let vault_secrets = [CreateSecretRequest {
++            name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
++            value:       "gh-token".to_string(),
++            type_:       ApiSecretType::Token,
++            description: None,
++        }];
++        let server = MockServer::start_async().await;
++        let listed = server
++            .mock_async(|when, then| {
++                when.method(GET).path("/api/v1/secrets");
++                then.status(200)
++                    .header("content-type", "application/json")
++                    .body(
++                        serde_json::json!({
++                            "data": [
++                                {
++                                    "name": GITHUB_APP_PRIVATE_KEY_KEY,
++                                    "type": "file",
++                                    "created_at": "2026-01-01T00:00:00Z",
++                                    "updated_at": "2026-01-01T00:00:00Z"
++                                }
++                            ]
++                        })
++                        .to_string(),
++                    );
++            })
++            .await;
++        let deleted = server
++            .mock_async(|when, then| {
++                when.method(DELETE)
++                    .path("/api/v1/secrets")
++                    .body_includes(GITHUB_APP_PRIVATE_KEY_KEY);
++                then.status(204);
++            })
++            .await;
++        let created = server
++            .mock_async(|when, then| {
++                when.method(POST)
++                    .path("/api/v1/secrets")
++                    .body_includes(GITHUB_TOKEN_SECRET_KEY);
++                then.status(200)
++                    .header("content-type", "application/json")
++                    .body(
++                        serde_json::json!({
++                            "name": GITHUB_TOKEN_SECRET_KEY,
++                            "type": "token",
++                            "created_at": "2026-01-01T00:00:00Z",
++                            "updated_at": "2026-01-01T00:00:00Z"
++                        })
++                        .to_string(),
++                    );
++            })
++            .await;
++
++        persist_vault_secrets_with(
++            dir.path(),
++            &vault_secrets,
++            &[GITHUB_APP_PRIVATE_KEY_KEY, GITHUB_APP_CLIENT_SECRET_KEY],
++            true,
++            |_| {
++                let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
++                Box::pin(async move { Ok(client) })
++            },
++            |_, _| Box::pin(async move { true }),
++        )
++        .await
++        .unwrap();
++
++        listed.assert_async().await;
++        deleted.assert_async().await;
++        created.assert_async().await;
++    }
++
++    #[test]
++    fn github_app_secret_request_marks_private_key_as_file_secret() {
++        let private_key =
++            github_app_secret_request(GITHUB_APP_PRIVATE_KEY_KEY.to_string(), "pem".to_string());
++        let client_secret = github_app_secret_request(
++            GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
++            "client".to_string(),
++        );
++
++        assert_eq!(private_key.type_, ApiSecretType::File);
++        assert_eq!(client_secret.type_, ApiSecretType::Token);
++    }
++
+     #[tokio::test]
+     async fn restart_server_after_install_returns_started_bind_on_success() {
+         let dir = tempfile::tempdir().unwrap();
+@@ -2871,6 +3053,7 @@ client_id = "client-id"
+             server_env_updates(&server_env_pairs),
+             Vec::new(),
+             &vault_secrets,
++            &[],
+             Some(PendingSettingsWrite {
+                 path:              &settings_path,
+                 contents:          "_version = 1\n",
+@@ -2926,6 +3109,7 @@ client_id = "client-id"
+             server_env_updates(&server_env_pairs),
+             Vec::new(),
+             &vault_secrets,
++            &[],
+             Some(PendingSettingsWrite {
+                 path:              &settings_path,
+                 contents:          "_version = 1\n",
+@@ -2974,6 +3158,7 @@ client_id = "client-id"
+             server_env_updates(&server_env_pairs),
+             Vec::new(),
+             &vault_secrets,
++            &[],
+             Some(PendingSettingsWrite {
+                 path:              &settings_path,
+                 contents:          "_version = 1\n",
+@@ -3013,6 +3198,7 @@ client_id = "client-id"
+             server_env_updates(&server_env_pairs),
+             Vec::new(),
+             &vault_secrets,
++            &[],
+             Some(PendingSettingsWrite {
+                 path:              &settings_path,
+                 contents:          "_version = 1\n[server]\nfoo = \"bar\"\n",
+@@ -3072,7 +3258,12 @@ client_id = "client-id"
+                 GITHUB_APP_CLIENT_SECRET_KEY,
+                 GITHUB_APP_WEBHOOK_SECRET_KEY,
+             ],
+-            vault_set:         vec![(GITHUB_TOKEN_SECRET_KEY.to_string(), "token".to_string())],
++            vault_set:         vec![VaultSecretWrite {
++                name:        GITHUB_TOKEN_SECRET_KEY.to_string(),
++                value:       "token".to_string(),
++                secret_type: VaultSecretType::Token,
++                description: None,
++            }],
+             vault_remove:      Vec::new(),
+         })
+         .unwrap();
+@@ -3095,7 +3286,7 @@ client_id = "client-id"
+     }
+ 
+     #[test]
+-    fn persist_github_install_changes_replaces_token_secret_with_app_env_keys() {
++    fn persist_github_install_changes_replaces_token_secret_with_app_vault_keys() {
+         let dir = tempfile::tempdir().unwrap();
+         let storage = Storage::new(dir.path());
+         let server_env_path = storage.runtime_directory().env_path();
+@@ -3124,44 +3315,66 @@ client_id = "client-id"
+                 contents:          "after",
+                 previous_contents: Some("before"),
+             },
+-            server_env_set:    vec![
+-                (
+-                    GITHUB_APP_PRIVATE_KEY_KEY.to_string(),
+-                    "private".to_string(),
+-                ),
+-                (
+-                    GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
+-                    "client".to_string(),
+-                ),
+-            ],
++            server_env_set:    Vec::new(),
+             server_env_remove: vec![
++                GITHUB_TOKEN_SECRET_KEY,
+                 GITHUB_APP_PRIVATE_KEY_KEY,
+                 GITHUB_APP_CLIENT_SECRET_KEY,
+                 GITHUB_APP_WEBHOOK_SECRET_KEY,
+             ],
+-            vault_set:         Vec::new(),
++            vault_set:         vec![
++                VaultSecretWrite {
++                    name:        GITHUB_APP_PRIVATE_KEY_KEY.to_string(),
++                    value:       "private".to_string(),
++                    secret_type: VaultSecretType::File,
++                    description: None,
++                },
++                VaultSecretWrite {
++                    name:        GITHUB_APP_CLIENT_SECRET_KEY.to_string(),
++                    value:       "client".to_string(),
++                    secret_type: VaultSecretType::Token,
++                    description: None,
++                },
++                VaultSecretWrite {
++                    name:        GITHUB_APP_WEBHOOK_SECRET_KEY.to_string(),
++                    value:       "webhook".to_string(),
++                    secret_type: VaultSecretType::Token,
++                    description: None,
++                },
++            ],
+             vault_remove:      vec![GITHUB_TOKEN_SECRET_KEY],
+         })
+         .unwrap();
+ 
+         let server_env = envfile::read_env_file(&server_env_path).unwrap();
+         assert_eq!(server_env.get("KEEP_ME").map(String::as_str), Some("1"));
+-        assert_eq!(
+-            server_env
+-                .get(GITHUB_APP_PRIVATE_KEY_KEY)
+-                .map(String::as_str),
+-            Some("private")
+-        );
+-        assert_eq!(
+-            server_env
+-                .get(GITHUB_APP_CLIENT_SECRET_KEY)
+-                .map(String::as_str),
+-            Some("client")
+-        );
++        assert!(!server_env.contains_key(GITHUB_APP_PRIVATE_KEY_KEY));
++        assert!(!server_env.contains_key(GITHUB_APP_CLIENT_SECRET_KEY));
+         assert!(!server_env.contains_key(GITHUB_APP_WEBHOOK_SECRET_KEY));
+ 
+         let vault = Vault::load(storage.secrets_path()).unwrap();
+         assert_eq!(vault.get(GITHUB_TOKEN_SECRET_KEY), None);
++        assert_eq!(vault.get(GITHUB_APP_PRIVATE_KEY_KEY), Some("private"));
++        assert_eq!(vault.get(GITHUB_APP_CLIENT_SECRET_KEY), Some("client"));
++        assert_eq!(vault.get(GITHUB_APP_WEBHOOK_SECRET_KEY), Some("webhook"));
++        assert_eq!(
++            vault
++                .get_entry(GITHUB_APP_PRIVATE_KEY_KEY)
++                .map(|entry| entry.secret_type),
++            Some(VaultSecretType::File)
++        );
++        assert_eq!(
++            vault
++                .get_entry(GITHUB_APP_CLIENT_SECRET_KEY)
++                .map(|entry| entry.secret_type),
++            Some(VaultSecretType::Token)
++        );
++        assert_eq!(
++            vault
++                .get_entry(GITHUB_APP_WEBHOOK_SECRET_KEY)
++                .map(|entry| entry.secret_type),
++            Some(VaultSecretType::Token)
++        );
+         assert_eq!(std::fs::read_to_string(&settings_path).unwrap(), "after");
+     }
+ 
+@@ -3197,7 +3410,12 @@ client_id = "client-id"
+             },
+             server_env_set:    Vec::new(),
+             server_env_remove: vec![GITHUB_APP_PRIVATE_KEY_KEY, GITHUB_APP_CLIENT_SECRET_KEY],
+-            vault_set:         vec![("bad-secret-name".to_string(), "token".to_string())],
++            vault_set:         vec![VaultSecretWrite {
++                name:        "bad-secret-name".to_string(),
++                value:       "token".to_string(),
++                secret_type: VaultSecretType::Token,
++                description: None,
++            }],
+             vault_remove:      Vec::new(),
+         });
+ 
+diff --git a/lib/crates/fabro-cli/src/commands/server/start.rs b/lib/crates/fabro-cli/src/commands/server/start.rs
+index d2e6a9c83..43382f0c1 100644
+--- a/lib/crates/fabro-cli/src/commands/server/start.rs
++++ b/lib/crates/fabro-cli/src/commands/server/start.rs
+@@ -13,7 +13,7 @@ use fabro_config::daemon::ServerDaemon;
+ use fabro_config::user::default_settings_path;
+ use fabro_server::jwt_auth::auth_method_name;
+ use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs, resolve_runtime_server_settings_for_start};
+-use fabro_server::{process_env_snapshot, validate_startup};
++use fabro_server::{load_startup_vault, process_env_snapshot, validate_startup};
+ use fabro_static::EnvVars;
+ use fabro_types::settings::{LogDestination, ServerAuthMethod};
+ use fabro_util::printer::Printer;
+@@ -286,10 +286,12 @@ async fn execute_daemon(
+             "[server.logging].destination = \"stdout\" is incompatible with daemon mode; use `fabro server start --foreground`"
+         );
+     }
++    let startup_vault = load_startup_vault(fabro_config::Storage::new(storage_dir).secrets_path())?;
+     validate_startup(
+         runtime_directory.env_path().as_path(),
+         process_env_snapshot(),
+         &resolved_settings,
++        &startup_vault,
+     )?;
+ 
+     let log_path = runtime_directory.log_path();
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/install.rs b/lib/crates/fabro-cli/tests/it/cmd/install.rs
+index 3d8ec88c1..61e869c33 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/install.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/install.rs
+@@ -661,6 +661,26 @@ mode = "keep-me"
+         ]),
+     )
+     .unwrap();
++    let mut stale_vault = Vault::load(Storage::new(&storage_dir).secrets_path()).unwrap();
++    stale_vault
++        .set("GITHUB_APP_PRIVATE_KEY", "private", SecretType::File, None)
++        .unwrap();
++    stale_vault
++        .set(
++            "GITHUB_APP_CLIENT_SECRET",
++            "client-secret",
++            SecretType::Token,
++            None,
++        )
++        .unwrap();
++    stale_vault
++        .set(
++            "GITHUB_APP_WEBHOOK_SECRET",
++            "webhook-secret",
++            SecretType::Token,
++            None,
++        )
++        .unwrap();
+ 
+     let path = fake_gh_path(&context, "token-from-gh");
+     let output = context
+@@ -740,6 +760,9 @@ mode = "keep-me"
+ 
+     let vault = Vault::load(Storage::new(&storage_dir).secrets_path()).unwrap();
+     assert_eq!(vault.get("GITHUB_TOKEN"), Some("token-from-gh"));
++    assert_eq!(vault.get("GITHUB_APP_PRIVATE_KEY"), None);
++    assert_eq!(vault.get("GITHUB_APP_CLIENT_SECRET"), None);
++    assert_eq!(vault.get("GITHUB_APP_WEBHOOK_SECRET"), None);
+     assert_eq!(
+         vault
+             .get_entry("GITHUB_TOKEN")
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/server_start.rs b/lib/crates/fabro-cli/tests/it/cmd/server_start.rs
+index 11ef4e073..899405856 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/server_start.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/server_start.rs
+@@ -290,7 +290,7 @@ methods = []
+             name:           "missing-github-client-secret",
+             settings:       GITHUB_SETTINGS,
+             server_env:     &[("SESSION_SECRET", TEST_SESSION_SECRET)],
+-            expected_error: "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not set.",
++            expected_error: "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not configured in the vault.",
+         },
+         StartupFailureCase {
+             name:           "empty-auth-methods",
+diff --git a/lib/crates/fabro-server/src/diagnostics.rs b/lib/crates/fabro-server/src/diagnostics.rs
+index 8fd258ef4..887f8b08a 100644
+--- a/lib/crates/fabro-server/src/diagnostics.rs
++++ b/lib/crates/fabro-server/src/diagnostics.rs
+@@ -261,7 +261,8 @@ async fn check_github_app(state: &AppState) -> CheckResult {
+                             summary:     "token expired".to_string(),
+                             details:     vec![CheckDetail::new(err.to_string())],
+                             remediation: Some(
+-                                "Run fabro install or update GITHUB_TOKEN".to_string(),
++                                "Run fabro install or run `fabro secret set GITHUB_TOKEN`"
++                                    .to_string(),
+                             ),
+                         };
+                     }
+@@ -274,7 +275,9 @@ async fn check_github_app(state: &AppState) -> CheckResult {
+                     status:      CheckStatus::Warning,
+                     summary:     "not configured".to_string(),
+                     details:     Vec::new(),
+-                    remediation: Some("Run fabro install or set GITHUB_TOKEN".to_string()),
++                    remediation: Some(
++                        "Run fabro install or run `fabro secret set GITHUB_TOKEN`".to_string(),
++                    ),
+                 };
+             }
+             Err(err) => {
+@@ -319,7 +322,9 @@ async fn check_github_app(state: &AppState) -> CheckResult {
+                         "GitHub returned {}",
+                         response.status()
+                     ))],
+-                    remediation: Some("Run fabro install or update GITHUB_TOKEN".to_string()),
++                    remediation: Some(
++                        "Run fabro install or run `fabro secret set GITHUB_TOKEN`".to_string(),
++                    ),
+                 }
+             }
+             Ok(Ok(response)) => CheckResult {
+@@ -330,21 +335,27 @@ async fn check_github_app(state: &AppState) -> CheckResult {
+                     "GitHub returned {}",
+                     response.status()
+                 ))],
+-                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
++                remediation: Some(
++                    "Check GitHub connectivity and the vault GITHUB_TOKEN".to_string(),
++                ),
+             },
+             Ok(Err(err)) => CheckResult {
+                 name:        "GitHub Token".to_string(),
+                 status:      CheckStatus::Error,
+                 summary:     "connectivity error".to_string(),
+                 details:     vec![CheckDetail::new(err.to_string())],
+-                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
++                remediation: Some(
++                    "Check GitHub connectivity and the vault GITHUB_TOKEN".to_string(),
++                ),
+             },
+             Err(_) => CheckResult {
+                 name:        "GitHub Token".to_string(),
+                 status:      CheckStatus::Error,
+                 summary:     "timeout".to_string(),
+                 details:     vec![CheckDetail::new("GitHub probe timed out".to_string())],
+-                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
++                remediation: Some(
++                    "Check GitHub connectivity and the vault GITHUB_TOKEN".to_string(),
++                ),
+             },
+         };
+     }
+@@ -363,13 +374,13 @@ async fn check_github_app(state: &AppState) -> CheckResult {
+         .slug
+         .as_ref()
+         .map(InterpString::as_source);
+-    let private_key_raw = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
++    let private_key_raw = state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
+     let client_id = settings.server.integrations.github.client_id.is_some();
+     let client_secret = state
+-        .server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
++        .vault_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
+         .is_some();
+     let webhook_secret = state
+-        .server_secret(EnvVars::GITHUB_APP_WEBHOOK_SECRET)
++        .vault_secret(EnvVars::GITHUB_APP_WEBHOOK_SECRET)
+         .is_some();
+ 
+     if app_id.is_none()
+@@ -404,7 +415,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
+             status:      CheckStatus::Error,
+             summary:     "missing private key".to_string(),
+             details:     Vec::new(),
+-            remediation: Some("Set GITHUB_APP_PRIVATE_KEY".to_string()),
++            remediation: Some("Run `fabro secret set GITHUB_APP_PRIVATE_KEY`".to_string()),
+         };
+     };
+ 
+@@ -469,7 +480,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
+ }
+ 
+ async fn check_sandbox(state: &AppState) -> CheckResult {
+-    let Some(api_key) = state.vault_or_env(EnvVars::DAYTONA_API_KEY) else {
++    let Some(api_key) = state.vault_secret(EnvVars::DAYTONA_API_KEY) else {
+         return CheckResult {
+             name:        "Sandbox".to_string(),
+             status:      CheckStatus::Warning,
+@@ -554,7 +565,7 @@ fn check_storage_dir_path(path: &std::path::Path) -> CheckResult {
+ }
+ 
+ async fn check_brave_search(state: &AppState) -> CheckResult {
+-    let Some(api_key) = state.vault_or_env(EnvVars::BRAVE_SEARCH_API_KEY) else {
++    let Some(api_key) = state.vault_secret(EnvVars::BRAVE_SEARCH_API_KEY) else {
+         return CheckResult {
+             name:        "Web Search (Brave)".to_string(),
+             status:      CheckStatus::Warning,
+@@ -650,10 +661,10 @@ fn check_crypto(state: &AppState) -> CheckResult {
+             errors.push("server.integrations.github.client_id is not configured".to_string());
+         }
+         if state
+-            .server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
++            .vault_secret(EnvVars::GITHUB_APP_CLIENT_SECRET)
+             .is_none()
+         {
+-            errors.push("GITHUB_APP_CLIENT_SECRET not set".to_string());
++            errors.push("GITHUB_APP_CLIENT_SECRET not configured in vault".to_string());
+         }
+     }
+ 
+@@ -681,6 +692,8 @@ fn check_crypto(state: &AppState) -> CheckResult {
+ 
+ #[cfg(test)]
+ mod tests {
++    use std::collections::HashMap;
++
+     use fabro_config::RunLayer;
+     use fabro_vault::SecretType;
+     use httpmock::Method::POST;
+@@ -766,6 +779,77 @@ mod tests {
+         );
+     }
+ 
++    #[tokio::test]
++    async fn check_sandbox_ignores_env_backed_daytona_api_key() {
++        let state = TestAppStateBuilder::new()
++            .env_lookup(|name| {
++                (name == EnvVars::DAYTONA_API_KEY).then(|| "dtn_from_env".to_string())
++            })
++            .build();
++
++        let result = check_sandbox(&state).await;
++
++        assert_eq!(result.status, CheckStatus::Warning);
++        assert_eq!(result.summary, "recommended, not configured");
++        assert_eq!(
++            result.remediation.as_deref(),
++            Some("Run `fabro secret set DAYTONA_API_KEY` to enable cloud sandbox execution")
++        );
++    }
++
++    #[tokio::test]
++    async fn check_brave_search_ignores_env_backed_api_key() {
++        let state = TestAppStateBuilder::new()
++            .env_lookup(|name| {
++                (name == EnvVars::BRAVE_SEARCH_API_KEY).then(|| "brave-from-env".to_string())
++            })
++            .build();
++
++        let result = check_brave_search(&state).await;
++
++        assert_eq!(result.status, CheckStatus::Warning);
++        assert_eq!(result.summary, "optional, not configured");
++        assert_eq!(
++            result.remediation.as_deref(),
++            Some("Run `fabro secret set BRAVE_SEARCH_API_KEY` to enable web search")
++        );
++    }
++
++    #[test]
++    fn check_crypto_requires_github_client_secret_from_vault() {
++        let settings = fabro_config::ServerSettingsBuilder::from_toml(
++            r#"
++_version = 1
++
++[server.auth]
++methods = ["github"]
++
++[server.auth.github]
++allowed_usernames = ["octocat"]
++
++[server.integrations.github]
++client_id = "Iv1.test"
++"#,
++        )
++        .expect("github settings should parse");
++        let state = TestAppStateBuilder::new()
++            .runtime_settings(settings, RunLayer::default())
++            .server_secret_env(HashMap::from([(
++                EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
++                "server-env-client-secret".to_string(),
++            )]))
++            .build();
++
++        let result = check_crypto(&state);
++
++        assert_eq!(result.status, CheckStatus::Error);
++        assert!(result.details.iter().any(|detail| {
++            detail
++                .text
++                .contains("GITHUB_APP_CLIENT_SECRET not configured in vault")
++        }));
++    }
++
+     #[test]
+     fn check_storage_dir_path_passes_for_readable_writable_directory() {
+         let dir = tempfile::tempdir().unwrap();
+diff --git a/lib/crates/fabro-server/src/install.rs b/lib/crates/fabro-server/src/install.rs
+index 3dd61b937..ed26a8823 100644
+--- a/lib/crates/fabro-server/src/install.rs
++++ b/lib/crates/fabro-server/src/install.rs
+@@ -15,7 +15,7 @@ use base64::Engine as _;
+ use base64::engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD};
+ use fabro_config::Storage;
+ use fabro_config::bind::{Bind, BindRequest};
+-use fabro_config::envfile::EnvFileUpdate;
++use fabro_config::envfile::{EnvFileRemoval, EnvFileUpdate};
+ use fabro_install::{
+     InstallListenConfig, InstallPersistencePlan, InstallSandboxSelection,
+     OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV, PendingSettingsWrite,
+@@ -1560,8 +1560,13 @@ async fn post_install_finish(
+         value,
+         comment: None,
+     };
++    let make_env_removal = |key: &str| EnvFileRemoval {
++        key:     key.to_string(),
++        comment: None,
++    };
+     let mut server_env_writes = object_store_env_plan.writes;
+-    let server_env_removals = object_store_env_plan.removals;
++    let mut server_env_removals = object_store_env_plan.removals;
++    let mut vault_removals = Vec::new();
+     let mut dev_token: Option<String> = None;
+     let mut dev_token_write = None;
+     match github {
+@@ -1575,6 +1580,17 @@ async fn post_install_finish(
+                 secret_type: VaultSecretType::Token,
+                 description: None,
+             });
++            vault_removals.extend([
++                EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
++                EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
++                EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string(),
++            ]);
++            server_env_removals.extend([
++                make_env_removal(EnvVars::GITHUB_TOKEN),
++                make_env_removal(EnvVars::GITHUB_APP_PRIVATE_KEY),
++                make_env_removal(EnvVars::GITHUB_APP_CLIENT_SECRET),
++                make_env_removal(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
++            ]);
+             let dev_token_path = Storage::new(state.storage_dir.as_ref())
+                 .runtime_directory()
+                 .dev_token_path();
+@@ -1600,17 +1616,35 @@ async fn post_install_finish(
+             ) {
+                 return install_error_response(StatusCode::INTERNAL_SERVER_ERROR, err.to_string());
+             }
+-            server_env_writes.push(make_env_write(
+-                EnvVars::GITHUB_APP_PRIVATE_KEY,
+-                BASE64_STANDARD.encode(github.pem.as_bytes()),
+-            ));
+-            server_env_writes.push(make_env_write(
+-                EnvVars::GITHUB_APP_CLIENT_SECRET,
+-                github.client_secret,
+-            ));
++            vault_secrets.push(VaultSecretWrite {
++                name:        EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
++                value:       BASE64_STANDARD.encode(github.pem.as_bytes()),
++                secret_type: VaultSecretType::File,
++                description: None,
++            });
++            vault_secrets.push(VaultSecretWrite {
++                name:        EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
++                value:       github.client_secret,
++                secret_type: VaultSecretType::Token,
++                description: None,
++            });
+             if let Some(secret) = github.webhook_secret {
+-                server_env_writes.push(make_env_write(EnvVars::GITHUB_APP_WEBHOOK_SECRET, secret));
++                vault_secrets.push(VaultSecretWrite {
++                    name:        EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string(),
++                    value:       secret,
++                    secret_type: VaultSecretType::Token,
++                    description: None,
++                });
++            } else {
++                vault_removals.push(EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string());
+             }
++            vault_removals.push(EnvVars::GITHUB_TOKEN.to_string());
++            server_env_removals.extend([
++                make_env_removal(EnvVars::GITHUB_TOKEN),
++                make_env_removal(EnvVars::GITHUB_APP_PRIVATE_KEY),
++                make_env_removal(EnvVars::GITHUB_APP_CLIENT_SECRET),
++                make_env_removal(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
++            ]);
+         }
+     }
+ 
+@@ -1645,7 +1679,7 @@ async fn post_install_finish(
+         server_env_removals,
+         dev_token_write,
+         vault_writes: vault_secrets,
+-        vault_removals: Vec::new(),
++        vault_removals,
+     };
+     if let Err(err) = persistence_plan.persist_direct() {
+         error!(error = %err, "install persistence failed");
+@@ -2256,20 +2290,27 @@ mod tests {
+     use std::sync::atomic::AtomicBool;
+     use std::sync::{Arc, Mutex};
+ 
+-    use axum::http::HeaderMap;
++    use axum::extract::{Query, State};
++    use axum::http::{HeaderMap, StatusCode};
++    use base64::Engine as _;
++    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
++    use fabro_config::{Storage, envfile};
+     use fabro_install::{OBJECT_STORE_ACCESS_KEY_ID_ENV, OBJECT_STORE_SECRET_ACCESS_KEY_ENV};
+     use fabro_model::{Catalog, ProviderId};
+     use fabro_static::EnvVars;
++    use fabro_vault::SecretType as VaultSecretType;
+     use object_store::Error as ObjectStoreError;
+     use serde_json::json;
+ 
+     use super::{
+-        DEFAULT_INSTALL_GITHUB_API_BASE_URL, InstallAppState, InstallAwsCredentialPair,
+-        InstallFinishGuard, InstallObjectStoreCredentialMode, InstallObjectStoreInput,
+-        InstallObjectStoreProvider, InstallObjectStoreState, PendingInstall, ServerSecrets,
+-        classify_object_store_validation_error, detect_canonical_url, install_object_store_lookup,
+-        lock_unpoisoned, provider_base_url_override, resolve_install_object_store_state,
+-        token_is_valid, write_artifact_store_metadata,
++        DEFAULT_INSTALL_GITHUB_API_BASE_URL, GitHubAppOwner, GithubAppInstall, GithubInstallState,
++        InstallAppState, InstallAwsCredentialPair, InstallFinishGuard,
++        InstallObjectStoreCredentialMode, InstallObjectStoreInput, InstallObjectStoreProvider,
++        InstallObjectStoreState, InstallSandboxState, InstallTokenQuery, LlmProvidersInput,
++        PendingInstall, ServerConfigInput, ServerSecrets, classify_object_store_validation_error,
++        detect_canonical_url, install_object_store_lookup, lock_unpoisoned, post_install_finish,
++        provider_base_url_override, resolve_install_object_store_state, token_is_valid,
++        write_artifact_store_metadata,
+     };
+ 
+     #[test]
+@@ -2334,6 +2375,106 @@ mod tests {
+         assert!(InstallFinishGuard::try_acquire(flag).is_some());
+     }
+ 
++    #[tokio::test]
++    async fn finish_with_github_app_writes_runtime_secrets_to_vault_not_server_env() {
++        let dir = tempfile::tempdir().unwrap();
++        let storage = Storage::new(dir.path());
++        let config_path = dir.path().join("settings.toml");
++        let server_env_path = storage.runtime_directory().env_path();
++        envfile::write_env_file(
++            &server_env_path,
++            &HashMap::from([
++                (
++                    EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
++                    "stale-private".to_string(),
++                ),
++                (
++                    EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
++                    "stale-client".to_string(),
++                ),
++                (
++                    EnvVars::GITHUB_APP_WEBHOOK_SECRET.to_string(),
++                    "stale-webhook".to_string(),
++                ),
++            ]),
++        )
++        .unwrap();
++
++        let mut stale_vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
++        stale_vault
++            .set(
++                EnvVars::GITHUB_TOKEN,
++                "stale-token",
++                VaultSecretType::Token,
++                None,
++            )
++            .unwrap();
++
++        let state = InstallAppState::for_test_with_paths("install-token", dir.path(), &config_path);
++        {
++            let mut pending = lock_unpoisoned(&state.pending_install, "install session");
++            pending.server = Some(ServerConfigInput {
++                canonical_url: "https://fabro.example".to_string(),
++            });
++            pending.object_store = Some(InstallObjectStoreState::Local {
++                root: dir.path().join("runs").display().to_string(),
++            });
++            pending.sandbox = Some(InstallSandboxState::Docker);
++            pending.llm = Some(LlmProvidersInput {
++                providers: Vec::new(),
++            });
++            pending.github = Some(GithubInstallState::App(GithubAppInstall {
++                owner:            GitHubAppOwner::Personal,
++                app_name:         "Fabro Test".to_string(),
++                allowed_username: "octocat".to_string(),
++                app_id:           "12345".to_string(),
++                slug:             "fabro-test".to_string(),
++                client_id:        "Iv1.test".to_string(),
++                client_secret:    "vault-client-secret".to_string(),
++                webhook_secret:   Some("vault-webhook-secret".to_string()),
++                pem:              "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n"
++                    .to_string(),
++            }));
++        }
++
++        let response = post_install_finish(
++            State(state),
++            HeaderMap::new(),
++            Query(InstallTokenQuery {
++                token: Some("install-token".to_string()),
++            }),
++        )
++        .await;
++
++        assert_eq!(response.status(), StatusCode::ACCEPTED);
++        let server_env = envfile::read_env_file(&server_env_path).unwrap();
++        assert!(server_env.contains_key(EnvVars::SESSION_SECRET));
++        assert!(!server_env.contains_key(EnvVars::GITHUB_APP_PRIVATE_KEY));
++        assert!(!server_env.contains_key(EnvVars::GITHUB_APP_CLIENT_SECRET));
++        assert!(!server_env.contains_key(EnvVars::GITHUB_APP_WEBHOOK_SECRET));
++
++        let vault = fabro_vault::Vault::load(storage.secrets_path()).unwrap();
++        assert_eq!(vault.get(EnvVars::GITHUB_TOKEN), None);
++        assert_eq!(
++            vault.get(EnvVars::GITHUB_APP_CLIENT_SECRET),
++            Some("vault-client-secret")
++        );
++        assert_eq!(
++            vault.get(EnvVars::GITHUB_APP_WEBHOOK_SECRET),
++            Some("vault-webhook-secret")
++        );
++        let private_key_entry = vault
++            .get_entry(EnvVars::GITHUB_APP_PRIVATE_KEY)
++            .expect("private key should be stored in vault");
++        assert_eq!(private_key_entry.secret_type, VaultSecretType::File);
++        assert_eq!(
++            private_key_entry.value,
++            BASE64_STANDARD.encode(
++                "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n".as_bytes()
++            )
++        );
++    }
++
+     #[test]
+     fn install_github_requests_default_to_fixed_github_api_base_url() {
+         assert_eq!(
+diff --git a/lib/crates/fabro-server/src/jwt_auth.rs b/lib/crates/fabro-server/src/jwt_auth.rs
+index 056413553..93bcc9bf7 100644
+--- a/lib/crates/fabro-server/src/jwt_auth.rs
++++ b/lib/crates/fabro-server/src/jwt_auth.rs
+@@ -91,7 +91,7 @@ where
+     }
+     if github_enabled && lookup(EnvVars::GITHUB_APP_CLIENT_SECRET).is_none() {
+         return Err(anyhow!(
+-            "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not set."
++            "Fabro server refuses to start: github auth is enabled but GITHUB_APP_CLIENT_SECRET is not configured in the vault."
+         ));
+     }
+ 
+diff --git a/lib/crates/fabro-server/src/lib.rs b/lib/crates/fabro-server/src/lib.rs
+index 5bbad6ea5..64ee50423 100644
+--- a/lib/crates/fabro-server/src/lib.rs
++++ b/lib/crates/fabro-server/src/lib.rs
+@@ -49,4 +49,4 @@ mod worker_token;
+ pub use error::{ApiError, Error, Result};
+ pub use run_manifest::workflow_bundle_from_manifest;
+ pub use server_secrets::process_env_snapshot;
+-pub use startup::validate_startup;
++pub use startup::{load_startup_vault, validate_startup};
+diff --git a/lib/crates/fabro-server/src/run_files.rs b/lib/crates/fabro-server/src/run_files.rs
+index e8416bfc1..8ef410972 100644
+--- a/lib/crates/fabro-server/src/run_files.rs
++++ b/lib/crates/fabro-server/src/run_files.rs
+@@ -1203,7 +1203,7 @@ async fn reconnect_run_sandbox(
+         .sandbox
+         .clone()
+         .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "Run has no active sandbox."))?;
+-    let daytona_api_key = state.vault_or_env_pub(EnvVars::DAYTONA_API_KEY);
++    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
+     let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
+         .await
+         .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.to_string()))?;
+diff --git a/lib/crates/fabro-server/src/run_manifest.rs b/lib/crates/fabro-server/src/run_manifest.rs
+index 0aefe8f78..e59a79124 100644
+--- a/lib/crates/fabro-server/src/run_manifest.rs
++++ b/lib/crates/fabro-server/src/run_manifest.rs
+@@ -533,7 +533,7 @@ async fn build_preflight_report(
+         None
+     };
+ 
+-    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
++    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
+     let sandbox_ok = run_sandbox_check(
+         &mut checks,
+         sandbox_provider,
+diff --git a/lib/crates/fabro-server/src/serve.rs b/lib/crates/fabro-server/src/serve.rs
+index 1fc8bae42..89730ba1f 100644
+--- a/lib/crates/fabro-server/src/serve.rs
++++ b/lib/crates/fabro-server/src/serve.rs
+@@ -41,7 +41,7 @@ use crate::server::{
+     spawn_scheduler,
+ };
+ use crate::server_secrets::{ServerSecrets, process_env_snapshot};
+-use crate::startup::resolve_startup;
++use crate::startup::{load_startup_vault, resolve_startup};
+ use crate::static_files;
+ 
+ pub const DEFAULT_TCP_PORT: u16 = 32276;
+@@ -730,12 +730,14 @@ where
+         llm_catalog_settings:          runtime_settings.llm_catalog_settings,
+     };
+     let resolved_server_settings = resolved_app_settings.server_settings.server.clone();
++    let startup_vault = load_startup_vault(&vault_path)?;
+     let (auth_mode, server_secrets) = resolve_startup(
+         &server_env_path,
+         process_env_snapshot(),
+         &resolved_server_settings,
++        &startup_vault,
+     )?;
+-    let webhook_secret_present = server_secrets.get(WEBHOOK_SECRET_ENV).is_some();
++    let webhook_secret_present = startup_vault.get(WEBHOOK_SECRET_ENV).is_some();
+     let bind_request = resolve_bind_request_from_server_settings(
+         &resolved_app_settings.server_settings,
+         args.bind.as_deref(),
+@@ -800,6 +802,7 @@ where
+         store,
+         artifact_store,
+         vault_path,
++        preloaded_vault: Some(startup_vault),
+         server_secrets,
+         env_lookup,
+         github_api_base_url: None,
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index bd2638729..7ae486624 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -146,10 +146,10 @@ use crate::request_id::{self, RequestId};
+ use crate::run_files::{FilesInFlight, new_files_in_flight};
+ use crate::server_secrets::{LlmClientResult, ServerSecrets};
+ use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
++use crate::startup::load_startup_vault;
+ use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
+ use crate::{
+-    canonical_host, demo, diagnostics, run_manifest, security_headers, static_files,
+-    vault_legacy_migration, web_auth,
++    canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
+ };
+ 
+ mod handler;
+@@ -1054,6 +1054,7 @@ pub(crate) struct AppStateConfig {
+     pub(crate) store:                     Arc<Database>,
+     pub(crate) artifact_store:            ArtifactStore,
+     pub(crate) vault_path:                PathBuf,
++    pub(crate) preloaded_vault:           Option<Vault>,
+     pub(crate) server_secrets:            ServerSecrets,
+     pub(crate) env_lookup:                EnvLookup,
+     pub(crate) github_api_base_url:       Option<String>,
+@@ -1223,17 +1224,15 @@ impl AppState {
+         AskFabroReadiness { default_model }
+     }
+ 
+-    pub(crate) fn vault_or_env(&self, name: &str) -> Option<String> {
+-        process_env_var(name).or_else(|| {
+-            self.vault
+-                .try_read()
+-                .ok()
+-                .and_then(|vault| vault.get(name).map(str::to_string))
+-        })
++    pub(crate) fn vault_secret(&self, name: &str) -> Option<String> {
++        self.vault
++            .try_read()
++            .ok()
++            .and_then(|vault| vault.get(name).map(str::to_string))
+     }
+ 
+-    fn env_lookup_or_vault_or_env(&self, name: &str) -> Option<String> {
+-        (self.env_lookup)(name).or_else(|| self.vault_or_env(name))
++    pub(crate) fn config_env_lookup(&self, name: &str) -> Option<String> {
++        (self.env_lookup)(name)
+     }
+ 
+     pub(crate) async fn check_daytona_api_key(
+@@ -1241,22 +1240,16 @@ impl AppState {
+         api_key: String,
+     ) -> anyhow::Result<daytona::DaytonaKeyCheck> {
+         let base_url = self
+-            .env_lookup_or_vault_or_env(EnvVars::DAYTONA_API_URL)
+-            .or_else(|| self.env_lookup_or_vault_or_env(EnvVars::DAYTONA_SERVER_URL))
++            .config_env_lookup(EnvVars::DAYTONA_API_URL)
++            .or_else(|| self.config_env_lookup(EnvVars::DAYTONA_SERVER_URL))
+             .unwrap_or_else(|| daytona::DEFAULT_DAYTONA_API_URL.to_string());
+-        let org_id = self.env_lookup_or_vault_or_env(EnvVars::DAYTONA_ORGANIZATION_ID);
++        let org_id = self.config_env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
+ 
+         let http_client = fabro_http::http_client().context("failed to build HTTP client")?;
+         daytona::check_daytona_api_key_with(&base_url, org_id.as_deref(), api_key, http_client)
+             .await
+     }
+ 
+-    /// Public accessor used by `run_files` — mirrors `vault_or_env` without
+-    /// changing its visibility semantics.
+-    pub(crate) fn vault_or_env_pub(&self, name: &str) -> Option<String> {
+-        self.vault_or_env(name)
+-    }
+-
+     /// Borrow the persistent store so sibling modules can open run readers
+     /// without cross-module state coupling on the `AppState` field layout.
+     pub(crate) fn store_ref(&self) -> &Arc<Database> {
+@@ -1317,7 +1310,7 @@ impl AppState {
+                 let Some(app_id) = settings.app_id.as_ref().map(InterpString::as_source) else {
+                     return Ok(None);
+                 };
+-                let raw = self.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
++                let raw = self.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY);
+                 let Some(raw) = raw else {
+                     return Ok(None);
+                 };
+@@ -1332,8 +1325,7 @@ impl AppState {
+             }
+             GithubIntegrationStrategy::Token => {
+                 let token = self
+-                    .vault_or_env(EnvVars::GITHUB_TOKEN)
+-                    .or_else(|| self.vault_or_env(EnvVars::GH_TOKEN))
++                    .vault_secret(EnvVars::GITHUB_TOKEN)
+                     .as_deref()
+                     .map(str::trim)
+                     .filter(|token| !token.is_empty())
+@@ -1345,7 +1337,7 @@ impl AppState {
+                         Ok(Some(fabro_github::GitHubCredentials::Pat(token)))
+                     }
+                     None => Err(
+-                        "GITHUB_TOKEN not configured — run fabro install or set GITHUB_TOKEN"
++                        "GITHUB_TOKEN not configured -- run fabro install or run fabro secret set GITHUB_TOKEN"
+                             .to_string(),
+                     ),
+                 }
+@@ -1445,7 +1437,7 @@ fn resolve_interp_string(value: &InterpString) -> anyhow::Result<String> {
+ 
+ #[expect(
+     clippy::disallowed_methods,
+-    reason = "Server state owns process-env lookup facades for interpolation and vault fallbacks."
++    reason = "Server state owns process-env lookup facades for interpolation and non-secret configuration."
+ )]
+ pub(crate) fn process_env_var(name: &str) -> Option<String> {
+     std::env::var(name).ok()
+@@ -1563,7 +1555,7 @@ pub fn build_router_with_options(
+         .github_endpoints
+         .clone()
+         .unwrap_or_else(|| Arc::new(GithubEndpoints::production_defaults()));
+-    let webhook_secret = state.server_secret(WEBHOOK_SECRET_ENV);
++    let webhook_secret = state.vault_secret(WEBHOOK_SECRET_ENV);
+     let principal_layer = middleware::from_fn_with_state(Arc::clone(&state), principal_middleware);
+     let api_common = if web_enabled {
+         Router::new()
+@@ -2066,6 +2058,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+         store,
+         artifact_store,
+         vault_path,
++        preloaded_vault,
+         server_secrets,
+         env_lookup,
+         github_api_base_url,
+@@ -2074,39 +2067,13 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+         shutdown,
+     } = config;
+ 
+-    match vault_legacy_migration::migrate_legacy_vault_file(&vault_path) {
+-        Ok(report) if report.changed() => {
+-            let backup_path = report
+-                .backup_path
+-                .as_ref()
+-                .map_or_else(|| "<none>".to_string(), |path| path.display().to_string());
+-            warn!(
+-                migrated_entries = report.migrated_entries,
+-                skipped_entries = report.skipped_entries,
+-                backup_path = %backup_path,
+-                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
+-                "Migrated legacy vault file"
+-            );
+-        }
+-        Ok(_) => {}
+-        Err(err) => {
+-            warn!(
+-                error = %err,
+-                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
+-                "Legacy vault migration failed; continuing with normal vault load"
+-            );
+-        }
+-    }
+-    let vault = Vault::load(vault_path.clone())
+-        .with_context(|| format!("load vault {}", vault_path.display()))?;
++    let vault = match preloaded_vault {
++        Some(vault) => vault,
++        None => load_startup_vault(&vault_path)?,
++    };
+     let vault = Arc::new(AsyncRwLock::new(vault));
+-    let llm_source: Arc<dyn CredentialSource> = Arc::new(VaultCredentialSource::with_env_lookup(
+-        Arc::clone(&vault),
+-        {
+-            let env_lookup = Arc::clone(&env_lookup);
+-            move |name| env_lookup(name)
+-        },
+-    ));
++    let llm_source: Arc<dyn CredentialSource> =
++        Arc::new(VaultCredentialSource::vault_only(Arc::clone(&vault)));
+     let (global_event_tx, _) = broadcast::channel(4096);
+     let current_server_settings = Arc::new(resolved_settings.server_settings);
+     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
+@@ -2131,7 +2098,12 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+                     .map_err(anyhow::Error::from)
+             })
+             .transpose()?;
+-        match resolve_slack_credentials_status_with_lookup(|name| server_secrets.get(name)) {
++        match resolve_slack_credentials_status_with_lookup(|name| {
++            vault
++                .try_read()
++                .ok()
++                .and_then(|vault| vault.get(name).map(str::to_string))
++        }) {
+             SlackCredentialResolution::Configured(credentials) => {
+                 info!(
+                     default_channel_configured = default_channel.is_some(),
+@@ -2351,7 +2323,7 @@ async fn delete_run_sandbox_resource(
+         }));
+     }
+ 
+-    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
++    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
+     let sandbox = match reconnect_for_run(&record, daytona_api_key, Some(id)).await {
+         Ok(sandbox) => sandbox,
+         Err(err) if force || delete_started => {
+@@ -3260,7 +3232,7 @@ fn worker_command(
+     cmd.env(EnvVars::FABRO_CONFIG, state.active_config_path());
+     cmd.env_remove(EnvVars::FABRO_WORKER_TOKEN);
+     cmd.env(EnvVars::FABRO_WORKER_TOKEN, worker_token);
+-    if let Some(pem) = state.server_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
++    if let Some(pem) = state.vault_secret(EnvVars::GITHUB_APP_PRIVATE_KEY) {
+         cmd.env(EnvVars::GITHUB_APP_PRIVATE_KEY, pem);
+     }
+ 
+diff --git a/lib/crates/fabro-server/src/server/handler/sandbox.rs b/lib/crates/fabro-server/src/server/handler/sandbox.rs
+index ca192c550..458e36720 100644
+--- a/lib/crates/fabro-server/src/server/handler/sandbox.rs
++++ b/lib/crates/fabro-server/src/server/handler/sandbox.rs
+@@ -107,8 +107,8 @@ async fn retrieve_run_sandbox(
+         Ok(record) => record,
+         Err(response) => return response,
+     };
+-    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
+-    let daytona_organization_id = state.vault_or_env(EnvVars::DAYTONA_ORGANIZATION_ID);
++    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
++    let daytona_organization_id = state.config_env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
+     match sandbox_details(&record, daytona_api_key, daytona_organization_id, Some(id)).await {
+         Ok(details) => Json::<SandboxDetails>(details).into_response(),
+         Err(err) => {
+@@ -225,8 +225,8 @@ async fn terminal_websocket(mut socket: WebSocket, state: Arc<AppState>, id: Run
+             return;
+         }
+     };
+-    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
+-    let daytona_organization_id = state.vault_or_env(EnvVars::DAYTONA_ORGANIZATION_ID);
++    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
++    let daytona_organization_id = state.config_env_lookup(EnvVars::DAYTONA_ORGANIZATION_ID);
+     let session = match open_terminal_for_run(
+         &record,
+         daytona_api_key,
+@@ -848,7 +848,7 @@ async fn reconnect_run_sandbox(
+     run_id: &RunId,
+ ) -> Result<Box<dyn Sandbox>, Response> {
+     let record = load_run_sandbox(state, run_id).await?;
+-    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
++    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
+     let sandbox = reconnect_for_run(&record, daytona_api_key, Some(*run_id))
+         .await
+         .map_err(|err| {
+@@ -887,7 +887,7 @@ async fn reconnect_daytona_sandbox(
+         )
+         .into_response());
+     };
+-    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
++    let daytona_api_key = state.vault_secret(EnvVars::DAYTONA_API_KEY);
+     let sandbox = DaytonaSandbox::reconnect(
+         &runtime.id,
+         daytona_api_key,
+diff --git a/lib/crates/fabro-server/src/server/handler/secrets.rs b/lib/crates/fabro-server/src/server/handler/secrets.rs
+index 2d448ccff..70abddbaf 100644
+--- a/lib/crates/fabro-server/src/server/handler/secrets.rs
++++ b/lib/crates/fabro-server/src/server/handler/secrets.rs
+@@ -31,6 +31,12 @@ async fn create_secret(
+     let name = body.name;
+     let value = body.value;
+     let description = body.description;
++    if fabro_static::is_bootstrap_secret(&name) {
++        return ApiError::bad_request(format!(
++            "{name} is a bootstrap secret; configure it with process env or server.env"
++        ))
++        .into_response();
++    }
+     if secret_type == SecretType::Oauth {
+         if let Err(err) = serde_json::from_str::<OAuthCredential>(&value) {
+             return ApiError::bad_request(format!("invalid oauth credential JSON: {err}"))
+diff --git a/lib/crates/fabro-server/src/server/handler/sessions.rs b/lib/crates/fabro-server/src/server/handler/sessions.rs
+index f87184289..1791ee57b 100644
+--- a/lib/crates/fabro-server/src/server/handler/sessions.rs
++++ b/lib/crates/fabro-server/src/server/handler/sessions.rs
+@@ -15,7 +15,7 @@ use fabro_agent::profiles::assemble_system_prompt;
+ use fabro_agent::tool_registry::ToolRegistry;
+ use fabro_agent::{
+     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, OpenAiProfile,
+-    Session, SessionEvent, SessionOptions, WebFetchSummarizer,
++    Session, SessionEvent, SessionOptions, ToolSecrets, WebFetchSummarizer,
+ };
+ use fabro_api::types::{
+     CreateRunSessionRequest, PaginatedEventList, PaginationMeta, SubmitTurnRequest,
+@@ -24,6 +24,7 @@ use fabro_llm::client::Client as LlmClient;
+ use fabro_llm::types::ToolDefinition;
+ use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
+ use fabro_sandbox::reconnect::reconnect_for_run;
++use fabro_static::EnvVars;
+ use fabro_store::{
+     EventPayload, ProjectedRunSession, RunDatabase, project_run_session, project_run_sessions,
+ };
+@@ -708,7 +709,7 @@ async fn build_agent_session(
+     }
+     let sandbox = reconnect_for_run(
+         sandbox_record,
+-        state.vault_or_env("DAYTONA_API_KEY"),
++        state.vault_secret(EnvVars::DAYTONA_API_KEY),
+         Some(run_id),
+     )
+     .await
+@@ -756,6 +757,9 @@ async fn build_agent_session(
+     let config = SessionOptions {
+         tool_access_policy: Some(ask_fabro_policy),
+         tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
++        tool_secrets: ToolSecrets {
++            brave_search_api_key: state.vault_secret(EnvVars::BRAVE_SEARCH_API_KEY),
++        },
+         ..SessionOptions::default()
+     };
+ 
+diff --git a/lib/crates/fabro-server/src/server/handler/system.rs b/lib/crates/fabro-server/src/server/handler/system.rs
+index 87cc06132..ce836f39b 100644
+--- a/lib/crates/fabro-server/src/server/handler/system.rs
++++ b/lib/crates/fabro-server/src/server/handler/system.rs
+@@ -390,7 +390,7 @@ async fn get_github_repo(
+                 Ok(None) => {
+                     return ApiError::new(
+                         StatusCode::SERVICE_UNAVAILABLE,
+-                        "GITHUB_TOKEN is not configured",
++                        "GITHUB_TOKEN is not configured -- run fabro install or run fabro secret set GITHUB_TOKEN",
+                     )
+                     .into_response();
+                 }
+@@ -444,7 +444,7 @@ async fn get_github_repo(
+         {
+             return ApiError::new(
+                 StatusCode::SERVICE_UNAVAILABLE,
+-                "Stored GitHub token is invalid — run fabro install or update GITHUB_TOKEN",
++                "Stored GitHub token is invalid -- run fabro install or run fabro secret set GITHUB_TOKEN",
+             )
+             .into_response();
+         }
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index f343b0fb4..fc7cca4e2 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -479,13 +479,18 @@ async fn http_log_records_webhook_principal_fields() {
+ )]
+ fn webhook_test_app(auth_mode: AuthMode) -> Router {
+     let secret = TEST_WEBHOOK_SECRET.to_string();
+-    let state = test_app_state_with_env_lookup_and_server_secret_env(
++    let state = test_app_state_with_env_lookup(
+         default_test_server_settings(),
+         RunLayer::default(),
+         5,
+         |_| None,
+-        &HashMap::from([(WEBHOOK_SECRET_ENV.to_string(), secret)]),
+     );
++    state
++        .vault
++        .try_write()
++        .expect("test vault should not be locked")
++        .set(WEBHOOK_SECRET_ENV, &secret, SecretType::Token, None)
++        .unwrap();
+     build_router_with_options(
+         state,
+         &auth_mode,
+@@ -1027,6 +1032,63 @@ async fn create_secret_stores_file_secret_outside_token_lookups() {
+     )]);
+ }
+ 
++fn create_token_secret_request(name: &str, value: &str) -> Request<Body> {
++    Request::builder()
++        .method("POST")
++        .uri(api("/secrets"))
++        .header("content-type", "application/json")
++        .body(Body::from(
++            serde_json::to_string(&serde_json::json!({
++                "name": name,
++                "value": value,
++                "type": "token"
++            }))
++            .unwrap(),
++        ))
++        .unwrap()
++}
++
++#[tokio::test]
++async fn create_secret_rejects_bootstrap_secret_names() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++
++    for name in [EnvVars::SESSION_SECRET, EnvVars::FABRO_DEV_TOKEN] {
++        let response = app
++            .clone()
++            .oneshot(create_token_secret_request(name, "secret-value"))
++            .await
++            .unwrap();
++        let body = response_json!(response, StatusCode::BAD_REQUEST).await;
++
++        assert_eq!(
++            body["errors"][0]["detail"],
++            format!("{name} is a bootstrap secret; configure it with process env or server.env")
++        );
++        assert!(state.vault.read().await.get(name).is_none());
++    }
++}
++
++#[tokio::test]
++async fn create_secret_allows_optional_vault_and_custom_secret_names() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++
++    for (name, value) in [
++        (EnvVars::GITHUB_APP_CLIENT_SECRET, "github-client-secret"),
++        ("CUSTOM_WORKFLOW_TOKEN", "custom-secret"),
++    ] {
++        let response = app
++            .clone()
++            .oneshot(create_token_secret_request(name, value))
++            .await
++            .unwrap();
++
++        assert_status!(response, StatusCode::OK).await;
++        assert_eq!(state.vault.read().await.get(name), Some(value));
++    }
++}
++
+ #[tokio::test]
+ async fn github_webhook_rejects_missing_signature() {
+     let app = webhook_test_app(crate::test_support::test_auth_mode());
+@@ -1274,6 +1336,24 @@ async fn resolve_llm_client_reads_openai_token_from_vault() {
+     assert!(llm_result.auth_issues.is_empty());
+ }
+ 
++#[tokio::test]
++async fn resolve_llm_client_ignores_env_lookup_provider_tokens() {
++    let state = test_app_state_with_env_lookup(
++        default_test_server_settings(),
++        RunLayer::default(),
++        5,
++        |name| (name == EnvVars::OPENAI_API_KEY).then(|| "env-openai-key".to_string()),
++    );
++
++    let llm_result = state.resolve_llm_client().await.unwrap();
++
++    assert!(
++        llm_result.client.provider_names().is_empty(),
++        "server LLM credentials should come from vault only"
++    );
++    assert!(llm_result.auth_issues.is_empty());
++}
++
+ struct FailingCredentialSource;
+ 
+ #[async_trait::async_trait]
+@@ -1347,17 +1427,16 @@ async fn llm_source_configured_providers_reads_openai_token_from_vault() {
+ }
+ 
+ #[tokio::test]
+-async fn resolve_llm_client_uses_env_lookup_for_openai_settings() {
++async fn resolve_llm_client_uses_vault_key_without_env_lookup_openai_settings() {
+     let server = MockServer::start_async().await;
+     let response_mock = server
+         .mock_async(|when, then| {
+             when.method(POST)
+                 .path("/v1/responses")
+-                .header("authorization", "Bearer vault-openai-key")
+-                .header("OpenAI-Organization", "env-org");
++                .header("authorization", "Bearer vault-openai-key");
+             then.status(200)
+                 .header("content-type", "application/json")
+-                .json_body(openai_responses_payload("hello from env lookup"));
++                .json_body(openai_responses_payload("hello from vault key"));
+         })
+         .await;
+     let state = TestAppStateBuilder::new()
+@@ -1403,7 +1482,7 @@ async fn resolve_llm_client_uses_env_lookup_for_openai_settings() {
+         .await
+         .unwrap();
+ 
+-    assert_eq!(response.text(), "hello from env lookup");
++    assert_eq!(response.text(), "hello from vault key");
+     response_mock.assert_async().await;
+ }
+ 
+@@ -1531,11 +1610,11 @@ async fn delete_secret_by_name_removes_file_secret() {
+ }
+ 
+ #[test]
+-fn server_secrets_resolve_process_env_before_server_env() {
++fn server_secrets_resolve_bootstrap_process_env_before_server_env() {
+     let dir = tempfile::tempdir().unwrap();
+     std::fs::write(
+         dir.path().join("server.env"),
+-        "SESSION_SECRET=file-value\nGITHUB_APP_CLIENT_SECRET=file-client\n",
++        "SESSION_SECRET=file-value\nFABRO_DEV_TOKEN=file-dev-token\n",
+     )
+     .unwrap();
+ 
+@@ -1547,11 +1626,84 @@ fn server_secrets_resolve_process_env_before_server_env() {
+ 
+     assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("env-value"));
+     assert_eq!(
+-        secrets.get("GITHUB_APP_CLIENT_SECRET").as_deref(),
+-        Some("file-client")
++        secrets.get("FABRO_DEV_TOKEN").as_deref(),
++        Some("file-dev-token")
+     );
+ }
+ 
++fn slack_app_state_with_secret_sources(
++    vault_entries: &[(&str, &str, SecretType)],
++    server_secret_env: HashMap<String, String>,
++) -> Arc<AppState> {
++    let (store, artifact_store) = test_store_bundle();
++    let vault_path = test_secret_store_path();
++    let server_env_path = vault_path.with_file_name("server.env");
++    let mut vault = Vault::load(vault_path.clone()).unwrap();
++    for (name, value, secret_type) in vault_entries {
++        vault.set(name, value, *secret_type, None).unwrap();
++    }
++    build_app_state(AppStateConfig {
++        resolved_settings: resolved_runtime_settings_for_tests(
++            default_test_server_settings(),
++            RunLayer::default(),
++            LlmCatalogSettings::default(),
++        ),
++        registry_factory_override: None,
++        max_concurrent_runs: 5,
++        store,
++        artifact_store,
++        vault_path,
++        preloaded_vault: Some(vault),
++        server_secrets: load_test_server_secrets(server_env_path, server_secret_env),
++        env_lookup: default_env_lookup(),
++        github_api_base_url: None,
++        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
++        http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
++        shutdown: tokio_util::sync::CancellationToken::new(),
++    })
++    .expect("slack test app state should build")
++}
++
++#[test]
++fn slack_service_is_enabled_by_vault_tokens() {
++    let state = slack_app_state_with_secret_sources(
++        &[
++            (
++                EnvVars::FABRO_SLACK_BOT_TOKEN,
++                "xoxb-test",
++                SecretType::Token,
++            ),
++            (
++                EnvVars::FABRO_SLACK_APP_TOKEN,
++                "xapp-test",
++                SecretType::Token,
++            ),
++        ],
++        HashMap::new(),
++    );
++
++    assert!(state.slack_service.is_some());
++}
++
++#[test]
++fn slack_service_ignores_server_env_tokens() {
++    let state = slack_app_state_with_secret_sources(
++        &[],
++        HashMap::from([
++            (
++                EnvVars::FABRO_SLACK_BOT_TOKEN.to_string(),
++                "xoxb-server-env".to_string(),
++            ),
++            (
++                EnvVars::FABRO_SLACK_APP_TOKEN.to_string(),
++                "xapp-server-env".to_string(),
++            ),
++        ]),
++    );
++
++    assert!(state.slack_service.is_none());
++}
++
+ #[cfg(unix)]
+ #[test]
+ fn worker_command_default_token_omits_agent_run_tools_scope() {
+@@ -1605,16 +1757,20 @@ fn worker_command_opt_in_token_includes_agent_run_tools_scope() {
+ 
+ #[cfg(unix)]
+ #[test]
+-fn worker_command_forwards_github_app_private_key_from_server_secrets() {
++fn worker_command_forwards_github_app_private_key_from_vault() {
+     let storage_dir = tempfile::tempdir().unwrap();
+-    let state = worker_command_test_state_with_extra_config_and_env_lookup(
+-        storage_dir.path(),
+-        &["dev-token"],
+-        Some(TEST_DEV_TOKEN),
+-        "",
+-        &[(EnvVars::GITHUB_APP_PRIVATE_KEY, "test-private-key")],
+-        |_| None,
+-    );
++    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
++    state
++        .vault
++        .try_write()
++        .expect("test vault should not be locked")
++        .set(
++            EnvVars::GITHUB_APP_PRIVATE_KEY,
++            "test-private-key",
++            SecretType::File,
++            None,
++        )
++        .unwrap();
+     let cmd = worker_command(
+         state.as_ref(),
+         RunId::new(),
+@@ -1837,6 +1993,7 @@ methods = ["dev-token"]
+         store,
+         artifact_store,
+         vault_path,
++        preloaded_vault: None,
+         server_secrets: ServerSecrets::load(server_env_path, HashMap::new()).unwrap(),
+         env_lookup: default_env_lookup(),
+         github_api_base_url: None,
+@@ -1958,6 +2115,7 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
+         store,
+         artifact_store,
+         vault_path: vault_path.to_path_buf(),
++        preloaded_vault: None,
+         server_secrets: load_test_server_secrets(
+             vault_path.with_file_name("server.env"),
+             HashMap::new(),
+@@ -5051,6 +5209,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
+         store,
+         artifact_store,
+         vault_path,
++        preloaded_vault: None,
+         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
+         env_lookup: Arc::new(env_lookup),
+         github_api_base_url,
+@@ -5070,6 +5229,68 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
+     state
+ }
+ 
++#[test]
++fn github_token_strategy_ignores_process_env_token() {
++    let state = create_github_token_app_state_with_env_lookup(None, None, |name| match name {
++        EnvVars::GITHUB_TOKEN => Some("ghu_from_env".to_string()),
++        _ => None,
++    });
++    let settings = state.server_settings();
++
++    let err = state
++        .github_credentials(&settings.server.integrations.github)
++        .expect_err("server runtime should ignore env-backed GitHub tokens");
++
++    assert_eq!(
++        err,
++        "GITHUB_TOKEN not configured -- run fabro install or run fabro secret set GITHUB_TOKEN"
++    );
++}
++
++#[test]
++fn github_token_strategy_ignores_gh_token_alias() {
++    let state = create_github_token_app_state_with_env_lookup(None, None, |name| match name {
++        EnvVars::GH_TOKEN => Some("ghu_from_env_alias".to_string()),
++        _ => None,
++    });
++    state
++        .vault
++        .try_write()
++        .expect("test vault should not already be locked")
++        .set(
++            EnvVars::GH_TOKEN,
++            "ghu_from_vault_alias",
++            SecretType::Token,
++            None,
++        )
++        .unwrap();
++    let settings = state.server_settings();
++
++    let err = state
++        .github_credentials(&settings.server.integrations.github)
++        .expect_err("server runtime should ignore GH_TOKEN in env and vault");
++
++    assert_eq!(
++        err,
++        "GITHUB_TOKEN not configured -- run fabro install or run fabro secret set GITHUB_TOKEN"
++    );
++}
++
++#[test]
++fn github_token_strategy_reads_github_token_from_vault() {
++    let state = create_github_token_app_state(Some("ghu_test"), None);
++    let settings = state.server_settings();
++
++    let credentials = state
++        .github_credentials(&settings.server.integrations.github)
++        .expect("vault GitHub token should resolve")
++        .expect("vault GitHub token should produce credentials");
++
++    assert!(
++        matches!(credentials, fabro_github::GitHubCredentials::Pat(token) if token == "ghu_test")
++    );
++}
++
+ /// Build the (state, router, run_id) triple every PR-endpoint test
+ /// needs. Use this instead of repeating the
+ /// state/build_router/fixtures::RUN_1 incantation per test.
+@@ -5366,8 +5587,19 @@ async fn list_models_marks_configured_true_when_provider_has_credential_material
+         default_test_server_settings(),
+         RunLayer::default(),
+         5,
+-        |name| (name == EnvVars::ANTHROPIC_API_KEY).then(|| "test-key".to_string()),
++        |_| None,
+     );
++    state
++        .vault
++        .write()
++        .await
++        .set(
++            EnvVars::ANTHROPIC_API_KEY,
++            "test-key",
++            SecretType::Token,
++            None,
++        )
++        .unwrap();
+     let app = crate::test_support::build_test_router(state);
+ 
+     let req = Request::builder()
+@@ -5543,14 +5775,25 @@ reasoning = false
+ 
+ #[tokio::test]
+ async fn list_providers_marks_configured_per_provider_and_omits_secrets() {
+-    // Only `ANTHROPIC_API_KEY` is supplied, so anthropic resolves as configured
+-    // while every other catalog provider does not.
++    // Only `ANTHROPIC_API_KEY` is supplied in the vault, so anthropic resolves as
++    // configured while every other catalog provider does not.
+     let state = test_app_state_with_env_lookup(
+         default_test_server_settings(),
+         RunLayer::default(),
+         5,
+-        |name| (name == EnvVars::ANTHROPIC_API_KEY).then(|| "test-key".to_string()),
++        |_| None,
+     );
++    state
++        .vault
++        .write()
++        .await
++        .set(
++            EnvVars::ANTHROPIC_API_KEY,
++            "test-key",
++            SecretType::Token,
++            None,
++        )
++        .unwrap();
+     let app = crate::test_support::build_test_router(state);
+ 
+     let req = Request::builder()
+diff --git a/lib/crates/fabro-server/src/server_secrets.rs b/lib/crates/fabro-server/src/server_secrets.rs
+index 476eb78a9..e6097712e 100644
+--- a/lib/crates/fabro-server/src/server_secrets.rs
++++ b/lib/crates/fabro-server/src/server_secrets.rs
+@@ -81,17 +81,14 @@ mod tests {
+     use super::ServerSecrets;
+ 
+     #[test]
+-    fn server_secrets_snapshot_prefers_env_over_file() {
++    fn bootstrap_server_secrets_snapshot_prefers_env_over_file() {
+         let dir = tempfile::tempdir().unwrap();
+         let env_path = dir.path().join("server.env");
+         envfile::write_env_file(
+             &env_path,
+             &HashMap::from([
+                 ("SESSION_SECRET".to_string(), "file-value".to_string()),
+-                (
+-                    "GITHUB_APP_CLIENT_SECRET".to_string(),
+-                    "file-client".to_string(),
+-                ),
++                ("FABRO_DEV_TOKEN".to_string(), "file-dev-token".to_string()),
+             ]),
+         )
+         .unwrap();
+@@ -104,8 +101,8 @@ mod tests {
+ 
+         assert_eq!(secrets.get("SESSION_SECRET").as_deref(), Some("env-value"));
+         assert_eq!(
+-            secrets.get("GITHUB_APP_CLIENT_SECRET").as_deref(),
+-            Some("file-client")
++            secrets.get("FABRO_DEV_TOKEN").as_deref(),
++            Some("file-dev-token")
+         );
+     }
+ }
+diff --git a/lib/crates/fabro-server/src/startup.rs b/lib/crates/fabro-server/src/startup.rs
+index 40ea7f6d1..d847970b4 100644
+--- a/lib/crates/fabro-server/src/startup.rs
++++ b/lib/crates/fabro-server/src/startup.rs
+@@ -1,27 +1,67 @@
+ use std::collections::HashMap;
+ use std::path::Path;
+ 
++use anyhow::Context as _;
++use fabro_static::EnvVars;
+ use fabro_types::settings::ServerNamespace;
++use fabro_vault::Vault;
++use tracing::warn;
+ 
+ use crate::jwt_auth::{AuthMode, resolve_auth_mode_with_lookup};
+ use crate::server_secrets::ServerSecrets;
++use crate::vault_legacy_migration;
+ 
+ pub(crate) fn resolve_startup(
+     env_path: &Path,
+     env_entries: HashMap<String, String>,
+     settings: &ServerNamespace,
++    vault: &Vault,
+ ) -> anyhow::Result<(AuthMode, ServerSecrets)> {
+     let server_secrets = ServerSecrets::load(env_path, env_entries)?;
+-    let auth_mode = resolve_auth_mode_with_lookup(settings, |name| server_secrets.get(name))?;
++    let auth_secret_lookup = |name: &str| match name {
++        EnvVars::GITHUB_APP_CLIENT_SECRET => vault.get(name).map(str::to_string),
++        _ => server_secrets.get(name),
++    };
++    let auth_mode = resolve_auth_mode_with_lookup(settings, auth_secret_lookup)?;
+     Ok((auth_mode, server_secrets))
+ }
+ 
++pub fn load_startup_vault(vault_path: impl AsRef<Path>) -> anyhow::Result<Vault> {
++    let vault_path = vault_path.as_ref();
++    match vault_legacy_migration::migrate_legacy_vault_file(vault_path) {
++        Ok(report) if report.changed() => {
++            let backup_path = report
++                .backup_path
++                .as_ref()
++                .map_or_else(|| "<none>".to_string(), |path| path.display().to_string());
++            warn!(
++                migrated_entries = report.migrated_entries,
++                skipped_entries = report.skipped_entries,
++                backup_path = %backup_path,
++                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
++                "Migrated legacy vault file"
++            );
++        }
++        Ok(_) => {}
++        Err(err) => {
++            warn!(
++                error = %err,
++                removal_deadline = vault_legacy_migration::REMOVAL_DEADLINE,
++                "Legacy vault migration failed; continuing with normal vault load"
++            );
++        }
++    }
++    Vault::load(vault_path.to_path_buf())
++        .with_context(|| format!("load vault {}", vault_path.display()))
++}
++
+ pub fn validate_startup(
+     env_path: &Path,
+     env_entries: HashMap<String, String>,
+     settings: &ServerNamespace,
++    vault: &Vault,
+ ) -> anyhow::Result<()> {
+-    resolve_startup(env_path, env_entries, settings).map(|_| ())
++    resolve_startup(env_path, env_entries, settings, vault).map(|_| ())
+ }
+ 
+ #[cfg(test)]
+@@ -31,17 +71,24 @@ mod tests {
+     use fabro_config::ServerSettingsBuilder;
+     use fabro_static::EnvVars;
+     use fabro_types::settings::ServerNamespace;
++    use fabro_vault::{SecretType, Vault};
+ 
+     use super::validate_startup;
+ 
+     fn resolved_settings(auth_methods: &[&str]) -> ServerNamespace {
+         ServerSettingsBuilder::from_toml(&format!(
+-            r"
++            r#"
+ _version = 1
+ 
+ [server.auth]
+ methods = [{}]
+-",
++
++[server.auth.github]
++allowed_usernames = ["octocat"]
++
++[server.integrations.github]
++client_id = "Iv1.test"
++"#,
+             auth_methods
+                 .iter()
+                 .map(|method| format!("\"{method}\""))
+@@ -52,9 +99,14 @@ methods = [{}]
+         .server
+     }
+ 
++    fn empty_vault(dir: &tempfile::TempDir) -> Vault {
++        Vault::load(dir.path().join("secrets.json")).unwrap()
++    }
++
+     #[test]
+     fn validate_startup_accepts_configured_secrets() {
+         let dir = tempfile::tempdir().unwrap();
++        let vault = empty_vault(&dir);
+         let env = HashMap::from([
+             (
+                 EnvVars::SESSION_SECRET.to_string(),
+@@ -68,21 +120,85 @@ methods = [{}]
+         ]);
+         let settings = resolved_settings(&["dev-token"]);
+ 
+-        assert!(validate_startup(dir.path().join("server.env").as_path(), env, &settings).is_ok());
++        assert!(
++            validate_startup(
++                dir.path().join("server.env").as_path(),
++                env,
++                &settings,
++                &vault,
++            )
++            .is_ok()
++        );
+     }
+ 
+     #[test]
+     fn validate_startup_rejects_missing_secrets() {
+         let dir = tempfile::tempdir().unwrap();
+         let settings = resolved_settings(&["dev-token"]);
++        let vault = empty_vault(&dir);
+ 
+         assert!(
+             validate_startup(
+                 dir.path().join("server.env").as_path(),
+                 HashMap::new(),
+                 &settings,
++                &vault,
+             )
+             .is_err()
+         );
+     }
++
++    #[test]
++    fn validate_startup_requires_github_client_secret_from_vault() {
++        let dir = tempfile::tempdir().unwrap();
++        let env = HashMap::from([
++            (
++                EnvVars::SESSION_SECRET.to_string(),
++                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
++            ),
++            (
++                EnvVars::GITHUB_APP_CLIENT_SECRET.to_string(),
++                "server-env-client-secret".to_string(),
++            ),
++        ]);
++        let settings = resolved_settings(&["github"]);
++        let vault = empty_vault(&dir);
++
++        let err = validate_startup(
++            dir.path().join("server.env").as_path(),
++            env,
++            &settings,
++            &vault,
++        )
++        .expect_err("github client secret in server.env should not satisfy startup");
++
++        assert!(err.to_string().contains("GITHUB_APP_CLIENT_SECRET"));
++    }
++
++    #[test]
++    fn validate_startup_accepts_github_client_secret_from_vault() {
++        let dir = tempfile::tempdir().unwrap();
++        let env = HashMap::from([(
++            EnvVars::SESSION_SECRET.to_string(),
++            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
++        )]);
++        let settings = resolved_settings(&["github"]);
++        let mut vault = empty_vault(&dir);
++        vault
++            .set(
++                EnvVars::GITHUB_APP_CLIENT_SECRET,
++                "vault-client-secret",
++                SecretType::Token,
++                None,
++            )
++            .unwrap();
++
++        validate_startup(
++            dir.path().join("server.env").as_path(),
++            env,
++            &settings,
++            &vault,
++        )
++        .expect("github client secret in vault should satisfy startup");
++    }
+ }
+diff --git a/lib/crates/fabro-server/src/test_support.rs b/lib/crates/fabro-server/src/test_support.rs
+index df65d247d..9187c4dc1 100644
+--- a/lib/crates/fabro-server/src/test_support.rs
++++ b/lib/crates/fabro-server/src/test_support.rs
+@@ -190,6 +190,7 @@ impl TestAppStateBuilder {
+             store,
+             artifact_store,
+             vault_path,
++            preloaded_vault: None,
+             server_secrets: load_test_server_secrets(server_env_path, self.server_secret_env),
+             env_lookup: self.env_lookup,
+             github_api_base_url: None,
+diff --git a/lib/crates/fabro-server/src/web_auth.rs b/lib/crates/fabro-server/src/web_auth.rs
+index 74c17b8df..49209b483 100644
+--- a/lib/crates/fabro-server/src/web_auth.rs
++++ b/lib/crates/fabro-server/src/web_auth.rs
+@@ -613,7 +613,7 @@ async fn callback_github(
+             );
+         }
+     };
+-    let Some(client_secret) = state.server_secret(EnvVars::GITHUB_APP_CLIENT_SECRET) else {
++    let Some(client_secret) = state.vault_secret(EnvVars::GITHUB_APP_CLIENT_SECRET) else {
+         error!("OAuth callback failed: GITHUB_APP_CLIENT_SECRET not configured");
+         return json_response(
+             StatusCode::CONFLICT,
+@@ -1055,8 +1055,10 @@ mod tests {
+     use axum::http::{HeaderMap, Request, StatusCode, header};
+     use axum_extra::extract::cookie::Key;
+     use fabro_config::{RunLayer, ServerSettingsBuilder};
++    use fabro_static::EnvVars;
+     use fabro_types::settings::server::ServerAuthMethod;
+     use fabro_types::{AuthMethod, IdpIdentity, Principal};
++    use fabro_vault::SecretType;
+     use serde_json::json;
+     use tower::ServiceExt;
+ 
+@@ -1672,6 +1674,107 @@ client_id = "github-client-id"
+         );
+     }
+ 
++    #[tokio::test]
++    async fn callback_github_reads_client_secret_from_vault() {
++        let github = httpmock::MockServer::start_async().await;
++        let token = github
++            .mock_async(|when, then| {
++                when.method(httpmock::Method::POST)
++                    .path("/login/oauth/access_token")
++                    .body_includes("client_secret=vault-client-secret");
++                then.status(200)
++                    .header("content-type", "application/json")
++                    .json_body(json!({ "access_token": "gho_test" }));
++            })
++            .await;
++        let user = github
++            .mock_async(|when, then| {
++                when.method(httpmock::Method::GET)
++                    .path("/api/user")
++                    .header("authorization", "Bearer gho_test");
++                then.status(200)
++                    .header("content-type", "application/json")
++                    .json_body(json!({
++                        "id": 12345,
++                        "login": "octocat",
++                        "name": "The Octocat",
++                        "avatar_url": "https://github.example/avatar.png"
++                    }));
++            })
++            .await;
++        let emails = github
++            .mock_async(|when, then| {
++                when.method(httpmock::Method::GET).path("/api/user/emails");
++                then.status(200)
++                    .header("content-type", "application/json")
++                    .json_body(json!([]));
++            })
++            .await;
++        let state = crate::test_support::test_app_state_with_runtime_settings_and_session_key(
++            github_settings("https://fabro.example"),
++            RunLayer::default(),
++            Some("web-auth-test-key-material-0123456789"),
++        );
++        state
++            .vault
++            .write()
++            .await
++            .set(
++                EnvVars::GITHUB_APP_CLIENT_SECRET,
++                "vault-client-secret",
++                SecretType::Token,
++                None,
++            )
++            .unwrap();
++        let app = server::build_router_with_options(
++            state,
++            &github_auth_mode(),
++            Arc::new(crate::ip_allowlist::IpAllowlistConfig::default()),
++            server::RouterOptions {
++                web_enabled: true,
++                github_endpoints: Some(Arc::new(GithubEndpoints::with_bases(
++                    github.url("/").parse().expect("oauth base should parse"),
++                    github.url("/api/").parse().expect("api base should parse"),
++                ))),
++                ..server::RouterOptions::default()
++            },
++        );
++        let key = test_cookie_key();
++        let mut jar = cookie::CookieJar::new();
++        super::add_oauth_state_cookie(
++            &mut jar,
++            &key,
++            &super::OAuthStateCookie {
++                state:     "fabro-test-state".to_string(),
++                exp:       (chrono::Utc::now() + chrono::Duration::minutes(30)).timestamp(),
++                return_to: None,
++            },
++            true,
++        );
++        let cookie = jar
++            .delta()
++            .next()
++            .expect("private oauth cookie should exist")
++            .encoded()
++            .to_string();
++
++        let response = app
++            .oneshot(
++                Request::builder()
++                    .uri("/auth/callback/github?code=test-code&state=fabro-test-state")
++                    .header(header::COOKIE, cookie)
++                    .body(Body::empty())
++                    .unwrap(),
++            )
++            .await
++            .unwrap();
++
++        assert_status!(response, StatusCode::SEE_OTHER).await;
++        token.assert_async().await;
++        user.assert_async().await;
++        emails.assert_async().await;
++    }
++
+     #[test]
+     fn read_private_session_rejects_v1_cookies() {
+         let key = test_cookie_key();
+diff --git a/lib/crates/fabro-static/src/lib.rs b/lib/crates/fabro-static/src/lib.rs
+index 58d35ac25..f5d94f18e 100644
+--- a/lib/crates/fabro-static/src/lib.rs
++++ b/lib/crates/fabro-static/src/lib.rs
+@@ -4,5 +4,9 @@
+ )]
+ 
+ mod env_vars;
++mod secret_registry;
+ 
+ pub use env_vars::EnvVars;
++pub use secret_registry::{
++    SecretScope, is_bootstrap_secret, is_optional_vault_secret, secret_scope,
++};
+diff --git a/lib/crates/fabro-static/src/secret_registry.rs b/lib/crates/fabro-static/src/secret_registry.rs
+new file mode 100644
+index 000000000..86fe1873e
+--- /dev/null
++++ b/lib/crates/fabro-static/src/secret_registry.rs
+@@ -0,0 +1,118 @@
++use crate::EnvVars;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum SecretScope {
++    Bootstrap,
++    OptionalVault,
++}
++
++const BOOTSTRAP_SECRETS: &[&str] = &[
++    EnvVars::SESSION_SECRET,
++    EnvVars::FABRO_DEV_TOKEN,
++    EnvVars::AWS_ACCESS_KEY_ID,
++    EnvVars::AWS_SECRET_ACCESS_KEY,
++    EnvVars::AWS_SESSION_TOKEN,
++];
++
++const OPTIONAL_VAULT_SECRETS: &[&str] = &[
++    EnvVars::ANTHROPIC_API_KEY,
++    EnvVars::BRAVE_SEARCH_API_KEY,
++    EnvVars::FABRO_SLACK_APP_TOKEN,
++    EnvVars::FABRO_SLACK_BOT_TOKEN,
++    EnvVars::GEMINI_API_KEY,
++    EnvVars::GITHUB_APP_CLIENT_SECRET,
++    EnvVars::GITHUB_APP_PRIVATE_KEY,
++    EnvVars::GITHUB_APP_WEBHOOK_SECRET,
++    EnvVars::GITHUB_TOKEN,
++    EnvVars::INCEPTION_API_KEY,
++    EnvVars::KIMI_API_KEY,
++    EnvVars::MINIMAX_API_KEY,
++    EnvVars::OPENAI_API_KEY,
++    EnvVars::ZAI_API_KEY,
++    EnvVars::DAYTONA_API_KEY,
++];
++
++pub fn secret_scope(name: &str) -> Option<SecretScope> {
++    if BOOTSTRAP_SECRETS.contains(&name) {
++        Some(SecretScope::Bootstrap)
++    } else if OPTIONAL_VAULT_SECRETS.contains(&name) {
++        Some(SecretScope::OptionalVault)
++    } else {
++        None
++    }
++}
++
++pub fn is_bootstrap_secret(name: &str) -> bool {
++    secret_scope(name) == Some(SecretScope::Bootstrap)
++}
++
++pub fn is_optional_vault_secret(name: &str) -> bool {
++    secret_scope(name) == Some(SecretScope::OptionalVault)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn classifies_bootstrap_secrets() {
++        for name in [
++            EnvVars::SESSION_SECRET,
++            EnvVars::FABRO_DEV_TOKEN,
++            EnvVars::AWS_ACCESS_KEY_ID,
++            EnvVars::AWS_SECRET_ACCESS_KEY,
++            EnvVars::AWS_SESSION_TOKEN,
++        ] {
++            assert_eq!(secret_scope(name), Some(SecretScope::Bootstrap), "{name}");
++            assert!(is_bootstrap_secret(name), "{name}");
++            assert!(!is_optional_vault_secret(name), "{name}");
++        }
++    }
++
++    #[test]
++    fn classifies_optional_vault_secrets() {
++        for name in [
++            EnvVars::GITHUB_APP_CLIENT_SECRET,
++            EnvVars::GITHUB_APP_PRIVATE_KEY,
++            EnvVars::GITHUB_APP_WEBHOOK_SECRET,
++            EnvVars::GITHUB_TOKEN,
++            EnvVars::FABRO_SLACK_APP_TOKEN,
++            EnvVars::FABRO_SLACK_BOT_TOKEN,
++            EnvVars::DAYTONA_API_KEY,
++            EnvVars::BRAVE_SEARCH_API_KEY,
++            EnvVars::ANTHROPIC_API_KEY,
++            EnvVars::GEMINI_API_KEY,
++            EnvVars::INCEPTION_API_KEY,
++            EnvVars::KIMI_API_KEY,
++            EnvVars::MINIMAX_API_KEY,
++            EnvVars::OPENAI_API_KEY,
++            EnvVars::ZAI_API_KEY,
++        ] {
++            assert_eq!(
++                secret_scope(name),
++                Some(SecretScope::OptionalVault),
++                "{name}"
++            );
++            assert!(is_optional_vault_secret(name), "{name}");
++            assert!(!is_bootstrap_secret(name), "{name}");
++        }
++    }
++
++    #[test]
++    fn leaves_legacy_aliases_and_non_secret_config_unclassified() {
++        for name in [
++            EnvVars::GH_TOKEN,
++            EnvVars::GITHUB_BASE_URL,
++            EnvVars::SLACK_BASE_URL,
++            EnvVars::DAYTONA_API_URL,
++            EnvVars::DAYTONA_ORGANIZATION_ID,
++            EnvVars::DAYTONA_SERVER_URL,
++            EnvVars::OPENAI_BASE_URL,
++            "CUSTOM_WORKFLOW_TOKEN",
++        ] {
++            assert_eq!(secret_scope(name), None, "{name}");
++            assert!(!is_bootstrap_secret(name), "{name}");
++            assert!(!is_optional_vault_secret(name), "{name}");
++        }
++    }
++}
+diff --git a/lib/crates/fabro-vault/Cargo.toml b/lib/crates/fabro-vault/Cargo.toml
+index f03479fb0..493d4f78d 100644
+--- a/lib/crates/fabro-vault/Cargo.toml
++++ b/lib/crates/fabro-vault/Cargo.toml
+@@ -14,6 +14,7 @@ workspace = true
+ 
+ [dependencies]
+ chrono.workspace = true
++fabro-static = { path = "../fabro-static" }
+ fabro-types = { path = "../fabro-types" }
+ serde.workspace = true
+ serde_json.workspace = true
+diff --git a/lib/crates/fabro-vault/src/lib.rs b/lib/crates/fabro-vault/src/lib.rs
+index d9256ea04..caf697577 100644
+--- a/lib/crates/fabro-vault/src/lib.rs
++++ b/lib/crates/fabro-vault/src/lib.rs
+@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
+ use std::{fmt, io};
+ 
+ use chrono::{DateTime, Utc};
++use fabro_static::EnvVars;
+ use fabro_types::SecretMetadata;
+ pub use fabro_types::SecretType;
+ 
+@@ -177,6 +178,10 @@ impl Vault {
+     }
+ 
+     fn validate_file_name(name: &str) -> Result<(), Error> {
++        if name == EnvVars::GITHUB_APP_PRIVATE_KEY {
++            return Ok(());
++        }
++
+         if !name.starts_with('/') || name.ends_with('/') || name.contains('\0') {
+             return Err(Error::InvalidName(name.to_string()));
+         }
+@@ -338,6 +343,26 @@ mod tests {
+         )]);
+     }
+ 
++    #[test]
++    fn github_app_private_key_may_be_stored_as_file_secret() {
++        let dir = tempfile::tempdir().unwrap();
++        let mut store = Vault::load(dir.path().join("secrets.json")).unwrap();
++
++        store
++            .set(
++                EnvVars::GITHUB_APP_PRIVATE_KEY,
++                "base64-pem",
++                SecretType::File,
++                None,
++            )
++            .unwrap();
++
++        assert_eq!(store.file_secrets(), vec![(
++            EnvVars::GITHUB_APP_PRIVATE_KEY.to_string(),
++            "base64-pem".to_string()
++        )]);
++    }
++
+     #[test]
+     fn list_includes_schema_typed_entries_loaded_from_disk() {
+         let dir = tempfile::tempdir().unwrap();
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+index f0267ec86..d487138ac 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+@@ -7,7 +7,7 @@ use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry, Tool
+ use fabro_agent::{
+     AgentEvent, AgentProfile, AnthropicProfile, CompletionCoordinator, GeminiProfile,
+     Message as AgentMessage, OpenAiProfile, Sandbox, Session, SessionOptions, StaticEnvProvider,
+-    ToolEnvProvider, register_question_tools,
++    ToolEnvProvider, ToolSecrets, register_question_tools,
+ };
+ use fabro_auth::{CredentialSource, EnvCredentialSource};
+ use fabro_graphviz::graph::{AttrValue, Node};
+@@ -574,6 +574,7 @@ pub struct AgentApiBackend {
+     sessions:           Mutex<HashMap<String, Session>>,
+     tool_env:           Option<Arc<dyn ToolEnvProvider>>,
+     mcp_servers:        Vec<McpServerSettings>,
++    tool_secrets:       ToolSecrets,
+     run_model_controls: RunModelControls,
+     source:             Arc<dyn CredentialSource>,
+     steering_hub:       Arc<SteeringHub>,
+@@ -622,6 +623,7 @@ impl AgentApiBackend {
+             sessions: Mutex::new(HashMap::new()),
+             tool_env: None,
+             mcp_servers: Vec::new(),
++            tool_secrets: ToolSecrets::default(),
+             run_model_controls: RunModelControls::default(),
+             source,
+             steering_hub,
+@@ -664,6 +666,12 @@ impl AgentApiBackend {
+         self
+     }
+ 
++    #[must_use]
++    pub fn with_tool_secrets(mut self, tool_secrets: ToolSecrets) -> Self {
++        self.tool_secrets = tool_secrets;
++        self
++    }
++
+     #[must_use]
+     pub fn with_run_model_controls(mut self, controls: RunModelControls) -> Self {
+         self.run_model_controls = controls;
+@@ -720,6 +728,7 @@ impl AgentApiBackend {
+             self.tool_env.as_ref(),
+             tool_hooks,
+             self.mcp_servers.clone(),
++            self.tool_secrets.clone(),
+             self.fabro_run_tools.clone(),
+         )
+         .await
+@@ -736,6 +745,7 @@ impl AgentApiBackend {
+         tool_env: Option<&Arc<dyn ToolEnvProvider>>,
+         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+         mcp_servers: Vec<McpServerSettings>,
++        tool_secrets: ToolSecrets,
+         fabro_run_tools: Option<FabroRunToolServices>,
+     ) -> Result<Session, Error> {
+         let controls = effective_request_controls(run_model_controls, node)?;
+@@ -756,6 +766,7 @@ impl AgentApiBackend {
+             speed: controls.speed,
+             tool_hooks,
+             mcp_servers,
++            tool_secrets,
+             // Workflow agents run with no `tool_access_policy`, which exposes
+             // the entire tool registry (read, write, shell, subagent, MCP) and
+             // skips approval gating. Report that truthfully so the UI doesn't
+@@ -779,6 +790,7 @@ impl AgentApiBackend {
+         let factory_tool_env = tool_env.cloned();
+         let factory_fabro_run_tools = fabro_run_tools.clone();
+         let factory_permission_level = config.permission_level;
++        let factory_tool_secrets = config.tool_secrets.clone();
+         let factory: SessionFactory = Arc::new(move || {
+             let mut child_profile = build_profile(
+                 &factory_model,
+@@ -798,6 +810,7 @@ impl AgentApiBackend {
+                     reasoning_effort: controls.reasoning_effort,
+                     speed: controls.speed,
+                     permission_level: factory_permission_level,
++                    tool_secrets: factory_tool_secrets.clone(),
+                     ..SessionOptions::default()
+                 },
+                 None,
+@@ -1293,6 +1306,7 @@ impl CodergenBackend for AgentApiBackend {
+                             self.tool_env.as_ref(),
+                             tool_hooks.clone(),
+                             self.mcp_servers.clone(),
++                            self.tool_secrets.clone(),
+                             self.fabro_run_tools.clone(),
+                         )
+                         .await;
+diff --git a/lib/crates/fabro-workflow/src/pipeline/initialize.rs b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+index c620c0151..761a58e42 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/initialize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+@@ -3,7 +3,7 @@ use std::path::PathBuf;
+ use std::sync::Arc;
+ use std::time::Instant;
+ 
+-use fabro_agent::Sandbox;
++use fabro_agent::{Sandbox, ToolSecrets};
+ use fabro_auth::{
+     CredentialSource, EnvCredentialSource, VaultCredentialSource, auth_issue_message,
+ };
+@@ -145,6 +145,7 @@ async fn build_registry(
+     graph: &graph::Graph,
+     llm_source: Arc<dyn CredentialSource>,
+     catalog: Arc<Catalog>,
++    tool_secrets: ToolSecrets,
+     fabro_run_tools: Option<FabroRunToolServices>,
+ ) -> Result<(Arc<HandlerRegistry>, bool), Error> {
+     let no_backend_interviewer = Arc::clone(&interviewer);
+@@ -174,6 +175,7 @@ async fn build_registry(
+         let fallback_chain = spec.fallback_chain.clone();
+         let mcp_servers = spec.mcp_servers.clone();
+         let model_controls = spec.model_controls.clone();
++        let tool_secrets_for_api = tool_secrets.clone();
+         let llm_source_for_api = Arc::clone(&llm_source);
+         let catalog_for_api = Arc::clone(&catalog);
+         let steering_hub_for_api = Arc::clone(&steering_hub);
+@@ -191,6 +193,7 @@ async fn build_registry(
+             )
+             .with_run_model_controls(model_controls.clone())
+             .with_tool_env_provider(tool_env_provider.clone())
++            .with_tool_secrets(tool_secrets_for_api.clone())
+             .with_mcp_servers(mcp_servers.clone());
+             if let Some(services) = fabro_run_tools_for_api.clone() {
+                 api = api.with_fabro_run_tools(services);
+@@ -239,6 +242,26 @@ async fn build_registry(
+     }
+ }
+ 
++#[expect(
++    clippy::disallowed_methods,
++    reason = "CLI/library workflow runs without a vault explicitly pass the Brave Search process-env credential into tool configuration; server runs pass a vault."
++)]
++async fn tool_secrets_from_configured_sources(
++    vault: Option<&Arc<AsyncRwLock<Vault>>>,
++) -> ToolSecrets {
++    let brave_search_api_key = match vault {
++        Some(vault) => vault
++            .read()
++            .await
++            .get(EnvVars::BRAVE_SEARCH_API_KEY)
++            .map(str::to_string),
++        None => std::env::var(EnvVars::BRAVE_SEARCH_API_KEY).ok(),
++    };
++    ToolSecrets {
++        brave_search_api_key,
++    }
++}
++
+ fn graph_needs_api_backend(graph: &graph::Graph) -> bool {
+     graph.nodes.values().any(routing::node_needs_api_backend)
+ }
+@@ -359,6 +382,7 @@ pub async fn initialize(
+     options.run_options.git = options.git.clone();
+ 
+     let llm_source = build_llm_source(options.vault.clone());
++    let tool_secrets = tool_secrets_from_configured_sources(options.vault.as_ref()).await;
+     let catalog = Arc::clone(&options.catalog);
+     let sandbox_git = Arc::new(SandboxGitRuntime::new());
+     let metadata_runtime = Arc::new(RunMetadataRuntime::new());
+@@ -529,6 +553,7 @@ pub async fn initialize(
+             &graph,
+             Arc::clone(&llm_source),
+             Arc::clone(&catalog),
++            tool_secrets.clone(),
+             options.fabro_run_tools.clone(),
+         )
+         .await?
+@@ -1100,6 +1125,7 @@ mod tests {
+             &graph,
+             Arc::new(VaultCredentialSource::new(Arc::clone(&vault))),
+             test_catalog(),
++            ToolSecrets::default(),
+             None,
+         )
+         .await
