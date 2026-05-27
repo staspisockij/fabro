@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "Script failed with exit code: 101\n\n## output\nerror[E0609]: no field `reference` on type `EnvironmentImageSettings`\n   --> lib/crates/fabro-types/src/settings/run.rs:259:53\n    |\n259 |     substitute_option_string(&mut environment.image.reference, lookup)?;\n    |                                                     ^^^^^^^^^ unknown field\n    |\n    = note: available fields are: `docker`, `dockerfile`\n\nFor more information about this error, try `rustc --explain E0609`.\nerror: could not compile `fabro-types` (lib) due to 1 previous error\n",
+  "timestamp": "2026-05-27T16:05:20.057576Z"
+}
