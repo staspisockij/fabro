@@ -505,7 +505,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-27T22:52:56.405369Z",
-  "last_event_at": "2026-05-27T22:55:32.067405Z",
+  "last_event_at": "2026-05-27T23:28:44.683887Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -690,9 +690,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 48,
       "checkpoint": {
-        "timestamp": "2026-05-27T22:57:59.537968Z",
+        "timestamp": "2026-05-27T22:58:03.211807Z",
         "current_node": "preflight_lint",
         "completed_nodes": [
           "start",
@@ -702,23 +702,128 @@
         ],
         "node_retries": {},
         "context_values": {
-          "thread.preflight_compile.current_node": "preflight_lint",
+          "graph.goal": "# Issue #398: Build automation run materialization core\n\nSource: https://github.com/fabro-sh/fabro/issues/398\nState: OPEN\nAuthor: brynary\nCreated: 2026-05-25T15:06:26Z\nUpdated: 2026-05-27T21:42:25Z\nLabels: none\nAssignees: none\nComments: none\n\n## Body\n\n## Goal\n\nRefactor server run creation so automation-triggered runs can share the existing run creation pipeline, and add a production materializer that turns an automation target into a run manifest.\n\n## Scope\n\nExtract the common body of `handler/runs.rs::create_run` into a crate-private helper that accepts a request object shaped like:\n\n```rust\nstruct CreateRunFromManifestRequest {\n    manifest: fabro_api::types::RunManifest,\n    submitted_manifest_bytes: Vec<u8>,\n    explicit_run_id: Option<fabro_types::RunId>,\n    explicit_title_supplied: bool,\n    actor: fabro_types::Principal,\n    headers: axum::http::HeaderMap,\n    automation: Option<fabro_types::AutomationRef>,\n}\n```\n\nKeep existing `POST /runs` behavior unchanged by calling the helper with `automation: None`.\n\nAdd a crate-private materializer abstraction:\n\n```rust\npub(crate) struct AutomationRunMaterializeInput {\n    pub automation_id: fabro_automation::AutomationId,\n    pub target: fabro_automation::AutomationTarget,\n    pub run_id: fabro_types::RunId,\n    pub user_settings_path: std::path::PathBuf,\n    pub temp_root: std::path::PathBuf,\n}\n\npub(crate) struct AutomationRunMaterialized {\n    pub manifest: fabro_api::types::RunManifest,\n    pub submitted_manifest_bytes: Vec<u8>,\n}\n\n#[derive(thiserror::Error, Debug)]\npub(crate) enum AutomationRunMaterializeError {\n    #[error(\"invalid automation target: {0}\")]\n    InvalidTarget(String),\n    #[error(\"failed to clone automation repository: {0}\")]\n    CloneFailed(String),\n    #[error(\"failed to resolve automation workflow: {0}\")]\n    WorkflowNotFound(String),\n    #[error(\"failed to build run manifest: {0}\")]\n    Manifest(String),\n}\n\n#[async_trait::async_trait]\npub(crate) trait AutomationRunMaterializer: Send + Sync {\n    async fn materialize(\n        &self,\n        input: AutomationRunMaterializeInput,\n    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError>;\n}\n```\n\nProduction materializer behavior:\n\n- Validate target repository as GitHub `owner/repo`.\n- Construct uncredentialed metadata URLs only; never persist credentialed clone URLs.\n- Use server GitHub credentials and existing clone credential helpers when configured.\n- Create a per-run temp directory under `AutomationRunMaterializeInput.temp_root`.\n- Shallow clone `https://github.com/{owner}/{repo}.git`.\n- Check out the configured ref.\n- Resolve the workflow selector with `fabro_config::project::WorkflowLocation::resolve`.\n- Build a `RunManifest` with `fabro_manifest::build_run_manifest`.\n- Pass `user_settings_path: Some(state.active_config_path().to_path_buf())`.\n- Run git commands with `tokio::process::Command` argv values, not shell command strings.\n- Set `GIT_TERMINAL_PROMPT=0` and explicit command timeouts.\n\nTest support:\n\n- Add test-only injection for a fake `AutomationRunMaterializer` behind tests or the existing `test-support` feature.\n- The fake should let route tests assert the input and return a controlled manifest without live GitHub access.\n\n## Files\n\nCreate:\n\n- `lib/crates/fabro-server/src/automation_materializer.rs`\n\nModify:\n\n- `lib/crates/fabro-server/src/server.rs`\n- `lib/crates/fabro-server/src/server/handler/runs.rs`\n- `lib/crates/fabro-server/src/test_support.rs`\n- Relevant server tests around run creation and test support\n\nRead before implementation:\n\n- `docs/internal/error-handling-strategy.md`\n- `docs/internal/server-secrets-strategy.md`\n- `docs/internal/testing-strategy.md`\n\n## Acceptance Criteria\n\n- Existing `POST /runs` behavior and response shape are unchanged.\n- Shared run creation can attach optional automation metadata to the created run.\n- The production materializer builds a run manifest from a GitHub automation target.\n- Git operations use argv-based process execution, disable terminal prompts, and have explicit timeouts.\n- Credentialed URLs are never stored in run metadata or error text.\n- Tests can use a fake materializer without network or live GitHub access.\n\n## Verification\n\nAdd tests for:\n\n- Existing `POST /runs` regression behavior.\n- Helper-created runs with `automation: None` and with automation metadata.\n- Fake materializer injection.\n- Target URL construction.\n- Credential redaction.\n- Ref checkout command planning.\n- Workflow path resolution using temp directories.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server runs\ncargo nextest run -p fabro-server automation_materializer\n```\n",
+          "current_node": "preflight_lint",
+          "internal.retry_count.preflight_lint": 0,
+          "internal.run_id": "01KSNT7Q18FX9NYD0XQDC9J4Q2",
+          "thread.start.current_node": "toolchain",
+          "thread.toolchain.current_node": "preflight_compile",
+          "internal.fidelity": "compact",
+          "graph.rankdir": "LR",
           "internal.thread_id": "preflight_compile",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "internal.retry_count.toolchain": 0,
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "failure_signature": "",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.node_visit_count": 1,
+          "internal.retry_count.preflight_compile": 0,
+          "internal.retry_count.start": 0,
+          "outcome": "succeeded",
+          "failure_class": "",
+          "internal.work_dir": "/home/daytona/workspace/fabro"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 147458,
+              "active_time_ms": 147458
+            }
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 132245,
+              "active_time_ms": 132245
+            }
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 2593,
+              "active_time_ms": 2593
+            }
+          }
+        },
+        "next_node_id": "implement",
+        "git_commit_sha": "2b7e3c2c5aa2468783a2c192c7b4a3dc59e2937d",
+        "node_visits": {
+          "toolchain": 1,
+          "preflight_lint": 1,
+          "start": 1,
+          "preflight_compile": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-27T23:28:44.769541Z",
+        "current_node": "implement",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint",
+          "implement"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "internal.thread_id": "preflight_lint",
           "failure_class": "",
           "internal.run_id": "01KSNT7Q18FX9NYD0XQDC9J4Q2",
           "internal.retry_count.preflight_lint": 0,
           "internal.retry_count.toolchain": 0,
           "graph.rankdir": "LR",
           "internal.work_dir": "/home/daytona/workspace/fabro",
+          "thread.preflight_lint.current_node": "implement",
           "thread.toolchain.current_node": "preflight_compile",
           "internal.node_visit_count": 1,
           "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-          "current_node": "preflight_lint",
+          "last_response": "Implemented #398 automation run materialization core.\n\nSummary:\n- Added crate-private `automation_materializer` module with:\n  - `AutomationRunMaterializeInput`\n  - `AutomationRunMaterialized`\n  - `Au",
+          "internal.retry_count.implement": 0,
+          "current_node": "implement",
           "internal.fidelity": "compact",
           "internal.retry_count.start": 0,
           "thread.start.current_node": "toolchain",
+          "last_stage": "implement",
           "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
           "internal.retry_count.preflight_compile": 0,
+          "response.implement": "Implemented #398 automation run materialization core.\n\nSummary:\n- Added crate-private `automation_materializer` module with:\n  - `AutomationRunMaterializeInput`\n  - `AutomationRunMaterialized`\n  - `AutomationRunMaterializeError`\n  - `AutomationRunMaterializer`\n  - production materializer\n  - test fake materializer\n- Refactored `POST /runs` creation through `create_run_from_manifest(...)`, preserving existing API behavior with `automation: None`.\n- Added optional automation metadata persistence through shared run creation.\n- Wired test-support injection into `AppState` / `TestAppStateBuilder`.\n- Production materializer now:\n  - validates GitHub `owner/repo` targets,\n  - uses uncredentialed clone/metadata URLs,\n  - resolves server GitHub clone credentials via existing helper,\n  - shallow clones and checks out refs using argv-based `tokio::process::Command`,\n  - disables git terminal prompts,\n  - uses explicit timeouts,\n  - resolves workflows and builds run manifests from temp checkouts.\n- Added tests for run creation regression, automation metadata, fake injection, URL construction, credential redaction, ref checkout planning, and workflow path resolution.\n\nVerification run:\n- `cargo check -q --workspace`\n- `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`\n- `cargo nextest run -p fabro-server runs`\n- `cargo nextest run -p fabro-server automation_materializer`\n\nAll passed.",
           "graph.goal": "# Issue #398: Build automation run materialization core\n\nSource: https://github.com/fabro-sh/fabro/issues/398\nState: OPEN\nAuthor: brynary\nCreated: 2026-05-25T15:06:26Z\nUpdated: 2026-05-27T21:42:25Z\nLabels: none\nAssignees: none\nComments: none\n\n## Body\n\n## Goal\n\nRefactor server run creation so automation-triggered runs can share the existing run creation pipeline, and add a production materializer that turns an automation target into a run manifest.\n\n## Scope\n\nExtract the common body of `handler/runs.rs::create_run` into a crate-private helper that accepts a request object shaped like:\n\n```rust\nstruct CreateRunFromManifestRequest {\n    manifest: fabro_api::types::RunManifest,\n    submitted_manifest_bytes: Vec<u8>,\n    explicit_run_id: Option<fabro_types::RunId>,\n    explicit_title_supplied: bool,\n    actor: fabro_types::Principal,\n    headers: axum::http::HeaderMap,\n    automation: Option<fabro_types::AutomationRef>,\n}\n```\n\nKeep existing `POST /runs` behavior unchanged by calling the helper with `automation: None`.\n\nAdd a crate-private materializer abstraction:\n\n```rust\npub(crate) struct AutomationRunMaterializeInput {\n    pub automation_id: fabro_automation::AutomationId,\n    pub target: fabro_automation::AutomationTarget,\n    pub run_id: fabro_types::RunId,\n    pub user_settings_path: std::path::PathBuf,\n    pub temp_root: std::path::PathBuf,\n}\n\npub(crate) struct AutomationRunMaterialized {\n    pub manifest: fabro_api::types::RunManifest,\n    pub submitted_manifest_bytes: Vec<u8>,\n}\n\n#[derive(thiserror::Error, Debug)]\npub(crate) enum AutomationRunMaterializeError {\n    #[error(\"invalid automation target: {0}\")]\n    InvalidTarget(String),\n    #[error(\"failed to clone automation repository: {0}\")]\n    CloneFailed(String),\n    #[error(\"failed to resolve automation workflow: {0}\")]\n    WorkflowNotFound(String),\n    #[error(\"failed to build run manifest: {0}\")]\n    Manifest(String),\n}\n\n#[async_trait::async_trait]\npub(crate) trait AutomationRunMaterializer: Send + Sync {\n    async fn materialize(\n        &self,\n        input: AutomationRunMaterializeInput,\n    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError>;\n}\n```\n\nProduction materializer behavior:\n\n- Validate target repository as GitHub `owner/repo`.\n- Construct uncredentialed metadata URLs only; never persist credentialed clone URLs.\n- Use server GitHub credentials and existing clone credential helpers when configured.\n- Create a per-run temp directory under `AutomationRunMaterializeInput.temp_root`.\n- Shallow clone `https://github.com/{owner}/{repo}.git`.\n- Check out the configured ref.\n- Resolve the workflow selector with `fabro_config::project::WorkflowLocation::resolve`.\n- Build a `RunManifest` with `fabro_manifest::build_run_manifest`.\n- Pass `user_settings_path: Some(state.active_config_path().to_path_buf())`.\n- Run git commands with `tokio::process::Command` argv values, not shell command strings.\n- Set `GIT_TERMINAL_PROMPT=0` and explicit command timeouts.\n\nTest support:\n\n- Add test-only injection for a fake `AutomationRunMaterializer` behind tests or the existing `test-support` feature.\n- The fake should let route tests assert the input and return a controlled manifest without live GitHub access.\n\n## Files\n\nCreate:\n\n- `lib/crates/fabro-server/src/automation_materializer.rs`\n\nModify:\n\n- `lib/crates/fabro-server/src/server.rs`\n- `lib/crates/fabro-server/src/server/handler/runs.rs`\n- `lib/crates/fabro-server/src/test_support.rs`\n- Relevant server tests around run creation and test support\n\nRead before implementation:\n\n- `docs/internal/error-handling-strategy.md`\n- `docs/internal/server-secrets-strategy.md`\n- `docs/internal/testing-strategy.md`\n\n## Acceptance Criteria\n\n- Existing `POST /runs` behavior and response shape are unchanged.\n- Shared run creation can attach optional automation metadata to the created run.\n- The production materializer builds a run manifest from a GitHub automation target.\n- Git operations use argv-based process execution, disable terminal prompts, and have explicit timeouts.\n- Credentialed URLs are never stored in run metadata or error text.\n- Tests can use a fake materializer without network or live GitHub access.\n\n## Verification\n\nAdd tests for:\n\n- Existing `POST /runs` regression behavior.\n- Helper-created runs with `automation: None` and with automation metadata.\n- Fake materializer injection.\n- Target URL construction.\n- Credential redaction.\n- Ref checkout command planning.\n- Workflow path resolution using temp directories.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server runs\ncargo nextest run -p fabro-server automation_materializer\n```\n",
           "outcome": "succeeded",
           "failure_signature": ""
@@ -727,6 +832,45 @@
           "start": {
             "status": "succeeded",
             "usage": null
+          },
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "implement",
+              "last_response": "Implemented #398 automation run materialization core.\n\nSummary:\n- Added crate-private `automation_materializer` module with:\n  - `AutomationRunMaterializeInput`\n  - `AutomationRunMaterialized`\n  - `Au",
+              "response.implement": "Implemented #398 automation run materialization core.\n\nSummary:\n- Added crate-private `automation_materializer` module with:\n  - `AutomationRunMaterializeInput`\n  - `AutomationRunMaterialized`\n  - `AutomationRunMaterializeError`\n  - `AutomationRunMaterializer`\n  - production materializer\n  - test fake materializer\n- Refactored `POST /runs` creation through `create_run_from_manifest(...)`, preserving existing API behavior with `automation: None`.\n- Added optional automation metadata persistence through shared run creation.\n- Wired test-support injection into `AppState` / `TestAppStateBuilder`.\n- Production materializer now:\n  - validates GitHub `owner/repo` targets,\n  - uses uncredentialed clone/metadata URLs,\n  - resolves server GitHub clone credentials via existing helper,\n  - shallow clones and checks out refs using argv-based `tokio::process::Command`,\n  - disables git terminal prompts,\n  - uses explicit timeouts,\n  - resolves workflows and builds run manifests from temp checkouts.\n- Added tests for run creation regression, automation metadata, fake injection, URL construction, credential redaction, ref checkout planning, and workflow path resolution.\n\nVerification run:\n- `cargo check -q --workspace`\n- `cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings`\n- `cargo nextest run -p fabro-server runs`\n- `cargo nextest run -p fabro-server automation_materializer`\n\nAll passed."
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 2561734,
+                    "output_tokens": 28506,
+                    "reasoning_tokens": 23576,
+                    "cache_read_tokens": 17460736,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 23101498
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-server/src/automation_materializer.rs"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 1398888,
+              "tool_time_ms": 372864,
+              "active_time_ms": 1771752
+            }
           },
           "toolchain": {
             "status": "succeeded",
@@ -771,11 +915,12 @@
             }
           }
         },
-        "next_node_id": "implement",
+        "next_node_id": "simplify_opus",
         "node_visits": {
           "start": 1,
           "preflight_lint": 1,
           "toolchain": 1,
+          "implement": 1,
           "preflight_compile": 1
         }
       },
@@ -812,7 +957,12 @@
       "first_event_seq": 41,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-27T22:57:59.536901Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -820,11 +970,27 @@
         "command": "exec 2>&1\ncargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+        "exit_code": 0,
+        "duration_ms": 147458,
+        "termination": "exited",
+        "output_bytes": 0,
+        "live_streaming": false
+      },
       "parallel_results": null,
       "output": null,
+      "output_bytes": 0,
+      "live_streaming": false,
+      "termination": "exited",
       "started_at": "2026-05-27T22:55:32.066910Z",
       "handler": "command",
+      "timing": {
+        "wall_time_ms": 147469,
+        "inference_time_ms": 0,
+        "tool_time_ms": 147458,
+        "active_time_ms": 147458
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -833,7 +999,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "toolchain@1": {
       "first_event_seq": 21,
@@ -882,6 +1048,259 @@
         "cache_write_tokens": 0
       },
       "state": "succeeded"
+    },
+    "implement@1": {
+      "first_event_seq": 51,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "openai",
+        "model": "gpt-5.5",
+        "reasoning_effort": "xhigh"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-27T22:58:03.215762Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 2561734,
+        "output_tokens": 28506,
+        "total_tokens": 20074552,
+        "reasoning_tokens": 23576,
+        "cache_read_tokens": 17460736,
+        "cache_write_tokens": 0,
+        "total_usd_micros": 23101498
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "gpt-5.5"
+      },
+      "todos": {
+        "kind": "openai_plan",
+        "list_id": "openai_plan:6d9a9d22-00f7-4ac9-997e-5dd294d7d0af",
+        "items": [
+          {
+            "id": "9329b11b5a306fe7",
+            "status": "completed",
+            "order": 0,
+            "subject": "Inspect existing automation domain, manifest builder, GitHub credential helpers, and server run tests"
+          },
+          {
+            "id": "b8926f25b6951df3",
+            "status": "completed",
+            "order": 1,
+            "subject": "Add focused failing tests for shared run creation, automation metadata, fake materializer injection, and production materializer planning/redaction/resolution"
+          },
+          {
+            "id": "12bf63c8b57dbcf8",
+            "status": "completed",
+            "order": 2,
+            "subject": "Implement create-run helper and wire POST /runs unchanged"
+          },
+          {
+            "id": "0776bd2c76e7758d",
+            "status": "completed",
+            "order": 3,
+            "subject": "Implement automation materializer abstraction, production materializer, Git command planning/timeouts, credential handling, and test injection"
+          },
+          {
+            "id": "de376744e3e74d9b",
+            "status": "in_progress",
+            "order": 4,
+            "subject": "Run targeted tests and fix failures"
+          },
+          {
+            "id": "d80bdd3dde40f6c5",
+            "status": "pending",
+            "order": 5,
+            "subject": "Run requested verification commands"
+          }
+        ]
+      },
+      "subagents": [
+        {
+          "agent_id": "09b80cf2",
+          "depth": 1,
+          "task": "Inspect the Fabro repo for issue #398 dependencies. Focus on existing automation domain types (fabro-automation), manifest builder APIs (fabro-manifest/build_run_manifest), GitHub clone credential helpers, and current fabro-server tests for POST /runs and test_support. Do not modify files. Return concise findings: relevant structs/enums/functions, file paths, and recommended test insertion points.",
+          "status": {
+            "kind": "closed"
+          }
+        }
+      ],
+      "permission_level": "full",
+      "agent_tools": [
+        {
+          "name": "apply_patch",
+          "description": "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        },
+        {
+          "name": "close_agent",
+          "description": "Close a running subagent that is no longer needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "glob",
+          "description": "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "grep",
+          "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "read_file",
+          "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "request_user_input",
+          "description": "Ask the human one or more questions and wait for their answers before continuing this stage.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "send_input",
+          "description": "Send a follow-up message to a running subagent when new information or corrected instructions are needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "shell",
+          "description": "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "shell",
+          "invoked": true
+        },
+        {
+          "name": "spawn_agent",
+          "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": true
+        },
+        {
+          "name": "update_plan",
+          "description": "Update the multi-step plan for the current task. Submit the entire plan; existing steps are reconciled by exact step text.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": true
+        },
+        {
+          "name": "wait",
+          "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "web_fetch",
+          "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "web_search",
+          "description": "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "write_file",
+          "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        }
+      ],
+      "context_window": {
+        "provider": "openai",
+        "model": "gpt-5.5",
+        "context_window_tokens": 272000,
+        "input_tokens": 110962,
+        "usage_percent": 40.79485294117647,
+        "count_method": "response_usage_scaled_breakdown",
+        "staleness": "live",
+        "generated_at": "2026-05-27T23:28:44.682665Z",
+        "event_seq": 662,
+        "breakdown": [
+          {
+            "category": "system_prompt",
+            "tokens": 1025,
+            "usage_percent": 0.37683823529411764
+          },
+          {
+            "category": "tools",
+            "tokens": 1464,
+            "usage_percent": 0.538235294117647
+          },
+          {
+            "category": "memory",
+            "tokens": 3484,
+            "usage_percent": 1.2808823529411764
+          },
+          {
+            "category": "conversation",
+            "tokens": 104982,
+            "usage_percent": 38.59632352941176
+          },
+          {
+            "category": "other",
+            "tokens": 7,
+            "usage_percent": 0.002573529411764706
+          }
+        ],
+        "warnings": []
+      },
+      "state": "running"
     },
     "start@1": {
       "first_event_seq": 17,
