@@ -1,0 +1,252 @@
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index af76e3f4c..5f8224de6 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -5108,7 +5108,7 @@ components:
+       name: If-Match
+       in: header
+       required: true
+-      description: Current automation revision returned in the `ETag` header or `revision` field.
++      description: Current resource revision used for optimistic concurrency, as returned in the `ETag` response header.
+       schema:
+         type: string
+       example: '"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+@@ -5363,7 +5363,7 @@ components:
+         format: uuid
+ 
+     ETag:
+-      description: Current automation revision for optimistic concurrency.
++      description: Current resource revision for optimistic concurrency. Supply this value via `If-Match` on subsequent mutating requests.
+       schema:
+         type: string
+       example: '"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"'
+diff --git a/lib/crates/fabro-api/build.rs b/lib/crates/fabro-api/build.rs
+index 5e240198b..7d999fb41 100644
+--- a/lib/crates/fabro-api/build.rs
++++ b/lib/crates/fabro-api/build.rs
+@@ -185,7 +185,6 @@ fn main() {
+ 
+     let mut settings = GenerationSettings::default();
+     settings.with_interface(InterfaceStyle::Builder);
+-    const NO_TYPE_IMPLS: &[TypeImpl] = &[];
+     let replacements: &[(&str, &str, &[TypeImpl])] = &[
+         ("RunStatus", "fabro_types::status::RunStatus", &[]),
+         ("PendingReason", "fabro_types::status::PendingReason", &[]),
+@@ -628,26 +627,18 @@ fn main() {
+         ("SandboxResources", "fabro_types::SandboxResources", &[]),
+         ("SandboxTimestamps", "fabro_types::SandboxTimestamps", &[]),
+         ("AskFabro", "fabro_types::AskFabro", &[]),
+-        ("Automation", "fabro_automation::Automation", NO_TYPE_IMPLS),
+-        (
+-            "AutomationTarget",
+-            "fabro_automation::AutomationTarget",
+-            NO_TYPE_IMPLS,
+-        ),
+-        (
+-            "AutomationTrigger",
+-            "fabro_automation::AutomationTrigger",
+-            NO_TYPE_IMPLS,
+-        ),
++        ("Automation", "fabro_automation::Automation", &[]),
++        ("AutomationTarget", "fabro_automation::AutomationTarget", &[]),
++        ("AutomationTrigger", "fabro_automation::AutomationTrigger", &[]),
+         (
+             "CreateAutomationRequest",
+             "fabro_automation::AutomationDraft",
+-            NO_TYPE_IMPLS,
++            &[],
+         ),
+         (
+             "ReplaceAutomationRequest",
+             "fabro_automation::AutomationReplace",
+-            NO_TYPE_IMPLS,
++            &[],
+         ),
+         ("SessionId", "fabro_types::SessionId", &[]),
+         ("TurnId", "fabro_types::TurnId", &[]),
+diff --git a/lib/crates/fabro-api/tests/automation_round_trip.rs b/lib/crates/fabro-api/tests/automation_round_trip.rs
+index f06eeb2b5..9984fbb39 100644
+--- a/lib/crates/fabro-api/tests/automation_round_trip.rs
++++ b/lib/crates/fabro-api/tests/automation_round_trip.rs
+@@ -1,5 +1,3 @@
+-use std::any::{TypeId, type_name};
+-
+ use fabro_api::types::{
+     Automation as ApiAutomation, AutomationTarget as ApiAutomationTarget,
+     AutomationTrigger as ApiAutomationTrigger,
+@@ -11,14 +9,15 @@ use fabro_automation::{
+ };
+ use serde_json::json;
+ 
+-#[test]
+-fn automation_contract_reuses_domain_types() {
+-    assert_same_type::<ApiAutomation, Automation>();
+-    assert_same_type::<ApiAutomationTarget, AutomationTarget>();
+-    assert_same_type::<ApiAutomationTrigger, AutomationTrigger>();
+-    assert_same_type::<ApiCreateAutomationRequest, AutomationDraft>();
+-    assert_same_type::<ApiReplaceAutomationRequest, AutomationReplace>();
+-}
++// Compile-time witnesses that the generated API types resolve to the same
++// types as the `fabro-automation` domain types via `with_replacement(...)`.
++// If progenitor stops reusing the domain type, these functions stop type-
++// checking and the build fails.
++const _: fn(ApiAutomation) -> Automation = |value| value;
++const _: fn(ApiAutomationTarget) -> AutomationTarget = |value| value;
++const _: fn(ApiAutomationTrigger) -> AutomationTrigger = |value| value;
++const _: fn(ApiCreateAutomationRequest) -> AutomationDraft = |value| value;
++const _: fn(ApiReplaceAutomationRequest) -> AutomationReplace = |value| value;
+ 
+ #[test]
+ fn automation_response_round_trips_public_json_shape() {
+@@ -49,9 +48,6 @@ fn automation_response_round_trips_public_json_shape() {
+     });
+ 
+     let api: ApiAutomation = serde_json::from_value(value.clone()).unwrap();
+-    let domain: Automation = serde_json::from_value(value.clone()).unwrap();
+-
+-    assert_eq!(api, domain);
+     assert_eq!(serde_json::to_value(api).unwrap(), value);
+ }
+ 
+@@ -61,7 +57,7 @@ fn create_automation_request_round_trips_public_json_shape() {
+         "id": "nightly-deps",
+         "name": "Nightly dependency update",
+         "description": "Keep dependencies fresh",
+-        "enabled": false,
++        "enabled": true,
+         "target": {
+             "repository": "fabro-sh/fabro",
+             "ref": "main",
+@@ -77,9 +73,6 @@ fn create_automation_request_round_trips_public_json_shape() {
+     });
+ 
+     let api: ApiCreateAutomationRequest = serde_json::from_value(value.clone()).unwrap();
+-    let domain: AutomationDraft = serde_json::from_value(value.clone()).unwrap();
+-
+-    assert_eq!(api, domain);
+     assert_eq!(serde_json::to_value(api).unwrap(), value);
+ }
+ 
+@@ -105,18 +98,5 @@ fn replace_automation_request_round_trips_public_json_shape() {
+     });
+ 
+     let api: ApiReplaceAutomationRequest = serde_json::from_value(value.clone()).unwrap();
+-    let domain: AutomationReplace = serde_json::from_value(value.clone()).unwrap();
+-
+-    assert_eq!(api, domain);
+     assert_eq!(serde_json::to_value(api).unwrap(), value);
+ }
+-
+-fn assert_same_type<Api: 'static, Domain: 'static>() {
+-    assert_eq!(
+-        TypeId::of::<Api>(),
+-        TypeId::of::<Domain>(),
+-        "{} should be reused as {}",
+-        type_name::<Api>(),
+-        type_name::<Domain>(),
+-    );
+-}
+diff --git a/lib/crates/fabro-automation/src/model.rs b/lib/crates/fabro-automation/src/model.rs
+index 93f1d2271..530ab84e9 100644
+--- a/lib/crates/fabro-automation/src/model.rs
++++ b/lib/crates/fabro-automation/src/model.rs
+@@ -147,7 +147,7 @@ pub struct AutomationDraft {
+     pub name:        String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub description: Option<String>,
+-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
++    #[serde(default = "default_true")]
+     pub enabled:     bool,
+     pub target:      AutomationTarget,
+     pub triggers:    Vec<AutomationTrigger>,
+@@ -380,14 +380,6 @@ fn default_true() -> bool {
+     true
+ }
+ 
+-#[expect(
+-    clippy::trivially_copy_pass_by_ref,
+-    reason = "serde skip_serializing_if predicates receive references"
+-)]
+-fn is_true(value: &bool) -> bool {
+-    *value
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use crate::{
+diff --git a/lib/packages/fabro-api-client/src/api/automations-api.ts b/lib/packages/fabro-api-client/src/api/automations-api.ts
+index f66253294..832fa0665 100644
+--- a/lib/packages/fabro-api-client/src/api/automations-api.ts
++++ b/lib/packages/fabro-api-client/src/api/automations-api.ts
+@@ -125,7 +125,7 @@ export const AutomationsApiAxiosParamCreator = function (configuration?: Configu
+          * Deletes an automation definition when `If-Match` matches the current automation revision.
+          * @summary Delete automation
+          * @param {string} id Unique automation identifier.
+-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+          * @param {*} [options] Override http request option.
+          * @throws {RequiredError}
+          */
+@@ -257,7 +257,7 @@ export const AutomationsApiAxiosParamCreator = function (configuration?: Configu
+          * Replaces an automation definition when `If-Match` matches the current automation revision.
+          * @summary Replace automation
+          * @param {string} id Unique automation identifier.
+-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+          * @param {ReplaceAutomationRequest} replaceAutomationRequest
+          * @param {*} [options] Override http request option.
+          * @throws {RequiredError}
+@@ -383,7 +383,7 @@ export const AutomationsApiFp = function(configuration?: Configuration) {
+          * Deletes an automation definition when `If-Match` matches the current automation revision.
+          * @summary Delete automation
+          * @param {string} id Unique automation identifier.
+-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+          * @param {*} [options] Override http request option.
+          * @throws {RequiredError}
+          */
+@@ -424,7 +424,7 @@ export const AutomationsApiFp = function(configuration?: Configuration) {
+          * Replaces an automation definition when `If-Match` matches the current automation revision.
+          * @summary Replace automation
+          * @param {string} id Unique automation identifier.
+-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+          * @param {ReplaceAutomationRequest} replaceAutomationRequest
+          * @param {*} [options] Override http request option.
+          * @throws {RequiredError}
+@@ -481,7 +481,7 @@ export const AutomationsApiFactory = function (configuration?: Configuration, ba
+          * Deletes an automation definition when `If-Match` matches the current automation revision.
+          * @summary Delete automation
+          * @param {string} id Unique automation identifier.
+-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+          * @param {*} [options] Override http request option.
+          * @throws {RequiredError}
+          */
+@@ -513,7 +513,7 @@ export const AutomationsApiFactory = function (configuration?: Configuration, ba
+          * Replaces an automation definition when `If-Match` matches the current automation revision.
+          * @summary Replace automation
+          * @param {string} id Unique automation identifier.
+-         * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++         * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+          * @param {ReplaceAutomationRequest} replaceAutomationRequest
+          * @param {*} [options] Override http request option.
+          * @throws {RequiredError}
+@@ -564,7 +564,7 @@ export class AutomationsApi extends BaseAPI {
+      * Deletes an automation definition when `If-Match` matches the current automation revision.
+      * @summary Delete automation
+      * @param {string} id Unique automation identifier.
+-     * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++     * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+      * @param {*} [options] Override http request option.
+      * @throws {RequiredError}
+      */
+@@ -599,7 +599,7 @@ export class AutomationsApi extends BaseAPI {
+      * Replaces an automation definition when `If-Match` matches the current automation revision.
+      * @summary Replace automation
+      * @param {string} id Unique automation identifier.
+-     * @param {string} ifMatch Current automation revision returned in the &#x60;ETag&#x60; header or &#x60;revision&#x60; field.
++     * @param {string} ifMatch Current resource revision used for optimistic concurrency, as returned in the &#x60;ETag&#x60; response header.
+      * @param {ReplaceAutomationRequest} replaceAutomationRequest
+      * @param {*} [options] Override http request option.
+      * @throws {RequiredError}
