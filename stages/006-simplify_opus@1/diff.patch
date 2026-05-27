@@ -1,0 +1,86 @@
+diff --git a/lib/crates/fabro-cli/src/commands/secret/list.rs b/lib/crates/fabro-cli/src/commands/secret/list.rs
+index 752109ee9..70cdc3a53 100644
+--- a/lib/crates/fabro-cli/src/commands/secret/list.rs
++++ b/lib/crates/fabro-cli/src/commands/secret/list.rs
+@@ -1,23 +1,12 @@
+ use anyhow::Result;
+-use chrono::{DateTime, Utc};
++use chrono::Utc;
+ use cli_table::format::{Border, Separator};
+ use cli_table::{Cell, CellStruct, Style, Table};
+ use fabro_util::terminal::Styles;
+ 
+ use crate::args::SecretListArgs;
+ use crate::command_context::CommandContext;
+-use crate::shared::print_json_pretty;
+-
+-fn format_age(dt: DateTime<Utc>, now: DateTime<Utc>) -> String {
+-    let dur = now.signed_duration_since(dt);
+-    if dur.num_days() > 0 {
+-        format!("{}d ago", dur.num_days())
+-    } else if dur.num_hours() > 0 {
+-        format!("{}h ago", dur.num_hours())
+-    } else {
+-        format!("{}m ago", dur.num_minutes().max(1))
+-    }
+-}
++use crate::shared::{format_age, print_json_pretty};
+ 
+ pub(super) async fn list_command(_args: &SecretListArgs, ctx: &CommandContext) -> Result<()> {
+     let client = ctx.server().await?;
+diff --git a/lib/crates/fabro-cli/src/commands/variable/list.rs b/lib/crates/fabro-cli/src/commands/variable/list.rs
+index f57dd2f42..4c19b6583 100644
+--- a/lib/crates/fabro-cli/src/commands/variable/list.rs
++++ b/lib/crates/fabro-cli/src/commands/variable/list.rs
+@@ -1,23 +1,12 @@
+ use anyhow::Result;
+-use chrono::{DateTime, Utc};
++use chrono::Utc;
+ use cli_table::format::{Border, Separator};
+ use cli_table::{Cell, CellStruct, Style, Table};
+ use fabro_util::terminal::Styles;
+ 
+ use crate::args::VariableListArgs;
+ use crate::command_context::CommandContext;
+-use crate::shared::print_json_pretty;
+-
+-fn format_age(dt: DateTime<Utc>, now: DateTime<Utc>) -> String {
+-    let dur = now.signed_duration_since(dt);
+-    if dur.num_days() > 0 {
+-        format!("{}d ago", dur.num_days())
+-    } else if dur.num_hours() > 0 {
+-        format!("{}h ago", dur.num_hours())
+-    } else {
+-        format!("{}m ago", dur.num_minutes().max(1))
+-    }
+-}
++use crate::shared::{format_age, print_json_pretty};
+ 
+ pub(super) async fn list_command(_args: &VariableListArgs, ctx: &CommandContext) -> Result<()> {
+     let client = ctx.server().await?;
+diff --git a/lib/crates/fabro-cli/src/shared/utilities.rs b/lib/crates/fabro-cli/src/shared/utilities.rs
+index d7d82f1fe..e9cd32bf6 100644
+--- a/lib/crates/fabro-cli/src/shared/utilities.rs
++++ b/lib/crates/fabro-cli/src/shared/utilities.rs
+@@ -195,6 +195,21 @@ pub(crate) fn format_duration_ms(ms: u64) -> String {
+     }
+ }
+ 
++/// Format a UTC timestamp as a coarse "N{d,h,m} ago" string relative to `now`.
++pub(crate) fn format_age(
++    dt: chrono::DateTime<chrono::Utc>,
++    now: chrono::DateTime<chrono::Utc>,
++) -> String {
++    let dur = now.signed_duration_since(dt);
++    if dur.num_days() > 0 {
++        format!("{}d ago", dur.num_days())
++    } else if dur.num_hours() > 0 {
++        format!("{}h ago", dur.num_hours())
++    } else {
++        format!("{}m ago", dur.num_minutes().max(1))
++    }
++}
++
+ pub(crate) fn format_size(bytes: u64) -> String {
+     const KB: u64 = 1024;
+     const MB: u64 = 1024 * KB;
