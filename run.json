@@ -505,7 +505,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-27T02:03:08.681266Z",
-  "last_event_at": "2026-05-27T02:47:31.151950Z",
+  "last_event_at": "2026-05-27T02:57:10.079137Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -1361,9 +1361,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 1234,
       "checkpoint": {
-        "timestamp": "2026-05-27T02:57:06.174756Z",
+        "timestamp": "2026-05-27T02:57:10.078925Z",
         "current_node": "verify",
         "completed_nodes": [
           "start",
@@ -1377,145 +1377,41 @@
         ],
         "node_retries": {},
         "context_values": {
-          "thread.simplify_opus.current_node": "simplify_gpt",
-          "internal.thread_id": "simplify_gpt",
-          "failure_signature": "",
-          "internal.retry_count.start": 0,
-          "internal.retry_count.implement": 0,
-          "thread.preflight_lint.current_node": "implement",
-          "internal.retry_count.preflight_lint": 0,
-          "thread.implement.current_node": "simplify_opus",
-          "response.simplify_gpt": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even when tooltip content size is unchanged.\n  - Removed direct `window.innerWidth/innerHeight` reads from style calculation and made viewport dimensions explicit state.\n\n- `apps/fabro-web/app/routes/run-terminal.tsx`\n  - Mounted Sonner `<Toaster richColors position=\"bottom-right\" />` for the standalone terminal route, since it sits outside `AppShell` where the global Toaster is mounted.\n\nVerification run:\n\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun test app/components/toast.test.tsx --isolate` ✅\n- `cd apps/fabro-web && bun run test` ✅ — 493 pass, 0 fail\n\nNote: running raw `bun test` without the package script’s `--isolate` failed in unrelated shared-state tests; `bun run test` is the repo’s configured command and passes.",
-          "internal.retry_count.verify": 0,
-          "graph.goal": "# Replace DIY overlay primitives in fabro-web\n\n## Context\n\n`apps/fabro-web` hand-rolls Tooltip, HoverCard, and a Toast system. ~285 lines of overlay code with weak collision detection, no keyboard a11y on the CSS-only tooltips, and a custom Toast context that no longer earns its complexity. Already on `@headlessui/react` for Dialog/Menu — Headless doesn't ship Tooltip/HoverCard/Toast, so this is a real gap, not redundancy.\n\nGoal: delete the DIY code, gain real a11y/positioning, keep call sites stable.\n\n## Scope (3 areas)\n\n### 1. Tooltip + HoverCard → Radix wrappers\n\nAdd `@radix-ui/react-tooltip` and `@radix-ui/react-hover-card`.\n\nKeep the public API (`<Tooltip label={x}>{children}</Tooltip>`, `<HoverCard content={x}>{children}</HoverCard>`) by reimplementing the two components in `app/components/ui.tsx` as thin Radix wrappers. All 13 existing call sites remain unchanged.\n\n- Delete `useHoverAnchor` (ui.tsx:141-179).\n- Mount one `TooltipProvider` in `app/layouts/app-shell.tsx` (delay 200, skipDelayDuration 300) so siblings share a delay group.\n- HoverCard wrapper passes `openDelay` (default 0, stage-sidebar still passes 200) → Radix `openDelay`.\n- Keep `PopoverHeader` / `PopoverRows` / `PopoverRow` unchanged — presentational, used inside HoverCard `content`.\n\nCall sites (do not touch): `run-billing`, `settings-live-events`, `run-sandbox/{services,vnc,filesystem}-panel`, `terminal-view`, `size-chip`, `run-summary-panel`, `event-debug` (Tooltip wrapper use), `meta-bar`, `human-qa`, `run-table-row`, `run-waterfall`, `stage-sidebar`, `run-stages`, `run-detail/header`.\n\n### 2. Toast system → Sonner\n\nAdd `sonner`. Mount `<Toaster richColors position=\"bottom-right\" />` in `app/layouts/app-shell.tsx` next to the new `TooltipProvider`.\n\nReplace `app/components/toast.tsx` with a tiny shim that preserves the current API:\n```ts\n// useToast() returns { push, dismiss, clear }\n// push({ message, tone, autoDismissMs }) → toast(msg) / toast.error(msg) / toast(msg, { duration })\n```\nKeep the shim so the 10 consumers + `useRunToasts` need zero changes. `action` field unused in production — drop from the type (only the test referenced it).\n\nRewrite `toast.test.tsx` against the shim's observable behavior (rendered text, error persistence) rather than `data-toast-id`. Other tests that wrap in `<ToastProvider>` keep working because the shim re-exports a no-op `ToastProvider` (sonner's `Toaster` is mounted globally).\n\n### 3. CSS-only tooltips → real Tooltip\n\nReplace the inline `group-hover/*` blocks in `app/routes/settings-models.tsx` (test-error message ~L519, alias list ~L545) with the new `<Tooltip label={...}>` wrapper. Gains keyboard focus + Esc dismiss + collision avoidance.\n\n### 4. SVG-anchored hovers → shared `FloatingTooltip` helper\n\nTwo sites anchor to a measured `DOMRect` from SVG/Graphviz output (no wrappable trigger element): `app/routes/run-overview.tsx:303-318` and `app/components/event-debug.tsx:423-432` (+ the thread-DNA one near :639).\n\nExtract a single helper in `app/components/floating-tooltip.tsx`:\n```ts\nfunction FloatingTooltip({ rect, placement, children }) // portals to body, applies collision-avoiding style\n```\nAbsorb the logic of `hover-card-style.ts` into it (cover `top`/`bottom` placements). Delete `app/components/hover-card-style.ts`. Both sites use the helper; `run-overview` renders `<StagePopover>` inside.\n\n## Files to modify\n\nModify:\n- `app/components/ui.tsx` — replace Tooltip/HoverCard impls; delete useHoverAnchor\n- `app/components/toast.tsx` — shrink to ~30-line sonner shim\n- `app/components/toast.test.tsx` — rewrite assertions\n- `app/layouts/app-shell.tsx` — mount `TooltipProvider` + sonner `<Toaster />`, drop `<ToastProvider>`\n- `app/routes/settings-models.tsx` — swap two inline CSS tooltips for `<Tooltip>`\n- `app/routes/run-overview.tsx` — use `FloatingTooltip`\n- `app/components/event-debug.tsx` — use `FloatingTooltip` (two call sites)\n- `apps/fabro-web/package.json` — add `@radix-ui/react-tooltip`, `@radix-ui/react-hover-card`, `sonner`\n\nCreate:\n- `app/components/floating-tooltip.tsx`\n\nDelete:\n- `app/components/hover-card-style.ts`\n\n## Verification\n\n1. `cd apps/fabro-web && bun run typecheck` — no type errors.\n2. `cd apps/fabro-web && bun test` — `toast.test.tsx` passes against new shim; all other tests unchanged.\n3. Run dev locally (`fabro server start` + `cd apps/fabro-web && bun run dev`) and exercise:\n   - Tooltips: hover the refresh button on `/runs/:id/sandbox/services`, status chip on `/runs/:id/billing`, run-table-row status icons. Confirm hover delay (~200ms shared), Esc dismisses, keyboard focus opens.\n   - HoverCards: hover stage rows in the stage sidebar, waterfall rows, and the run-detail header chips. Confirm positioning flips near viewport edges (Radix collision detection).\n   - Toasts: trigger a failed `/runs/:id` action (e.g. retry an unretryable run), confirm red toast persists; trigger a success toast (e.g. archive), confirm auto-dismiss; deep-link to a missing file under `/runs/:id/files/missing-path` — confirm 5s warning.\n   - SVG hovers: hover Graphviz nodes on `/runs/:id` overview; hover the waterfall event chips in event-debug. Confirm tooltips appear above and clamp to viewport.\n4. Lighthouse/axe spot check on settings-models: confirm aliases + test-error tooltips now reachable via keyboard.\n\n## Out of scope\n\n- `ConfirmDialog`, `RowActionsMenu` — already on Headless UI Dialog/Menu, no change.\n- `CollapsibleFile` — 40-line one-off, marginal win, leave.\n- Theming changes; visual output should match current styling pixel-close.\n\n## Open questions\n\n- Do we want to brand sonner toasts (custom `toastOptions` for color tokens), or accept sonner defaults? Defaults are dark-themed and read well against `bg-panel`, so likely fine.\n- `TooltipProvider` `skipDelayDuration` value — 300ms is a sensible default for grouped hovers across a sidebar; revisit if it feels off in use.\n",
-          "response.implement": "Implemented the overlay replacement across `fabro-web`.\n\nWhat changed:\n- Replaced DIY `Tooltip` / `HoverCard` in `app/components/ui.tsx` with Radix wrappers.\n- Added app-level `TooltipProvider` and Sonner `<Toaster richColors position=\"bottom-right\" />` in `app/layouts/app-shell.tsx`.\n- Replaced custom toast context/rendering with a Sonner-backed shim preserving `useToast()` / `ToastProvider` API.\n- Rewrote `toast.test.tsx` around Sonner observable behavior and persistent error toasts.\n- Converted CSS-only settings model tooltips to real `<Tooltip>`.\n- Added shared `FloatingTooltip` for SVG/DOMRect-anchored hovers and migrated:\n  - `run-overview`\n  - `event-debug` DNA popover\n  - `event-debug` thread DNA popover\n- Deleted `hover-card-style.ts`.\n- Added dependencies:\n  - `@radix-ui/react-tooltip`\n  - `@radix-ui/react-hover-card`\n  - `sonner`\n- Removed the stale toast `action` type usage from the remaining test helper.\n\nVerification:\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun run test` ✅  \n  - This runs the package script: `bun test --isolate`\n  - 493 tests passed.",
-          "internal.retry_count.simplify_gpt": 0,
-          "thread.start.current_node": "toolchain",
-          "failure_class": "",
-          "current_node": "verify",
           "internal.retry_count.simplify_opus": 0,
-          "graph.rankdir": "LR",
-          "internal.fidelity": "compact",
-          "internal.node_visit_count": 1,
-          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
-          "internal.work_dir": "/home/daytona/workspace/fabro",
-          "internal.run_id": "01KSKJQ9FMRRBBNQW12S4A3HYJ",
-          "internal.retry_count.toolchain": 0,
-          "response.simplify_opus": "## Summary\n\nThree review agents flagged issues across code reuse, quality, and efficiency. I applied fixes for the clear wins; some flagged items were rejected because they would have caused regressions.\n\n### Fixed\n\n**`floating-tooltip.tsx`** (efficiency — the biggest set of issues):\n- `useLayoutEffect` deps were `[children, rect]`. Both change identity every render, so the `ResizeObserver` and `window.resize` listener were torn down and re-added on every parent render of an open tooltip. Changed deps to `[]` — the observer is wired once on mount and watches the node directly.\n- `setSize` now bails out when the measured size hasn't changed, preventing render/effect storms.\n- Dropped the dead `useMemo` for `style`: `rect` was a fresh `DOMRect` every render so the memo dep always changed; the cache machinery cost more than the arithmetic.\n- `floatingStyle` reads `window.innerWidth`/`innerHeight` once and passes both to `resolvePlacement` instead of two separate `viewportSize()` calls.\n- Added a `DEFAULT_CLASS_NAME` for the common tooltip styling.\n\n**`event-debug.tsx`**: removed two duplicated `className` strings (now use the helper default), shrinking the two near-identical `*Popover` components.\n\n**`ui.tsx`** (quality cleanup, kept SSR/no-Provider safety):\n- Hoisted `TOOLTIP_DELAY_DURATION` / `TOOLTIP_SKIP_DELAY_DURATION` constants (they had been duplicated between `ui.tsx` and `app-shell.tsx`).\n- `<TooltipPrimitive.Trigger asChild className=\"inline-flex\">` was leaking `inline-flex` onto consumer elements (button styles, etc.). Now wraps children in a real `<span className=\"inline-flex\">` inside the `asChild` trigger — matches the original wrapper behavior. Same fix on `HoverCard`.\n- `TooltipProvider` no longer requires callers to pass `delayDuration`/`skipDelayDuration`; defaults come from the constants.\n\n**`toast.tsx`** (quality):\n- Dropped the unused `autoDismissMs` prop from `ToastProvider`'s type and updated the one test that referenced it.\n- Added a doc comment explaining why `ToastProvider` is a transparent shim plus why the non-DOM fallback exists.\n\n**`app-shell.tsx`**: removed the duplicated `delayDuration={200} skipDelayDuration={300}` props (now defaults).\n\n### Rejected / kept as-is\n\n- **\"Drop `TooltipProviderMountedContext` + fallback Provider — AppShell already mounts one\"** (quality agent): tested it, this broke tests that mount `<Tooltip>`-using components without going through the shell. Radix's `react-context` throws `\\`Tooltip\\` must be used within \\`TooltipProvider\\`` when there's no ancestor. Kept the context-detect fallback.\n- **\"Drop `canUseOverlayDom` SSR guards — Radix/Sonner handle SSR\"** (quality/reuse agents): tried it, broke every test that renders Tooltip/HoverCard-using components. The bun test environment has no `document`, and Radix Tooltip's `useEffect` cleanup calls `document.removeEventListener`. Kept the guards.\n- **\"Drop `nextToastId` counter — use Sonner's returned id\"** (quality agent): tried it, broke `toast.test.tsx` because Sonner stores ids as numbers internally and the tests compare ids via `===`. Kept the explicit string id pattern.\n- **\"Drop `NonDomToastOutput`\"** (reuse agent): it is dead in production but `run-detail.test.ts` relies on it to render toast text in the no-DOM test environment. Kept it.\n- **Extract a shared `isBrowser`/`canUseDom` helper across the 5+ inline `typeof window` checks** (reuse agent): pre-existing tech debt, out of scope for this review.\n- **Consolidate `textFromNode` across 6 test files** (reuse agent): pre-existing duplication, out of scope.\n- **`FloatingTooltip` duplicates Radix Tooltip for event-debug call sites** (reuse agent): the suggestion to route those through Radix Tooltip via `asChild` is plausible but a bigger refactor than this review — the original implement task chose `FloatingTooltip` for these sites deliberately. Out of scope.\n- **`run-overview` switched from below-anchor HoverCard styling to above-anchor tooltip styling** (quality agent): real positioning regression flagged, but matches what the implement task specified (\"absorb the logic of hover-card-style.ts into [FloatingTooltip]\"). Behavior change is intentional per the task.\n\nFinal: typecheck clean, test count and pass/fail set identical to pre-review baseline (471 pass / 22 fail — all 22 failures pre-exist this branch).",
-          "internal.retry_count.preflight_compile": 0,
-          "thread.toolchain.current_node": "preflight_compile",
-          "last_stage": "simplify_gpt",
-          "thread.simplify_gpt.current_node": "verify",
-          "outcome": "succeeded",
+          "internal.thread_id": "simplify_gpt",
           "thread.preflight_compile.current_node": "preflight_lint",
+          "internal.retry_count.preflight_compile": 0,
+          "failure_signature": "",
+          "internal.node_visit_count": 1,
+          "last_stage": "simplify_gpt",
+          "internal.retry_count.toolchain": 0,
+          "thread.preflight_lint.current_node": "implement",
           "command.output": "blob://sha256/e0b88d8ff81d1bfa7c505136514e3a3f20a8c451d271c30c2d469c3479b6eeec",
-          "last_response": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even whe"
+          "outcome": "succeeded",
+          "failure_class": "",
+          "response.implement": "Implemented the overlay replacement across `fabro-web`.\n\nWhat changed:\n- Replaced DIY `Tooltip` / `HoverCard` in `app/components/ui.tsx` with Radix wrappers.\n- Added app-level `TooltipProvider` and Sonner `<Toaster richColors position=\"bottom-right\" />` in `app/layouts/app-shell.tsx`.\n- Replaced custom toast context/rendering with a Sonner-backed shim preserving `useToast()` / `ToastProvider` API.\n- Rewrote `toast.test.tsx` around Sonner observable behavior and persistent error toasts.\n- Converted CSS-only settings model tooltips to real `<Tooltip>`.\n- Added shared `FloatingTooltip` for SVG/DOMRect-anchored hovers and migrated:\n  - `run-overview`\n  - `event-debug` DNA popover\n  - `event-debug` thread DNA popover\n- Deleted `hover-card-style.ts`.\n- Added dependencies:\n  - `@radix-ui/react-tooltip`\n  - `@radix-ui/react-hover-card`\n  - `sonner`\n- Removed the stale toast `action` type usage from the remaining test helper.\n\nVerification:\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun run test` ✅  \n  - This runs the package script: `bun test --isolate`\n  - 493 tests passed.",
+          "thread.implement.current_node": "simplify_opus",
+          "internal.retry_count.preflight_lint": 0,
+          "thread.simplify_gpt.current_node": "verify",
+          "graph.rankdir": "LR",
+          "current_node": "verify",
+          "internal.retry_count.implement": 0,
+          "internal.retry_count.start": 0,
+          "internal.run_id": "01KSKJQ9FMRRBBNQW12S4A3HYJ",
+          "internal.fidelity": "compact",
+          "internal.retry_count.simplify_gpt": 0,
+          "internal.retry_count.verify": 0,
+          "thread.toolchain.current_node": "preflight_compile",
+          "thread.start.current_node": "toolchain",
+          "response.simplify_gpt": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even when tooltip content size is unchanged.\n  - Removed direct `window.innerWidth/innerHeight` reads from style calculation and made viewport dimensions explicit state.\n\n- `apps/fabro-web/app/routes/run-terminal.tsx`\n  - Mounted Sonner `<Toaster richColors position=\"bottom-right\" />` for the standalone terminal route, since it sits outside `AppShell` where the global Toaster is mounted.\n\nVerification run:\n\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun test app/components/toast.test.tsx --isolate` ✅\n- `cd apps/fabro-web && bun run test` ✅ — 493 pass, 0 fail\n\nNote: running raw `bun test` without the package script’s `--isolate` failed in unrelated shared-state tests; `bun run test` is the repo’s configured command and passes.",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "last_response": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even whe",
+          "thread.simplify_opus.current_node": "simplify_gpt",
+          "graph.goal": "# Replace DIY overlay primitives in fabro-web\n\n## Context\n\n`apps/fabro-web` hand-rolls Tooltip, HoverCard, and a Toast system. ~285 lines of overlay code with weak collision detection, no keyboard a11y on the CSS-only tooltips, and a custom Toast context that no longer earns its complexity. Already on `@headlessui/react` for Dialog/Menu — Headless doesn't ship Tooltip/HoverCard/Toast, so this is a real gap, not redundancy.\n\nGoal: delete the DIY code, gain real a11y/positioning, keep call sites stable.\n\n## Scope (3 areas)\n\n### 1. Tooltip + HoverCard → Radix wrappers\n\nAdd `@radix-ui/react-tooltip` and `@radix-ui/react-hover-card`.\n\nKeep the public API (`<Tooltip label={x}>{children}</Tooltip>`, `<HoverCard content={x}>{children}</HoverCard>`) by reimplementing the two components in `app/components/ui.tsx` as thin Radix wrappers. All 13 existing call sites remain unchanged.\n\n- Delete `useHoverAnchor` (ui.tsx:141-179).\n- Mount one `TooltipProvider` in `app/layouts/app-shell.tsx` (delay 200, skipDelayDuration 300) so siblings share a delay group.\n- HoverCard wrapper passes `openDelay` (default 0, stage-sidebar still passes 200) → Radix `openDelay`.\n- Keep `PopoverHeader` / `PopoverRows` / `PopoverRow` unchanged — presentational, used inside HoverCard `content`.\n\nCall sites (do not touch): `run-billing`, `settings-live-events`, `run-sandbox/{services,vnc,filesystem}-panel`, `terminal-view`, `size-chip`, `run-summary-panel`, `event-debug` (Tooltip wrapper use), `meta-bar`, `human-qa`, `run-table-row`, `run-waterfall`, `stage-sidebar`, `run-stages`, `run-detail/header`.\n\n### 2. Toast system → Sonner\n\nAdd `sonner`. Mount `<Toaster richColors position=\"bottom-right\" />` in `app/layouts/app-shell.tsx` next to the new `TooltipProvider`.\n\nReplace `app/components/toast.tsx` with a tiny shim that preserves the current API:\n```ts\n// useToast() returns { push, dismiss, clear }\n// push({ message, tone, autoDismissMs }) → toast(msg) / toast.error(msg) / toast(msg, { duration })\n```\nKeep the shim so the 10 consumers + `useRunToasts` need zero changes. `action` field unused in production — drop from the type (only the test referenced it).\n\nRewrite `toast.test.tsx` against the shim's observable behavior (rendered text, error persistence) rather than `data-toast-id`. Other tests that wrap in `<ToastProvider>` keep working because the shim re-exports a no-op `ToastProvider` (sonner's `Toaster` is mounted globally).\n\n### 3. CSS-only tooltips → real Tooltip\n\nReplace the inline `group-hover/*` blocks in `app/routes/settings-models.tsx` (test-error message ~L519, alias list ~L545) with the new `<Tooltip label={...}>` wrapper. Gains keyboard focus + Esc dismiss + collision avoidance.\n\n### 4. SVG-anchored hovers → shared `FloatingTooltip` helper\n\nTwo sites anchor to a measured `DOMRect` from SVG/Graphviz output (no wrappable trigger element): `app/routes/run-overview.tsx:303-318` and `app/components/event-debug.tsx:423-432` (+ the thread-DNA one near :639).\n\nExtract a single helper in `app/components/floating-tooltip.tsx`:\n```ts\nfunction FloatingTooltip({ rect, placement, children }) // portals to body, applies collision-avoiding style\n```\nAbsorb the logic of `hover-card-style.ts` into it (cover `top`/`bottom` placements). Delete `app/components/hover-card-style.ts`. Both sites use the helper; `run-overview` renders `<StagePopover>` inside.\n\n## Files to modify\n\nModify:\n- `app/components/ui.tsx` — replace Tooltip/HoverCard impls; delete useHoverAnchor\n- `app/components/toast.tsx` — shrink to ~30-line sonner shim\n- `app/components/toast.test.tsx` — rewrite assertions\n- `app/layouts/app-shell.tsx` — mount `TooltipProvider` + sonner `<Toaster />`, drop `<ToastProvider>`\n- `app/routes/settings-models.tsx` — swap two inline CSS tooltips for `<Tooltip>`\n- `app/routes/run-overview.tsx` — use `FloatingTooltip`\n- `app/components/event-debug.tsx` — use `FloatingTooltip` (two call sites)\n- `apps/fabro-web/package.json` — add `@radix-ui/react-tooltip`, `@radix-ui/react-hover-card`, `sonner`\n\nCreate:\n- `app/components/floating-tooltip.tsx`\n\nDelete:\n- `app/components/hover-card-style.ts`\n\n## Verification\n\n1. `cd apps/fabro-web && bun run typecheck` — no type errors.\n2. `cd apps/fabro-web && bun test` — `toast.test.tsx` passes against new shim; all other tests unchanged.\n3. Run dev locally (`fabro server start` + `cd apps/fabro-web && bun run dev`) and exercise:\n   - Tooltips: hover the refresh button on `/runs/:id/sandbox/services`, status chip on `/runs/:id/billing`, run-table-row status icons. Confirm hover delay (~200ms shared), Esc dismisses, keyboard focus opens.\n   - HoverCards: hover stage rows in the stage sidebar, waterfall rows, and the run-detail header chips. Confirm positioning flips near viewport edges (Radix collision detection).\n   - Toasts: trigger a failed `/runs/:id` action (e.g. retry an unretryable run), confirm red toast persists; trigger a success toast (e.g. archive), confirm auto-dismiss; deep-link to a missing file under `/runs/:id/files/missing-path` — confirm 5s warning.\n   - SVG hovers: hover Graphviz nodes on `/runs/:id` overview; hover the waterfall event chips in event-debug. Confirm tooltips appear above and clamp to viewport.\n4. Lighthouse/axe spot check on settings-models: confirm aliases + test-error tooltips now reachable via keyboard.\n\n## Out of scope\n\n- `ConfirmDialog`, `RowActionsMenu` — already on Headless UI Dialog/Menu, no change.\n- `CollapsibleFile` — 40-line one-off, marginal win, leave.\n- Theming changes; visual output should match current styling pixel-close.\n\n## Open questions\n\n- Do we want to brand sonner toasts (custom `toastOptions` for color tokens), or accept sonner defaults? Defaults are dark-themed and read well against `bg-panel`, so likely fine.\n- `TooltipProvider` `skipDelayDuration` value — 300ms is a sensible default for grouped hovers across a sidebar; revisit if it feels off in use.\n",
+          "response.simplify_opus": "## Summary\n\nThree review agents flagged issues across code reuse, quality, and efficiency. I applied fixes for the clear wins; some flagged items were rejected because they would have caused regressions.\n\n### Fixed\n\n**`floating-tooltip.tsx`** (efficiency — the biggest set of issues):\n- `useLayoutEffect` deps were `[children, rect]`. Both change identity every render, so the `ResizeObserver` and `window.resize` listener were torn down and re-added on every parent render of an open tooltip. Changed deps to `[]` — the observer is wired once on mount and watches the node directly.\n- `setSize` now bails out when the measured size hasn't changed, preventing render/effect storms.\n- Dropped the dead `useMemo` for `style`: `rect` was a fresh `DOMRect` every render so the memo dep always changed; the cache machinery cost more than the arithmetic.\n- `floatingStyle` reads `window.innerWidth`/`innerHeight` once and passes both to `resolvePlacement` instead of two separate `viewportSize()` calls.\n- Added a `DEFAULT_CLASS_NAME` for the common tooltip styling.\n\n**`event-debug.tsx`**: removed two duplicated `className` strings (now use the helper default), shrinking the two near-identical `*Popover` components.\n\n**`ui.tsx`** (quality cleanup, kept SSR/no-Provider safety):\n- Hoisted `TOOLTIP_DELAY_DURATION` / `TOOLTIP_SKIP_DELAY_DURATION` constants (they had been duplicated between `ui.tsx` and `app-shell.tsx`).\n- `<TooltipPrimitive.Trigger asChild className=\"inline-flex\">` was leaking `inline-flex` onto consumer elements (button styles, etc.). Now wraps children in a real `<span className=\"inline-flex\">` inside the `asChild` trigger — matches the original wrapper behavior. Same fix on `HoverCard`.\n- `TooltipProvider` no longer requires callers to pass `delayDuration`/`skipDelayDuration`; defaults come from the constants.\n\n**`toast.tsx`** (quality):\n- Dropped the unused `autoDismissMs` prop from `ToastProvider`'s type and updated the one test that referenced it.\n- Added a doc comment explaining why `ToastProvider` is a transparent shim plus why the non-DOM fallback exists.\n\n**`app-shell.tsx`**: removed the duplicated `delayDuration={200} skipDelayDuration={300}` props (now defaults).\n\n### Rejected / kept as-is\n\n- **\"Drop `TooltipProviderMountedContext` + fallback Provider — AppShell already mounts one\"** (quality agent): tested it, this broke tests that mount `<Tooltip>`-using components without going through the shell. Radix's `react-context` throws `\\`Tooltip\\` must be used within \\`TooltipProvider\\`` when there's no ancestor. Kept the context-detect fallback.\n- **\"Drop `canUseOverlayDom` SSR guards — Radix/Sonner handle SSR\"** (quality/reuse agents): tried it, broke every test that renders Tooltip/HoverCard-using components. The bun test environment has no `document`, and Radix Tooltip's `useEffect` cleanup calls `document.removeEventListener`. Kept the guards.\n- **\"Drop `nextToastId` counter — use Sonner's returned id\"** (quality agent): tried it, broke `toast.test.tsx` because Sonner stores ids as numbers internally and the tests compare ids via `===`. Kept the explicit string id pattern.\n- **\"Drop `NonDomToastOutput`\"** (reuse agent): it is dead in production but `run-detail.test.ts` relies on it to render toast text in the no-DOM test environment. Kept it.\n- **Extract a shared `isBrowser`/`canUseDom` helper across the 5+ inline `typeof window` checks** (reuse agent): pre-existing tech debt, out of scope for this review.\n- **Consolidate `textFromNode` across 6 test files** (reuse agent): pre-existing duplication, out of scope.\n- **`FloatingTooltip` duplicates Radix Tooltip for event-debug call sites** (reuse agent): the suggestion to route those through Radix Tooltip via `asChild` is plausible but a bigger refactor than this review — the original implement task chose `FloatingTooltip` for these sites deliberately. Out of scope.\n- **`run-overview` switched from below-anchor HoverCard styling to above-anchor tooltip styling** (quality agent): real positioning regression flagged, but matches what the implement task specified (\"absorb the logic of hover-card-style.ts into [FloatingTooltip]\"). Behavior change is intentional per the task.\n\nFinal: typecheck clean, test count and pass/fail set identical to pre-review baseline (471 pass / 22 fail — all 22 failures pre-exist this branch).",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        "
         },
         "node_outcomes": {
-          "toolchain": {
-            "status": "succeeded",
-            "context_updates": {
-              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
-            },
-            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
-            "usage": null,
-            "timing": {
-              "wall_time_ms": 0,
-              "inference_time_ms": 0,
-              "tool_time_ms": 1365,
-              "active_time_ms": 1365
-            }
-          },
-          "preflight_compile": {
-            "status": "succeeded",
-            "context_updates": {
-              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
-            },
-            "notes": "Script completed: cargo check -q --workspace 2>&1",
-            "usage": null,
-            "timing": {
-              "wall_time_ms": 0,
-              "inference_time_ms": 0,
-              "tool_time_ms": 126855,
-              "active_time_ms": 126855
-            }
-          },
-          "implement": {
-            "status": "succeeded",
-            "context_updates": {
-              "response.implement": "Implemented the overlay replacement across `fabro-web`.\n\nWhat changed:\n- Replaced DIY `Tooltip` / `HoverCard` in `app/components/ui.tsx` with Radix wrappers.\n- Added app-level `TooltipProvider` and Sonner `<Toaster richColors position=\"bottom-right\" />` in `app/layouts/app-shell.tsx`.\n- Replaced custom toast context/rendering with a Sonner-backed shim preserving `useToast()` / `ToastProvider` API.\n- Rewrote `toast.test.tsx` around Sonner observable behavior and persistent error toasts.\n- Converted CSS-only settings model tooltips to real `<Tooltip>`.\n- Added shared `FloatingTooltip` for SVG/DOMRect-anchored hovers and migrated:\n  - `run-overview`\n  - `event-debug` DNA popover\n  - `event-debug` thread DNA popover\n- Deleted `hover-card-style.ts`.\n- Added dependencies:\n  - `@radix-ui/react-tooltip`\n  - `@radix-ui/react-hover-card`\n  - `sonner`\n- Removed the stale toast `action` type usage from the remaining test helper.\n\nVerification:\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun run test` ✅  \n  - This runs the package script: `bun test --isolate`\n  - 493 tests passed.",
-              "last_stage": "implement",
-              "last_response": "Implemented the overlay replacement across `fabro-web`.\n\nWhat changed:\n- Replaced DIY `Tooltip` / `HoverCard` in `app/components/ui.tsx` with Radix wrappers.\n- Added app-level `TooltipProvider` and So"
-            },
-            "notes": "Stage completed: implement",
-            "usage": {
-              "input": {
-                "usage": {
-                  "model": {
-                    "provider": "openai",
-                    "model_id": "gpt-5.5"
-                  },
-                  "tokens": {
-                    "input_tokens": 3331251,
-                    "output_tokens": 21142,
-                    "reasoning_tokens": 17825,
-                    "cache_read_tokens": 9311232,
-                    "cache_write_tokens": 0
-                  }
-                },
-                "facts": {
-                  "algorithm": "openai"
-                }
-              },
-              "total_usd_micros": 22480881
-            },
-            "timing": {
-              "wall_time_ms": 0,
-              "inference_time_ms": 1203328,
-              "tool_time_ms": 92932,
-              "active_time_ms": 1296260
-            }
-          },
-          "start": {
-            "status": "succeeded",
-            "usage": null
-          },
-          "simplify_gpt": {
-            "status": "succeeded",
-            "context_updates": {
-              "response.simplify_gpt": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even when tooltip content size is unchanged.\n  - Removed direct `window.innerWidth/innerHeight` reads from style calculation and made viewport dimensions explicit state.\n\n- `apps/fabro-web/app/routes/run-terminal.tsx`\n  - Mounted Sonner `<Toaster richColors position=\"bottom-right\" />` for the standalone terminal route, since it sits outside `AppShell` where the global Toaster is mounted.\n\nVerification run:\n\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun test app/components/toast.test.tsx --isolate` ✅\n- `cd apps/fabro-web && bun run test` ✅ — 493 pass, 0 fail\n\nNote: running raw `bun test` without the package script’s `--isolate` failed in unrelated shared-state tests; `bun run test` is the repo’s configured command and passes.",
-              "last_stage": "simplify_gpt",
-              "last_response": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even whe"
-            },
-            "notes": "Stage completed: simplify_gpt",
-            "usage": {
-              "input": {
-                "usage": {
-                  "model": {
-                    "provider": "openai",
-                    "model_id": "gpt-5.5"
-                  },
-                  "tokens": {
-                    "input_tokens": 586643,
-                    "output_tokens": 4720,
-                    "reasoning_tokens": 1767,
-                    "cache_read_tokens": 497664,
-                    "cache_write_tokens": 0
-                  }
-                },
-                "facts": {
-                  "algorithm": "openai"
-                }
-              },
-              "total_usd_micros": 3376657
-            },
-            "timing": {
-              "wall_time_ms": 0,
-              "inference_time_ms": 196052,
-              "tool_time_ms": 37866,
-              "active_time_ms": 233918
-            }
-          },
           "preflight_lint": {
             "status": "succeeded",
             "context_updates": {
@@ -1589,24 +1485,250 @@
               "tool_time_ms": 574991,
               "active_time_ms": 574991
             }
+          },
+          "implement": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.implement": "Implemented the overlay replacement across `fabro-web`.\n\nWhat changed:\n- Replaced DIY `Tooltip` / `HoverCard` in `app/components/ui.tsx` with Radix wrappers.\n- Added app-level `TooltipProvider` and Sonner `<Toaster richColors position=\"bottom-right\" />` in `app/layouts/app-shell.tsx`.\n- Replaced custom toast context/rendering with a Sonner-backed shim preserving `useToast()` / `ToastProvider` API.\n- Rewrote `toast.test.tsx` around Sonner observable behavior and persistent error toasts.\n- Converted CSS-only settings model tooltips to real `<Tooltip>`.\n- Added shared `FloatingTooltip` for SVG/DOMRect-anchored hovers and migrated:\n  - `run-overview`\n  - `event-debug` DNA popover\n  - `event-debug` thread DNA popover\n- Deleted `hover-card-style.ts`.\n- Added dependencies:\n  - `@radix-ui/react-tooltip`\n  - `@radix-ui/react-hover-card`\n  - `sonner`\n- Removed the stale toast `action` type usage from the remaining test helper.\n\nVerification:\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun run test` ✅  \n  - This runs the package script: `bun test --isolate`\n  - 493 tests passed.",
+              "last_stage": "implement",
+              "last_response": "Implemented the overlay replacement across `fabro-web`.\n\nWhat changed:\n- Replaced DIY `Tooltip` / `HoverCard` in `app/components/ui.tsx` with Radix wrappers.\n- Added app-level `TooltipProvider` and So"
+            },
+            "notes": "Stage completed: implement",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 3331251,
+                    "output_tokens": 21142,
+                    "reasoning_tokens": 17825,
+                    "cache_read_tokens": 9311232,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 22480881
+            },
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 1203328,
+              "tool_time_ms": 92932,
+              "active_time_ms": 1296260
+            }
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 126855,
+              "active_time_ms": 126855
+            }
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "simplify_gpt": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.simplify_gpt": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even when tooltip content size is unchanged.\n  - Removed direct `window.innerWidth/innerHeight` reads from style calculation and made viewport dimensions explicit state.\n\n- `apps/fabro-web/app/routes/run-terminal.tsx`\n  - Mounted Sonner `<Toaster richColors position=\"bottom-right\" />` for the standalone terminal route, since it sits outside `AppShell` where the global Toaster is mounted.\n\nVerification run:\n\n- `cd apps/fabro-web && bun run typecheck` ✅\n- `cd apps/fabro-web && bun test app/components/toast.test.tsx --isolate` ✅\n- `cd apps/fabro-web && bun run test` ✅ — 493 pass, 0 fail\n\nNote: running raw `bun test` without the package script’s `--isolate` failed in unrelated shared-state tests; `bun run test` is the repo’s configured command and passes.",
+              "last_stage": "simplify_gpt",
+              "last_response": "Reviewed the overlay/toast changes and applied two cleanup fixes:\n\n- `apps/fabro-web/app/components/floating-tooltip.tsx`\n  - Fixed resize behavior so viewport changes force a style recompute even whe"
+            },
+            "notes": "Stage completed: simplify_gpt",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "openai",
+                    "model_id": "gpt-5.5"
+                  },
+                  "tokens": {
+                    "input_tokens": 586643,
+                    "output_tokens": 4720,
+                    "reasoning_tokens": 1767,
+                    "cache_read_tokens": 497664,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "openai"
+                }
+              },
+              "total_usd_micros": 3376657
+            },
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 196052,
+              "tool_time_ms": 37866,
+              "active_time_ms": 233918
+            }
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 1365,
+              "active_time_ms": 1365
+            }
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "2c856f556b3f4e2fb8d72e5c245eb1913b4c2d26",
         "node_visits": {
-          "preflight_lint": 1,
-          "start": 1,
           "verify": 1,
+          "implement": 1,
           "simplify_gpt": 1,
           "toolchain": 1,
           "preflight_compile": 1,
-          "implement": 1,
-          "simplify_opus": 1
+          "simplify_opus": 1,
+          "preflight_lint": 1,
+          "start": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "patch": "diff --git a/.fabro/workflows/goal/workflow.fabro b/.fabro/workflows/goal/workflow.fabro\nindex 6c919d829..6b9269634 100644\n--- a/.fabro/workflows/goal/workflow.fabro\n+++ b/.fabro/workflows/goal/workflow.fabro\n@@ -13,6 +13,8 @@ digraph Goal {\n         thread_id=\"goal\",\n         fidelity=\"full\",\n         max_visits=12,\n+        model=\"gpt-55\",\n+        reasoning_effort=\"xhigh\",\n         prompt=\"@prompts/continue.md\"\n     ]\n \n@@ -25,6 +27,8 @@ digraph Goal {\n         output_schema=\"routing\",\n         output_retries=2,\n         max_visits=12,\n+        model=\"gpt-55\",\n+        reasoning_effort=\"xhigh\",\n         prompt=\"@prompts/audit.md\"\n     ]\n \ndiff --git a/AGENTS.md b/AGENTS.md\nindex 19f0108bf..c97bcec4c 100644\n--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -135,7 +135,8 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as\n \n ## Strategy docs\n \n-When working on Rust crates, read the relevant strategy doc **before** making changes:\n+When working in an area covered by a strategy doc, read the relevant document\n+**before** making changes:\n \n - **`docs/internal/logging-strategy.md`** — read when adding `tracing` calls (`info!`, `debug!`, `warn!`, `error!`), working on error handling paths, or adding new operations that should be observable\n - **`docs/internal/events-strategy.md`** — read when adding or modifying `Event` variants, touching `Emitter`/`emit()`, changing `progress.jsonl` output, or adding new workflow stage types\n@@ -143,6 +144,7 @@ When working on Rust crates, read the relevant strategy doc **before** making ch\n - **`docs/internal/server-secrets-strategy.md`** — read when adding or changing server-level secrets, startup validation, install-time secret persistence, or subprocess env inheritance/scrubbing\n - **`docs/internal/migrations-strategy.md`** — read when adding or changing temporary compatibility migrations, startup/file rewrites, migration runners, backups, or removal deadlines\n - **`docs/internal/error-handling-strategy.md`** — read when changing error types, using `anyhow`/`thiserror`, adding `.map_err(...)`, converting errors to `String`, changing API error responses, or touching CLI/miette/log/telemetry error rendering\n+- **`docs/internal/react-effects-policy.md`** — read when adding or refactoring React effects in `apps/fabro-web`; direct `useEffect` calls should be avoided in component code\n \n ## Shell quoting in sandbox code\n \ndiff --git a/docs/internal/panic-policy.md b/docs/internal/panic-policy.md\nnew file mode 100644\nindex 000000000..5f6ffc04c\n--- /dev/null\n+++ b/docs/internal/panic-policy.md\n@@ -0,0 +1,26 @@\n+Production runtime code must not panic on any path reachable from CLI input,\n+  HTTP requests, workflow definitions, external services, storage, subprocesses,\n+  or normal environment failure.\n+\n+  Use Result for recoverable or reportable failures, preserving the source chain\n+  until the boundary. CLI boundaries render errors with miette. HTTP boundaries log\n+  the full internal chain and return a curated public API error.\n+\n+  Panics are allowed only for:\n+  - tests, fixtures, and test-only helpers;\n+  - build scripts or dev tooling where failure happens before runtime;\n+  - hard-coded literals or generated constants whose validity is controlled by the\n+    source tree, preferably with `expect` explaining the invariant;\n+  - truly impossible internal invariants where continuing would be more dangerous\n+    than terminating.\n+\n+  `unwrap()` is not allowed in production runtime code. `expect()` is allowed only\n+  when the message explains why the failure is impossible, not merely what failed.\n+  `panic!`, `todo!`, `unimplemented!`, and `unreachable!` require an explicit,\n+  reviewable justification.\n+\n+  The practical review test should be:\n+\n+  > Could this failure be caused by input, config, environment, I/O, network, time, concurrency, persisted state, or a third-party system?\n+\n+  If yes, it is not a panic. Return an error.\n\\ No newline at end of file\ndiff --git a/lib/crates/fabro-server/src/csp.rs b/lib/crates/fabro-server/src/csp.rs\nindex bb0b1333c..d41324fde 100644\n--- a/lib/crates/fabro-server/src/csp.rs\n+++ b/lib/crates/fabro-server/src/csp.rs\n@@ -97,7 +97,7 @@ fn build_policy_with_hashes(script_hashes: &[String]) -> String {\n          script-src 'self'{inline_script_sources} 'wasm-unsafe-eval'; \\\n          style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; \\\n          font-src 'self' https://fonts.gstatic.com; \\\n-         img-src 'self' data: blob:; \\\n+         img-src 'self' data: blob: https://avatars.githubusercontent.com; \\\n          connect-src 'self' ws: wss:; \\\n          worker-src 'self' blob:; \\\n          manifest-src 'self'; \\\ndiff --git a/lib/crates/fabro-server/tests/it/api/routing.rs b/lib/crates/fabro-server/tests/it/api/routing.rs\nindex 6a56cac9e..d63b5c4e7 100644\n--- a/lib/crates/fabro-server/tests/it/api/routing.rs\n+++ b/lib/crates/fabro-server/tests/it/api/routing.rs\n@@ -378,7 +378,10 @@ async fn security_headers_are_applied_to_all_responses() {\n         csp.contains(\"font-src 'self' https://fonts.gstatic.com\"),\n         \"got: {csp}\"\n     );\n-    assert!(csp.contains(\"img-src 'self' data: blob:\"), \"got: {csp}\");\n+    assert!(\n+        csp.contains(\"img-src 'self' data: blob: https://avatars.githubusercontent.com\"),\n+        \"got: {csp}\"\n+    );\n     assert!(csp.contains(\"connect-src 'self' ws: wss:\"), \"got: {csp}\");\n     assert!(csp.contains(\"worker-src 'self' blob:\"), \"got: {csp}\");\n     assert!(csp.contains(\"frame-ancestors 'none'\"), \"got: {csp}\");\n",
+        "summary": {
+          "files_changed": 18,
+          "additions": 504,
+          "deletions": 478
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-27T02:57:10.127290Z",
+    "status": "succeeded",
+    "timing": {
+      "wall_time_ms": 3241388,
+      "inference_time_ms": 1967112,
+      "tool_time_ms": 1240343,
+      "active_time_ms": 3207455
+    },
+    "final_git_commit_sha": "2c856f556b3f4e2fb8d72e5c245eb1913b4c2d26",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "toolchain",
+        "stage_label": "toolchain",
+        "timing": {
+          "wall_time_ms": 1379,
+          "inference_time_ms": 0,
+          "tool_time_ms": 1365,
+          "active_time_ms": 1365
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_compile",
+        "stage_label": "preflight_compile",
+        "timing": {
+          "wall_time_ms": 126864,
+          "inference_time_ms": 0,
+          "tool_time_ms": 126855,
+          "active_time_ms": 126855
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_lint",
+        "stage_label": "preflight_lint",
+        "timing": {
+          "wall_time_ms": 143100,
+          "inference_time_ms": 0,
+          "tool_time_ms": 143093,
+          "active_time_ms": 143093
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "implement",
+        "stage_label": "implement",
+        "timing": {
+          "wall_time_ms": 1298618,
+          "inference_time_ms": 1203328,
+          "tool_time_ms": 92932,
+          "active_time_ms": 1296260
+        },
+        "billing_usd_micros": 22480881,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_opus",
+        "stage_label": "simplify_opus",
+        "timing": {
+          "wall_time_ms": 831792,
+          "inference_time_ms": 567732,
+          "tool_time_ms": 263241,
+          "active_time_ms": 830973
+        },
+        "billing_usd_micros": 7004775,
+        "retries": 0
+      },
+      {
+        "stage_id": "simplify_gpt",
+        "stage_label": "simplify_gpt",
+        "timing": {
+          "wall_time_ms": 234481,
+          "inference_time_ms": 196052,
+          "tool_time_ms": 37866,
+          "active_time_ms": 233918
+        },
+        "billing_usd_micros": 3376657,
+        "retries": 0
+      },
+      {
+        "stage_id": "verify",
+        "stage_label": "verify",
+        "timing": {
+          "wall_time_ms": 575016,
+          "inference_time_ms": 0,
+          "tool_time_ms": 574991,
+          "active_time_ms": 574991
+        },
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 4016293,
+      "output_tokens": 65945,
+      "total_tokens": 19297380,
+      "reasoning_tokens": 19592,
+      "cache_read_tokens": 14705571,
+      "cache_write_tokens": 489979,
+      "total_usd_micros": 32862313
+    },
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "provider": "daytona",
     "snapshot": "fabro-v12",
@@ -2521,6 +2643,40 @@
       },
       "state": "succeeded"
     },
+    "exit@1": {
+      "first_event_seq": 1237,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-27T02:57:10.079137Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-27T02:57:10.079100Z",
+      "handler": "exit",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
     "preflight_compile@1": {
       "first_event_seq": 32,
       "prompt": null,
@@ -2607,7 +2763,12 @@
       "first_event_seq": 1227,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Script completed: git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+        "failure_reason": null,
+        "timestamp": "2026-05-27T02:57:06.172959Z"
+      },
       "provider_used": null,
       "diff": null,
       "script_invocation": {
@@ -2615,11 +2776,27 @@
         "command": "exec 2>&1\ngit fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
         "language": "shell"
       },
-      "script_timing": null,
+      "script_timing": {
+        "output": "blob://sha256/e0b88d8ff81d1bfa7c505136514e3a3f20a8c451d271c30c2d469c3479b6eeec",
+        "exit_code": 0,
+        "duration_ms": 574991,
+        "termination": "exited",
+        "output_bytes": 214135,
+        "live_streaming": true
+      },
       "parallel_results": null,
       "output": null,
+      "output_bytes": 214135,
+      "live_streaming": true,
+      "termination": "exited",
       "started_at": "2026-05-27T02:47:31.151260Z",
       "handler": "command",
+      "timing": {
+        "wall_time_ms": 575016,
+        "inference_time_ms": 0,
+        "tool_time_ms": 574991,
+        "active_time_ms": 574991
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -2628,7 +2805,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "preflight_lint@1": {
       "first_event_seq": 42,

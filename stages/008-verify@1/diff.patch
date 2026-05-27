@@ -1,0 +1,106 @@
+diff --git a/.fabro/workflows/goal/workflow.fabro b/.fabro/workflows/goal/workflow.fabro
+index 6c919d829..6b9269634 100644
+--- a/.fabro/workflows/goal/workflow.fabro
++++ b/.fabro/workflows/goal/workflow.fabro
+@@ -13,6 +13,8 @@ digraph Goal {
+         thread_id="goal",
+         fidelity="full",
+         max_visits=12,
++        model="gpt-55",
++        reasoning_effort="xhigh",
+         prompt="@prompts/continue.md"
+     ]
+ 
+@@ -25,6 +27,8 @@ digraph Goal {
+         output_schema="routing",
+         output_retries=2,
+         max_visits=12,
++        model="gpt-55",
++        reasoning_effort="xhigh",
+         prompt="@prompts/audit.md"
+     ]
+ 
+diff --git a/AGENTS.md b/AGENTS.md
+index 19f0108bf..c97bcec4c 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -135,7 +135,8 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
+ 
+ ## Strategy docs
+ 
+-When working on Rust crates, read the relevant strategy doc **before** making changes:
++When working in an area covered by a strategy doc, read the relevant document
++**before** making changes:
+ 
+ - **`docs/internal/logging-strategy.md`** — read when adding `tracing` calls (`info!`, `debug!`, `warn!`, `error!`), working on error handling paths, or adding new operations that should be observable
+ - **`docs/internal/events-strategy.md`** — read when adding or modifying `Event` variants, touching `Emitter`/`emit()`, changing `progress.jsonl` output, or adding new workflow stage types
+@@ -143,6 +144,7 @@ When working on Rust crates, read the relevant strategy doc **before** making ch
+ - **`docs/internal/server-secrets-strategy.md`** — read when adding or changing server-level secrets, startup validation, install-time secret persistence, or subprocess env inheritance/scrubbing
+ - **`docs/internal/migrations-strategy.md`** — read when adding or changing temporary compatibility migrations, startup/file rewrites, migration runners, backups, or removal deadlines
+ - **`docs/internal/error-handling-strategy.md`** — read when changing error types, using `anyhow`/`thiserror`, adding `.map_err(...)`, converting errors to `String`, changing API error responses, or touching CLI/miette/log/telemetry error rendering
++- **`docs/internal/react-effects-policy.md`** — read when adding or refactoring React effects in `apps/fabro-web`; direct `useEffect` calls should be avoided in component code
+ 
+ ## Shell quoting in sandbox code
+ 
+diff --git a/docs/internal/panic-policy.md b/docs/internal/panic-policy.md
+new file mode 100644
+index 000000000..5f6ffc04c
+--- /dev/null
++++ b/docs/internal/panic-policy.md
+@@ -0,0 +1,26 @@
++Production runtime code must not panic on any path reachable from CLI input,
++  HTTP requests, workflow definitions, external services, storage, subprocesses,
++  or normal environment failure.
++
++  Use Result for recoverable or reportable failures, preserving the source chain
++  until the boundary. CLI boundaries render errors with miette. HTTP boundaries log
++  the full internal chain and return a curated public API error.
++
++  Panics are allowed only for:
++  - tests, fixtures, and test-only helpers;
++  - build scripts or dev tooling where failure happens before runtime;
++  - hard-coded literals or generated constants whose validity is controlled by the
++    source tree, preferably with `expect` explaining the invariant;
++  - truly impossible internal invariants where continuing would be more dangerous
++    than terminating.
++
++  `unwrap()` is not allowed in production runtime code. `expect()` is allowed only
++  when the message explains why the failure is impossible, not merely what failed.
++  `panic!`, `todo!`, `unimplemented!`, and `unreachable!` require an explicit,
++  reviewable justification.
++
++  The practical review test should be:
++
++  > Could this failure be caused by input, config, environment, I/O, network, time, concurrency, persisted state, or a third-party system?
++
++  If yes, it is not a panic. Return an error.
+\ No newline at end of file
+diff --git a/lib/crates/fabro-server/src/csp.rs b/lib/crates/fabro-server/src/csp.rs
+index bb0b1333c..d41324fde 100644
+--- a/lib/crates/fabro-server/src/csp.rs
++++ b/lib/crates/fabro-server/src/csp.rs
+@@ -97,7 +97,7 @@ fn build_policy_with_hashes(script_hashes: &[String]) -> String {
+          script-src 'self'{inline_script_sources} 'wasm-unsafe-eval'; \
+          style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; \
+          font-src 'self' https://fonts.gstatic.com; \
+-         img-src 'self' data: blob:; \
++         img-src 'self' data: blob: https://avatars.githubusercontent.com; \
+          connect-src 'self' ws: wss:; \
+          worker-src 'self' blob:; \
+          manifest-src 'self'; \
+diff --git a/lib/crates/fabro-server/tests/it/api/routing.rs b/lib/crates/fabro-server/tests/it/api/routing.rs
+index 6a56cac9e..d63b5c4e7 100644
+--- a/lib/crates/fabro-server/tests/it/api/routing.rs
++++ b/lib/crates/fabro-server/tests/it/api/routing.rs
+@@ -378,7 +378,10 @@ async fn security_headers_are_applied_to_all_responses() {
+         csp.contains("font-src 'self' https://fonts.gstatic.com"),
+         "got: {csp}"
+     );
+-    assert!(csp.contains("img-src 'self' data: blob:"), "got: {csp}");
++    assert!(
++        csp.contains("img-src 'self' data: blob: https://avatars.githubusercontent.com"),
++        "got: {csp}"
++    );
+     assert!(csp.contains("connect-src 'self' ws: wss:"), "got: {csp}");
+     assert!(csp.contains("worker-src 'self' blob:"), "got: {csp}");
+     assert!(csp.contains("frame-ancestors 'none'"), "got: {csp}");
