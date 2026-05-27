@@ -313,7 +313,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-27T02:04:35.579135Z",
-  "last_event_at": "2026-05-27T02:26:30.048935Z",
+  "last_event_at": "2026-05-27T02:31:35.437328Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -354,9 +354,9 @@
       "diff": {}
     },
     {
-      "seq": 0,
+      "seq": 306,
       "checkpoint": {
-        "timestamp": "2026-05-27T02:26:30.203459Z",
+        "timestamp": "2026-05-27T02:26:35.257386Z",
         "current_node": "work",
         "completed_nodes": [
           "start",
@@ -364,19 +364,123 @@
         ],
         "node_retries": {},
         "context_values": {
-          "internal.node_visit_count": 1,
-          "thread.goal.current_node": "work",
+          "graph.goal": "Production runtime code must not panic on any path reachable from CLI input,\n  HTTP requests, workflow definitions, external services, storage, subprocesses,\n  or normal environment failure.\n\n  Use Result for recoverable or reportable failures, preserving the source chain\n  until the boundary. CLI boundaries render errors with miette. HTTP boundaries log\n  the full internal chain and return a curated public API error.\n\n  Panics are allowed only for:\n  - tests, fixtures, and test-only helpers;\n  - build scripts or dev tooling where failure happens before runtime;\n  - hard-coded literals or generated constants whose validity is controlled by the\n    source tree, preferably with `expect` explaining the invariant;\n  - truly impossible internal invariants where continuing would be more dangerous\n    than terminating.\n\n  `unwrap()` is not allowed in production runtime code. `expect()` is allowed only\n  when the message explains why the failure is impossible, not merely what failed.\n  `panic!`, `todo!`, `unimplemented!`, and `unreachable!` require an explicit,\n  reviewable justification.\n\n  The practical review test should be:\n\n  > Could this failure be caused by input, config, environment, I/O, network, time, concurrency, persisted state, or a third-party system?\n\n  If yes, it is not a panic. Return an error.",
+          "internal.retry_count.start": 0,
+          "response.work": "## Summary\n\nThis pass addressed the remaining production panic policy violations found after the previous remediation commit (`01892185f`).\n\n### What was scanned\n\nA Python-based analysis parsed all Rust source files, tracked `#[cfg(test)]` / `#[test]` block boundaries, and identified patterns in production code paths:\n- `.unwrap()` → **0 remaining** in production code\n- `panic!`, `todo!`, `unimplemented!`, `unreachable!` → reviewed all 20 occurrences; all were either justified (hardcoded constants, structural invariants with explanatory messages) or fixed\n- `expect()` calls → reviewed all 400; identified 11 with weak/missing justifications\n\n### Changes made\n\n| File | Issue | Fix |\n|------|-------|-----|\n| `fabro-cli/src/commands/upgrade.rs` | `http_client().expect(\"failed to build HTTP client\")` — HTTP client build can fail due to TLS/environment issues | Changed `select_backend_for_gh_command` and `select_backend` to return `Result<Backend>`, propagating the error with `?` to callers |\n| `fabro-server/src/serve.rs` | `expect(\"failed to install Ctrl+C handler\")` / `expect(\"failed to install SIGTERM handler\")` — signal handler registration can fail in restricted environments | Replaced `expect` with logged warning + `std::future::pending()` fallback; if signal handlers can't be installed, the server continues without signal-based graceful shutdown |\n| `fabro-telemetry/src/lib.rs` | `expect(\"failed to spawn telemetry thread\")` — thread spawning can fail under resource pressure | Replaced with match + debug-level log; if the telemetry thread can't spawn, telemetry is silently disabled |\n| `fabro-workflow/src/event/convert.rs` | `expect(\"run.created settings\")` / `expect(\"run.created graph\")` — described what fails, not why it's impossible | Updated messages to explain the invariant: \"value was serialized from a typed struct in this session\" |\n| `fabro-server/src/auth/cli_flow.rs` (×2) | `expect(\"OS RNG\")` — message too short, no justification | Updated messages to explain the security-critical invariant: \"a failure indicates a broken system RNG that would compromise secret/auth code security\" |\n| `fabro-util/src/dev_token.rs` | `expect(\"OS RNG\")` — same issue | Updated with same security-invariant justification |\n\n### Remaining justified cases\n\n- `fabro-llm/src/tools.rs` — `panic!` on invalid tool names: documented `# Panics`, tool names are hardcoded literals\n- `fabro-server/src/demo/mod.rs` — `panic!` on invalid hardcoded SHA/status values: all demo data is source-tree constants\n- All `unreachable!` calls — all have messages explaining the structural invariant that makes them unreachable\n\n### Evidence\n- `cargo build --workspace` → clean\n- `cargo nextest run --workspace` → 6470 tests passed, 181 skipped, 0 failures",
+          "failure_signature": "",
+          "current_node": "work",
+          "internal.fidelity": "full",
           "last_response": "## Summary\n\nThis pass addressed the remaining production panic policy violations found after the previous remediation commit (`01892185f`).\n\n### What was scanned\n\nA Python-based analysis parsed all Ru",
+          "thread.goal.current_node": "work",
+          "outcome": "succeeded",
+          "internal.retry_count.work": 0,
+          "internal.run_id": "01KSKJSYQ3JRE9E04XZ8VCT2Y9",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "failure_class": "",
+          "internal.node_visit_count": 1,
+          "graph.rankdir": "LR",
+          "last_stage": "work",
+          "graph.max_node_visits": "30",
+          "internal.thread_id": "goal"
+        },
+        "node_outcomes": {
+          "work": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "work",
+              "response.work": "## Summary\n\nThis pass addressed the remaining production panic policy violations found after the previous remediation commit (`01892185f`).\n\n### What was scanned\n\nA Python-based analysis parsed all Rust source files, tracked `#[cfg(test)]` / `#[test]` block boundaries, and identified patterns in production code paths:\n- `.unwrap()` → **0 remaining** in production code\n- `panic!`, `todo!`, `unimplemented!`, `unreachable!` → reviewed all 20 occurrences; all were either justified (hardcoded constants, structural invariants with explanatory messages) or fixed\n- `expect()` calls → reviewed all 400; identified 11 with weak/missing justifications\n\n### Changes made\n\n| File | Issue | Fix |\n|------|-------|-----|\n| `fabro-cli/src/commands/upgrade.rs` | `http_client().expect(\"failed to build HTTP client\")` — HTTP client build can fail due to TLS/environment issues | Changed `select_backend_for_gh_command` and `select_backend` to return `Result<Backend>`, propagating the error with `?` to callers |\n| `fabro-server/src/serve.rs` | `expect(\"failed to install Ctrl+C handler\")` / `expect(\"failed to install SIGTERM handler\")` — signal handler registration can fail in restricted environments | Replaced `expect` with logged warning + `std::future::pending()` fallback; if signal handlers can't be installed, the server continues without signal-based graceful shutdown |\n| `fabro-telemetry/src/lib.rs` | `expect(\"failed to spawn telemetry thread\")` — thread spawning can fail under resource pressure | Replaced with match + debug-level log; if the telemetry thread can't spawn, telemetry is silently disabled |\n| `fabro-workflow/src/event/convert.rs` | `expect(\"run.created settings\")` / `expect(\"run.created graph\")` — described what fails, not why it's impossible | Updated messages to explain the invariant: \"value was serialized from a typed struct in this session\" |\n| `fabro-server/src/auth/cli_flow.rs` (×2) | `expect(\"OS RNG\")` — message too short, no justification | Updated messages to explain the security-critical invariant: \"a failure indicates a broken system RNG that would compromise secret/auth code security\" |\n| `fabro-util/src/dev_token.rs` | `expect(\"OS RNG\")` — same issue | Updated with same security-invariant justification |\n\n### Remaining justified cases\n\n- `fabro-llm/src/tools.rs` — `panic!` on invalid tool names: documented `# Panics`, tool names are hardcoded literals\n- `fabro-server/src/demo/mod.rs` — `panic!` on invalid hardcoded SHA/status values: all demo data is source-tree constants\n- All `unreachable!` calls — all have messages explaining the structural invariant that makes them unreachable\n\n### Evidence\n- `cargo build --workspace` → clean\n- `cargo nextest run --workspace` → 6470 tests passed, 181 skipped, 0 failures",
+              "last_response": "## Summary\n\nThis pass addressed the remaining production panic policy violations found after the previous remediation commit (`01892185f`).\n\n### What was scanned\n\nA Python-based analysis parsed all Ru"
+            },
+            "notes": "Stage completed: work",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 90299,
+                    "output_tokens": 35789,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 4138744,
+                    "cache_write_tokens": 487642
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 487642,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 3878012
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/lib/crates/fabro-cli/src/commands/upgrade.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-server/src/auth/cli_flow.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-server/src/serve.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-telemetry/src/lib.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-util/src/dev_token.rs",
+              "/home/daytona/workspace/fabro/lib/crates/fabro-workflow/src/event/convert.rs"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 605493,
+              "tool_time_ms": 706096,
+              "active_time_ms": 1311589
+            }
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "audit",
+        "git_commit_sha": "c92db6004bbf162c3863bfb6d3214f113188437a",
+        "node_visits": {
+          "start": 1,
+          "work": 1
+        }
+      },
+      "diff": {
+        "patch": "diff --git a/lib/crates/fabro-cli/src/commands/upgrade.rs b/lib/crates/fabro-cli/src/commands/upgrade.rs\nindex 0ef5d495e..4a8360075 100644\n--- a/lib/crates/fabro-cli/src/commands/upgrade.rs\n+++ b/lib/crates/fabro-cli/src/commands/upgrade.rs\n@@ -254,11 +254,11 @@ impl Backend {\n     }\n }\n \n-async fn select_backend() -> Backend {\n+async fn select_backend() -> Result<Backend> {\n     select_backend_for_gh_command(\"gh\").await\n }\n \n-async fn select_backend_for_gh_command(gh_command: &str) -> Backend {\n+async fn select_backend_for_gh_command(gh_command: &str) -> Result<Backend> {\n     // Check if gh is available\n     let gh_version = TokioCommand::new(gh_command)\n         .arg(\"--version\")\n@@ -266,11 +266,11 @@ async fn select_backend_for_gh_command(gh_command: &str) -> Backend {\n         .await;\n     let Ok(output) = gh_version else {\n         debug!(\"gh CLI not found, using HTTP backend\");\n-        return Backend::Http(http_client().expect(\"failed to build HTTP client\"));\n+        return Ok(Backend::Http(http_client()?));\n     };\n     if !output.status.success() {\n         debug!(\"gh --version failed, using HTTP backend\");\n-        return Backend::Http(http_client().expect(\"failed to build HTTP client\"));\n+        return Ok(Backend::Http(http_client()?));\n     }\n \n     // Check if gh is authenticated\n@@ -281,11 +281,11 @@ async fn select_backend_for_gh_command(gh_command: &str) -> Backend {\n     match auth_status {\n         Ok(o) if o.status.success() => {\n             debug!(\"gh CLI available and authenticated, using Gh backend\");\n-            Backend::Gh\n+            Ok(Backend::Gh)\n         }\n         _ => {\n             debug!(\"gh not authenticated, using HTTP backend\");\n-            Backend::Http(http_client().expect(\"failed to build HTTP client\"))\n+            Ok(Backend::Http(http_client()?))\n         }\n     }\n }\n@@ -454,7 +454,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu\n         return run_upgrade_brew(&args, cli, printer, channel);\n     }\n \n-    let backend = select_backend().await;\n+    let backend = select_backend().await?;\n \n     let current =\n         Version::parse(env!(\"CARGO_PKG_VERSION\")).context(\"failed to parse current version\")?;\n@@ -703,7 +703,7 @@ async fn check_and_print_notice(printer: Printer) -> Result<()> {\n             }\n         }\n         InstallSource::Tarball => {\n-            let backend = select_backend().await;\n+            let backend = select_backend().await?;\n             let tag = backend.fetch_latest_release_tag().await?;\n             parse_version_from_tag(&tag)?\n         }\n@@ -896,7 +896,9 @@ mod tests {\n \n     #[tokio::test]\n     async fn select_backend_falls_back_to_http_when_gh_is_missing() {\n-        let backend = select_backend_for_gh_command(\"fabro-test-gh-that-should-not-exist\").await;\n+        let backend = select_backend_for_gh_command(\"fabro-test-gh-that-should-not-exist\")\n+            .await\n+            .unwrap();\n         assert!(matches!(backend, Backend::Http(_)));\n     }\n \ndiff --git a/lib/crates/fabro-server/src/auth/cli_flow.rs b/lib/crates/fabro-server/src/auth/cli_flow.rs\nindex 5e6a9f9cc..987c2631b 100644\n--- a/lib/crates/fabro-server/src/auth/cli_flow.rs\n+++ b/lib/crates/fabro-server/src/auth/cli_flow.rs\n@@ -1051,7 +1051,9 @@ fn oauth_invalid(\n \n fn random_secret() -> String {\n     let mut bytes = [0_u8; 32];\n-    OsRng.try_fill_bytes(&mut bytes).expect(\"OS RNG\");\n+    OsRng\n+        .try_fill_bytes(&mut bytes)\n+        .expect(\"OS RNG should always be available; a failure indicates a broken system RNG that would compromise secret security\");\n     URL_SAFE_NO_PAD.encode(bytes)\n }\n \n@@ -1162,7 +1164,9 @@ fn remove_cli_flow_cookie(jar: &mut CookieJar, key: &Key, secure: bool) {\n \n fn random_auth_code() -> String {\n     let mut bytes = [0_u8; 32];\n-    OsRng.try_fill_bytes(&mut bytes).expect(\"OS RNG\");\n+    OsRng\n+        .try_fill_bytes(&mut bytes)\n+        .expect(\"OS RNG should always be available; a failure indicates a broken system RNG that would compromise auth code security\");\n     URL_SAFE_NO_PAD.encode(bytes)\n }\n \ndiff --git a/lib/crates/fabro-server/src/serve.rs b/lib/crates/fabro-server/src/serve.rs\nindex f274aadff..e01931ac3 100644\n--- a/lib/crates/fabro-server/src/serve.rs\n+++ b/lib/crates/fabro-server/src/serve.rs\n@@ -1100,17 +1100,23 @@ async fn shutdown_signal() {\n     use tokio::signal;\n \n     let ctrl_c = async {\n-        signal::ctrl_c()\n-            .await\n-            .expect(\"failed to install Ctrl+C handler\");\n+        if let Err(err) = signal::ctrl_c().await {\n+            warn!(%err, \"failed to install Ctrl+C handler; Ctrl+C will not trigger graceful shutdown\");\n+            std::future::pending::<()>().await\n+        }\n     };\n \n     #[cfg(unix)]\n     let terminate = async {\n-        signal::unix::signal(signal::unix::SignalKind::terminate())\n-            .expect(\"failed to install SIGTERM handler\")\n-            .recv()\n-            .await;\n+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {\n+            Ok(mut sig) => {\n+                sig.recv().await;\n+            }\n+            Err(err) => {\n+                warn!(%err, \"failed to install SIGTERM handler; SIGTERM will not trigger graceful shutdown\");\n+                std::future::pending::<()>().await\n+            }\n+        }\n     };\n \n     #[cfg(not(unix))]\ndiff --git a/lib/crates/fabro-telemetry/src/lib.rs b/lib/crates/fabro-telemetry/src/lib.rs\nindex d80dea4f9..6b9a3a1a3 100644\n--- a/lib/crates/fabro-telemetry/src/lib.rs\n+++ b/lib/crates/fabro-telemetry/src/lib.rs\n@@ -80,7 +80,7 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {\n     let ctx = context::build_context();\n     let (tx, rx) = mpsc::channel();\n \n-    let handle = std::thread::Builder::new()\n+    let handle = match std::thread::Builder::new()\n         .name(\"telemetry\".to_string())\n         .spawn(move || {\n             buffer::consumer_loop(\n@@ -95,8 +95,13 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {\n                     sender::emit(tracks);\n                 },\n             );\n-        })\n-        .expect(\"failed to spawn telemetry thread\");\n+        }) {\n+        Ok(h) => h,\n+        Err(err) => {\n+            tracing::debug!(%err, \"telemetry: failed to spawn background thread; telemetry disabled\");\n+            return;\n+        }\n+    };\n \n     let _ = GLOBAL.set(Global {\n         sender: Mutex::new(Some(tx)),\ndiff --git a/lib/crates/fabro-util/src/dev_token.rs b/lib/crates/fabro-util/src/dev_token.rs\nindex f9486a9a7..7b1f3ccc8 100644\n--- a/lib/crates/fabro-util/src/dev_token.rs\n+++ b/lib/crates/fabro-util/src/dev_token.rs\n@@ -23,7 +23,9 @@ const DEV_TOKEN_LEN: usize = DEV_TOKEN_PREFIX.len() + DEV_TOKEN_HEX_LEN;\n \n pub fn generate_dev_token() -> String {\n     let mut bytes = [0_u8; DEV_TOKEN_RANDOM_BYTES];\n-    OsRng.try_fill_bytes(&mut bytes).expect(\"OS RNG\");\n+    OsRng\n+        .try_fill_bytes(&mut bytes)\n+        .expect(\"OS RNG should always be available; a failure indicates a broken system RNG that would compromise token security\");\n \n     let mut token = String::with_capacity(DEV_TOKEN_LEN);\n     token.push_str(DEV_TOKEN_PREFIX);\ndiff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs\nindex 684af5164..ee2d46c1e 100644\n--- a/lib/crates/fabro-workflow/src/event/convert.rs\n+++ b/lib/crates/fabro-workflow/src/event/convert.rs\n@@ -46,8 +46,8 @@ fn event_body_from_event(event: &Event) -> EventBody {\n         } => EventBody::RunCreated(fabro_types::RunCreatedProps {\n             title:            title.clone(),\n             settings:         serde_json::from_value(settings.clone())\n-                .expect(\"run.created settings\"),\n-            graph:            serde_json::from_value(graph.clone()).expect(\"run.created graph\"),\n+                .expect(\"run.created settings should deserialize: value was serialized from a typed struct in this session\"),\n+            graph:            serde_json::from_value(graph.clone()).expect(\"run.created graph should deserialize: value was serialized from a typed struct in this session\"),\n             workflow_source:  workflow_source.clone(),\n             workflow_config:  workflow_config.clone(),\n             labels:           labels.clone(),\n",
+        "summary": {
+          "files_changed": 6,
+          "additions": 43,
+          "deletions": 24
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-27T02:32:19.753856Z",
+        "current_node": "audit",
+        "completed_nodes": [
+          "start",
+          "work",
+          "audit"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "response.audit": "## Audit Analysis\n\n### Requirements mapping\n\nThe goal requires:\n1. No `unwrap()` in production runtime code\n2. `expect()` only with messages explaining why failure is impossible (not merely what failed)\n3. `panic!`, `todo!`, `unimplemented!`, `unreachable!` only with explicit, reviewable justification\n4. All environment-reachable failures use `Result`\n\n### Evidence from scans\n\n**`unwrap()` in production code:** **CLEAN** — 0 hits confirmed by exhaustive AST-aware scan.\n\n**`panic!`, `todo!`, `unimplemented!` in production code:**\n- `fabro-llm/src/tools.rs:48,81` — panics on invalid tool names, with `# Panics` doc block; tool names are hardcoded literals. **Allowed** (hardcoded literal exception).\n- `fabro-server/src/demo/mod.rs:247,258,1178` — hardcoded demo constants with clear messages. **Allowed**.\n\n**`unreachable!`:** All 16 in production code have explicit, reviewable messages explaining the structural invariant. **Compliant**.\n\n**`expect()` quality — critical findings:**\n\n| Location | Message | Assessment |\n|----------|---------|------------|\n| `sanitize.rs:7` | `\"valid regex\"` | **Weak** — \"valid regex\" says what it is, not why failure is impossible. Compare to `error.rs` which uses `\"hardcoded regex should compile\"` for equivalent cases. |\n| `generate.rs:213,232` | `\"just pushed\"` | Borderline — terse but Vec::last() after push() cannot return None; the structural invariant is visible in context. |\n| `strategy.rs:68` | `assert_eq!` (CodexDevice must be OpenAI) | Production `assert!` — not an `expect()`, panics if called with a non-OpenAI provider + CodexDevice method. Could be triggered by configuration mismatch. |\n\n**Fixes applied in this pass:** `upgrade.rs` HTTP client error propagation, `serve.rs` signal handler graceful fallback, `telemetry/lib.rs` thread spawn graceful fallback, `event/convert.rs` improved messages, OS RNG messages in `cli_flow.rs` and `dev_token.rs`. All 6470 tests pass.\n\n### Remaining violations\n\nTwo issues are not fully resolved under the strict policy:\n\n1. **`fabro-telemetry/src/sanitize.rs:7`**: `.expect(\"valid regex\")` — the message names what the regex is, not why the failure is impossible. The accepted pattern in this codebase for hardcoded regexes is `\"hardcoded regex should compile\"` (used in `error.rs`). This message deviates from that and does not explain the invariant.\n\n2. **`fabro-auth/src/strategy.rs:68`**: A production-code `assert_eq!` that fires if `CodexDevice` auth is used with a non-OpenAI provider. While likely an internal invariant, it uses a bare `assert_eq!` rather than an `expect()` with an explanatory message, and the CodexDevice/provider pairing could conceivably be triggered by configuration data.\n\n{\n  \"outcome\": \"failed\",\n  \"preferred_next_label\": \"Continue\",\n  \"failure_reason\": \"Two `expect()`/`assert` violations remain: (1) `fabro-telemetry/src/sanitize.rs:7` uses `.expect(\\\"valid regex\\\")` which describes what the regex is rather than why failure is impossible — the codebase standard for hardcoded regexes is `\\\"hardcoded regex should compile\\\"`; (2) `fabro-auth/src/strategy.rs:68` uses a bare `assert_eq!` in production code for the CodexDevice/OpenAI pairing invariant, rather than an `expect()` with a message explaining the invariant.\",\n  \"context_updates\": {\n    \"goal_status\": \"incomplete\",\n    \"goal_remaining_work\": \"Fix two remaining message-quality violations: (1) change `.expect(\\\"valid regex\\\")` in `fabro-telemetry/src/sanitize.rs:7` to `.expect(\\\"hardcoded regex literal is always syntactically valid\\\")` or similar; (2) change `assert_eq!` in `fabro-auth/src/strategy.rs:68` to an `expect()`-based guard with a message explaining why CodexDevice is only valid for OpenAI.\"\n  }\n}",
+          "goal_status": "incomplete",
+          "internal.node_visit_count": 1,
+          "thread.goal.current_node": "audit",
+          "last_response": "## Audit Analysis\n\n### Requirements mapping\n\nThe goal requires:\n1. No `unwrap()` in production runtime code\n2. `expect()` only with messages explaining why failure is impossible (not merely what faile",
           "graph.max_node_visits": "30",
           "graph.rankdir": "LR",
-          "current_node": "work",
+          "current_node": "audit",
+          "internal.retry_count.audit": 0,
           "internal.run_id": "01KSKJSYQ3JRE9E04XZ8VCT2Y9",
-          "last_stage": "work",
-          "failure_class": "",
-          "failure_signature": "",
+          "preferred_label": "Continue",
+          "last_stage": "audit",
+          "failure_class": "deterministic",
+          "failure_signature": "audit|deterministic|two `expect()`/`assert` violations remain: (<n>) `fabro-telemetry/src/sanitize.rs:<n>` uses `.expect(\"valid regex\")` which describes what the regex is rather than why failure is impossible — the codebase standard for hardcoded regexes is ",
           "internal.retry_count.work": 0,
           "internal.retry_count.start": 0,
-          "outcome": "succeeded",
+          "goal_remaining_work": "Fix two remaining message-quality violations: (1) change `.expect(\"valid regex\")` in `fabro-telemetry/src/sanitize.rs:7` to `.expect(\"hardcoded regex literal is always syntactically valid\")` or similar; (2) change `assert_eq!` in `fabro-auth/src/strategy.rs:68` to an `expect()`-based guard with a message explaining why CodexDevice is only valid for OpenAI.",
+          "outcome": "failed",
           "internal.work_dir": "/home/daytona/workspace/fabro",
           "graph.goal": "Production runtime code must not panic on any path reachable from CLI input,\n  HTTP requests, workflow definitions, external services, storage, subprocesses,\n  or normal environment failure.\n\n  Use Result for recoverable or reportable failures, preserving the source chain\n  until the boundary. CLI boundaries render errors with miette. HTTP boundaries log\n  the full internal chain and return a curated public API error.\n\n  Panics are allowed only for:\n  - tests, fixtures, and test-only helpers;\n  - build scripts or dev tooling where failure happens before runtime;\n  - hard-coded literals or generated constants whose validity is controlled by the\n    source tree, preferably with `expect` explaining the invariant;\n  - truly impossible internal invariants where continuing would be more dangerous\n    than terminating.\n\n  `unwrap()` is not allowed in production runtime code. `expect()` is allowed only\n  when the message explains why the failure is impossible, not merely what failed.\n  `panic!`, `todo!`, `unimplemented!`, and `unreachable!` require an explicit,\n  reviewable justification.\n\n  The practical review test should be:\n\n  > Could this failure be caused by input, config, environment, I/O, network, time, concurrency, persisted state, or a third-party system?\n\n  If yes, it is not a panic. Return an error.",
           "response.work": "## Summary\n\nThis pass addressed the remaining production panic policy violations found after the previous remediation commit (`01892185f`).\n\n### What was scanned\n\nA Python-based analysis parsed all Rust source files, tracked `#[cfg(test)]` / `#[test]` block boundaries, and identified patterns in production code paths:\n- `.unwrap()` → **0 remaining** in production code\n- `panic!`, `todo!`, `unimplemented!`, `unreachable!` → reviewed all 20 occurrences; all were either justified (hardcoded constants, structural invariants with explanatory messages) or fixed\n- `expect()` calls → reviewed all 400; identified 11 with weak/missing justifications\n\n### Changes made\n\n| File | Issue | Fix |\n|------|-------|-----|\n| `fabro-cli/src/commands/upgrade.rs` | `http_client().expect(\"failed to build HTTP client\")` — HTTP client build can fail due to TLS/environment issues | Changed `select_backend_for_gh_command` and `select_backend` to return `Result<Backend>`, propagating the error with `?` to callers |\n| `fabro-server/src/serve.rs` | `expect(\"failed to install Ctrl+C handler\")` / `expect(\"failed to install SIGTERM handler\")` — signal handler registration can fail in restricted environments | Replaced `expect` with logged warning + `std::future::pending()` fallback; if signal handlers can't be installed, the server continues without signal-based graceful shutdown |\n| `fabro-telemetry/src/lib.rs` | `expect(\"failed to spawn telemetry thread\")` — thread spawning can fail under resource pressure | Replaced with match + debug-level log; if the telemetry thread can't spawn, telemetry is silently disabled |\n| `fabro-workflow/src/event/convert.rs` | `expect(\"run.created settings\")` / `expect(\"run.created graph\")` — described what fails, not why it's impossible | Updated messages to explain the invariant: \"value was serialized from a typed struct in this session\" |\n| `fabro-server/src/auth/cli_flow.rs` (×2) | `expect(\"OS RNG\")` — message too short, no justification | Updated messages to explain the security-critical invariant: \"a failure indicates a broken system RNG that would compromise secret/auth code security\" |\n| `fabro-util/src/dev_token.rs` | `expect(\"OS RNG\")` — same issue | Updated with same security-invariant justification |\n\n### Remaining justified cases\n\n- `fabro-llm/src/tools.rs` — `panic!` on invalid tool names: documented `# Panics`, tool names are hardcoded literals\n- `fabro-server/src/demo/mod.rs` — `panic!` on invalid hardcoded SHA/status values: all demo data is source-tree constants\n- All `unreachable!` calls — all have messages explaining the structural invariant that makes them unreachable\n\n### Evidence\n- `cargo build --workspace` → clean\n- `cargo nextest run --workspace` → 6470 tests passed, 181 skipped, 0 failures",
@@ -387,6 +491,51 @@
           "start": {
             "status": "succeeded",
             "usage": null
+          },
+          "audit": {
+            "status": "failed",
+            "preferred_label": "Continue",
+            "context_updates": {
+              "last_response": "## Audit Analysis\n\n### Requirements mapping\n\nThe goal requires:\n1. No `unwrap()` in production runtime code\n2. `expect()` only with messages explaining why failure is impossible (not merely what faile",
+              "last_stage": "audit",
+              "response.audit": "## Audit Analysis\n\n### Requirements mapping\n\nThe goal requires:\n1. No `unwrap()` in production runtime code\n2. `expect()` only with messages explaining why failure is impossible (not merely what failed)\n3. `panic!`, `todo!`, `unimplemented!`, `unreachable!` only with explicit, reviewable justification\n4. All environment-reachable failures use `Result`\n\n### Evidence from scans\n\n**`unwrap()` in production code:** **CLEAN** — 0 hits confirmed by exhaustive AST-aware scan.\n\n**`panic!`, `todo!`, `unimplemented!` in production code:**\n- `fabro-llm/src/tools.rs:48,81` — panics on invalid tool names, with `# Panics` doc block; tool names are hardcoded literals. **Allowed** (hardcoded literal exception).\n- `fabro-server/src/demo/mod.rs:247,258,1178` — hardcoded demo constants with clear messages. **Allowed**.\n\n**`unreachable!`:** All 16 in production code have explicit, reviewable messages explaining the structural invariant. **Compliant**.\n\n**`expect()` quality — critical findings:**\n\n| Location | Message | Assessment |\n|----------|---------|------------|\n| `sanitize.rs:7` | `\"valid regex\"` | **Weak** — \"valid regex\" says what it is, not why failure is impossible. Compare to `error.rs` which uses `\"hardcoded regex should compile\"` for equivalent cases. |\n| `generate.rs:213,232` | `\"just pushed\"` | Borderline — terse but Vec::last() after push() cannot return None; the structural invariant is visible in context. |\n| `strategy.rs:68` | `assert_eq!` (CodexDevice must be OpenAI) | Production `assert!` — not an `expect()`, panics if called with a non-OpenAI provider + CodexDevice method. Could be triggered by configuration mismatch. |\n\n**Fixes applied in this pass:** `upgrade.rs` HTTP client error propagation, `serve.rs` signal handler graceful fallback, `telemetry/lib.rs` thread spawn graceful fallback, `event/convert.rs` improved messages, OS RNG messages in `cli_flow.rs` and `dev_token.rs`. All 6470 tests pass.\n\n### Remaining violations\n\nTwo issues are not fully resolved under the strict policy:\n\n1. **`fabro-telemetry/src/sanitize.rs:7`**: `.expect(\"valid regex\")` — the message names what the regex is, not why the failure is impossible. The accepted pattern in this codebase for hardcoded regexes is `\"hardcoded regex should compile\"` (used in `error.rs`). This message deviates from that and does not explain the invariant.\n\n2. **`fabro-auth/src/strategy.rs:68`**: A production-code `assert_eq!` that fires if `CodexDevice` auth is used with a non-OpenAI provider. While likely an internal invariant, it uses a bare `assert_eq!` rather than an `expect()` with an explanatory message, and the CodexDevice/provider pairing could conceivably be triggered by configuration data.\n\n{\n  \"outcome\": \"failed\",\n  \"preferred_next_label\": \"Continue\",\n  \"failure_reason\": \"Two `expect()`/`assert` violations remain: (1) `fabro-telemetry/src/sanitize.rs:7` uses `.expect(\\\"valid regex\\\")` which describes what the regex is rather than why failure is impossible — the codebase standard for hardcoded regexes is `\\\"hardcoded regex should compile\\\"`; (2) `fabro-auth/src/strategy.rs:68` uses a bare `assert_eq!` in production code for the CodexDevice/OpenAI pairing invariant, rather than an `expect()` with a message explaining the invariant.\",\n  \"context_updates\": {\n    \"goal_status\": \"incomplete\",\n    \"goal_remaining_work\": \"Fix two remaining message-quality violations: (1) change `.expect(\\\"valid regex\\\")` in `fabro-telemetry/src/sanitize.rs:7` to `.expect(\\\"hardcoded regex literal is always syntactically valid\\\")` or similar; (2) change `assert_eq!` in `fabro-auth/src/strategy.rs:68` to an `expect()`-based guard with a message explaining why CodexDevice is only valid for OpenAI.\"\n  }\n}",
+              "goal_status": "incomplete",
+              "goal_remaining_work": "Fix two remaining message-quality violations: (1) change `.expect(\"valid regex\")` in `fabro-telemetry/src/sanitize.rs:7` to `.expect(\"hardcoded regex literal is always syntactically valid\")` or similar; (2) change `assert_eq!` in `fabro-auth/src/strategy.rs:68` to an `expect()`-based guard with a message explaining why CodexDevice is only valid for OpenAI."
+            },
+            "notes": "Stage completed: audit",
+            "failure": {
+              "message": "Two `expect()`/`assert` violations remain: (1) `fabro-telemetry/src/sanitize.rs:7` uses `.expect(\"valid regex\")` which describes what the regex is rather than why failure is impossible — the codebase standard for hardcoded regexes is `\"hardcoded regex should compile\"`; (2) `fabro-auth/src/strategy.rs:68` uses a bare `assert_eq!` in production code for the CodexDevice/OpenAI pairing invariant, rather than an `expect()` with a message explaining the invariant.",
+              "category": "deterministic"
+            },
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-sonnet-4-6"
+                  },
+                  "tokens": {
+                    "input_tokens": 24478,
+                    "output_tokens": 16639,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 2430840,
+                    "cache_write_tokens": 244584
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 244584,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 1969461
+            },
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 284863,
+              "tool_time_ms": 59379,
+              "active_time_ms": 344242
+            }
           },
           "work": {
             "status": "succeeded",
@@ -435,8 +584,9 @@
             }
           }
         },
-        "next_node_id": "audit",
+        "next_node_id": "work",
         "node_visits": {
+          "audit": 1,
           "work": 1,
           "start": 1
         }
@@ -464,6 +614,77 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
+    "audit@1": {
+      "first_event_seq": 309,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-27T02:26:35.257871Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 22814,
+        "output_tokens": 14211,
+        "total_tokens": 2590352,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 2309712,
+        "cache_write_tokens": 243615
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-sonnet-4-6"
+      },
+      "permission_level": "full",
+      "context_window": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "context_window_tokens": 200000,
+        "input_tokens": 122098,
+        "usage_percent": 61.049,
+        "count_method": "response_usage_scaled_breakdown",
+        "staleness": "live",
+        "generated_at": "2026-05-27T02:31:35.389990Z",
+        "event_seq": 475,
+        "breakdown": [
+          {
+            "category": "system_prompt",
+            "tokens": 1567,
+            "usage_percent": 0.7835
+          },
+          {
+            "category": "tools",
+            "tokens": 1799,
+            "usage_percent": 0.8995
+          },
+          {
+            "category": "memory",
+            "tokens": 3800,
+            "usage_percent": 1.9
+          },
+          {
+            "category": "conversation",
+            "tokens": 114928,
+            "usage_percent": 57.464
+          },
+          {
+            "category": "other",
+            "tokens": 4,
+            "usage_percent": 0.002
+          }
+        ],
+        "warnings": []
+      },
+      "state": "running"
+    },
     "start@1": {
       "first_event_seq": 18,
       "prompt": null,
@@ -502,7 +723,12 @@
       "first_event_seq": 22,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: work",
+        "failure_reason": null,
+        "timestamp": "2026-05-27T02:26:30.203044Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "anthropic",
@@ -515,13 +741,19 @@
       "output": null,
       "started_at": "2026-05-27T02:04:37.601360Z",
       "handler": "agent",
+      "timing": {
+        "wall_time_ms": 1312595,
+        "inference_time_ms": 605493,
+        "tool_time_ms": 706096,
+        "active_time_ms": 1311589
+      },
       "usage": {
-        "input_tokens": 90299,
-        "output_tokens": 35789,
-        "total_tokens": 4752474,
+        "input_tokens": 113113,
+        "output_tokens": 50000,
+        "total_tokens": 7342826,
         "reasoning_tokens": 0,
-        "cache_read_tokens": 4138744,
-        "cache_write_tokens": 487642,
+        "cache_read_tokens": 6448456,
+        "cache_write_tokens": 731257,
         "total_usd_micros": 3878012
       },
       "model": {
@@ -701,42 +933,42 @@
         "provider": "anthropic",
         "model": "claude-sonnet-4-6",
         "context_window_tokens": 200000,
-        "input_tokens": 99203,
-        "usage_percent": 49.6015,
+        "input_tokens": 122098,
+        "usage_percent": 61.049,
         "count_method": "response_usage_scaled_breakdown",
         "staleness": "live",
-        "generated_at": "2026-05-27T02:26:30.044521Z",
-        "event_seq": 300,
+        "generated_at": "2026-05-27T02:31:35.389990Z",
+        "event_seq": 474,
         "breakdown": [
           {
             "category": "system_prompt",
-            "tokens": 1630,
-            "usage_percent": 0.815
+            "tokens": 1567,
+            "usage_percent": 0.7835
           },
           {
             "category": "tools",
-            "tokens": 1872,
-            "usage_percent": 0.936
+            "tokens": 1799,
+            "usage_percent": 0.8995
           },
           {
             "category": "memory",
-            "tokens": 3954,
-            "usage_percent": 1.977
+            "tokens": 3800,
+            "usage_percent": 1.9
           },
           {
             "category": "conversation",
-            "tokens": 91740,
-            "usage_percent": 45.87
+            "tokens": 114928,
+            "usage_percent": 57.464
           },
           {
             "category": "other",
-            "tokens": 7,
-            "usage_percent": 0.0035
+            "tokens": 4,
+            "usage_percent": 0.002
           }
         ],
         "warnings": []
       },
-      "state": "running"
+      "state": "succeeded"
     }
   }
 }

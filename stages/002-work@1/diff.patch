@@ -1,0 +1,195 @@
+diff --git a/lib/crates/fabro-cli/src/commands/upgrade.rs b/lib/crates/fabro-cli/src/commands/upgrade.rs
+index 0ef5d495e..4a8360075 100644
+--- a/lib/crates/fabro-cli/src/commands/upgrade.rs
++++ b/lib/crates/fabro-cli/src/commands/upgrade.rs
+@@ -254,11 +254,11 @@ impl Backend {
+     }
+ }
+ 
+-async fn select_backend() -> Backend {
++async fn select_backend() -> Result<Backend> {
+     select_backend_for_gh_command("gh").await
+ }
+ 
+-async fn select_backend_for_gh_command(gh_command: &str) -> Backend {
++async fn select_backend_for_gh_command(gh_command: &str) -> Result<Backend> {
+     // Check if gh is available
+     let gh_version = TokioCommand::new(gh_command)
+         .arg("--version")
+@@ -266,11 +266,11 @@ async fn select_backend_for_gh_command(gh_command: &str) -> Backend {
+         .await;
+     let Ok(output) = gh_version else {
+         debug!("gh CLI not found, using HTTP backend");
+-        return Backend::Http(http_client().expect("failed to build HTTP client"));
++        return Ok(Backend::Http(http_client()?));
+     };
+     if !output.status.success() {
+         debug!("gh --version failed, using HTTP backend");
+-        return Backend::Http(http_client().expect("failed to build HTTP client"));
++        return Ok(Backend::Http(http_client()?));
+     }
+ 
+     // Check if gh is authenticated
+@@ -281,11 +281,11 @@ async fn select_backend_for_gh_command(gh_command: &str) -> Backend {
+     match auth_status {
+         Ok(o) if o.status.success() => {
+             debug!("gh CLI available and authenticated, using Gh backend");
+-            Backend::Gh
++            Ok(Backend::Gh)
+         }
+         _ => {
+             debug!("gh not authenticated, using HTTP backend");
+-            Backend::Http(http_client().expect("failed to build HTTP client"))
++            Ok(Backend::Http(http_client()?))
+         }
+     }
+ }
+@@ -454,7 +454,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, ctx: &CommandContext) -> Resu
+         return run_upgrade_brew(&args, cli, printer, channel);
+     }
+ 
+-    let backend = select_backend().await;
++    let backend = select_backend().await?;
+ 
+     let current =
+         Version::parse(env!("CARGO_PKG_VERSION")).context("failed to parse current version")?;
+@@ -703,7 +703,7 @@ async fn check_and_print_notice(printer: Printer) -> Result<()> {
+             }
+         }
+         InstallSource::Tarball => {
+-            let backend = select_backend().await;
++            let backend = select_backend().await?;
+             let tag = backend.fetch_latest_release_tag().await?;
+             parse_version_from_tag(&tag)?
+         }
+@@ -896,7 +896,9 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn select_backend_falls_back_to_http_when_gh_is_missing() {
+-        let backend = select_backend_for_gh_command("fabro-test-gh-that-should-not-exist").await;
++        let backend = select_backend_for_gh_command("fabro-test-gh-that-should-not-exist")
++            .await
++            .unwrap();
+         assert!(matches!(backend, Backend::Http(_)));
+     }
+ 
+diff --git a/lib/crates/fabro-server/src/auth/cli_flow.rs b/lib/crates/fabro-server/src/auth/cli_flow.rs
+index 5e6a9f9cc..987c2631b 100644
+--- a/lib/crates/fabro-server/src/auth/cli_flow.rs
++++ b/lib/crates/fabro-server/src/auth/cli_flow.rs
+@@ -1051,7 +1051,9 @@ fn oauth_invalid(
+ 
+ fn random_secret() -> String {
+     let mut bytes = [0_u8; 32];
+-    OsRng.try_fill_bytes(&mut bytes).expect("OS RNG");
++    OsRng
++        .try_fill_bytes(&mut bytes)
++        .expect("OS RNG should always be available; a failure indicates a broken system RNG that would compromise secret security");
+     URL_SAFE_NO_PAD.encode(bytes)
+ }
+ 
+@@ -1162,7 +1164,9 @@ fn remove_cli_flow_cookie(jar: &mut CookieJar, key: &Key, secure: bool) {
+ 
+ fn random_auth_code() -> String {
+     let mut bytes = [0_u8; 32];
+-    OsRng.try_fill_bytes(&mut bytes).expect("OS RNG");
++    OsRng
++        .try_fill_bytes(&mut bytes)
++        .expect("OS RNG should always be available; a failure indicates a broken system RNG that would compromise auth code security");
+     URL_SAFE_NO_PAD.encode(bytes)
+ }
+ 
+diff --git a/lib/crates/fabro-server/src/serve.rs b/lib/crates/fabro-server/src/serve.rs
+index f274aadff..e01931ac3 100644
+--- a/lib/crates/fabro-server/src/serve.rs
++++ b/lib/crates/fabro-server/src/serve.rs
+@@ -1100,17 +1100,23 @@ async fn shutdown_signal() {
+     use tokio::signal;
+ 
+     let ctrl_c = async {
+-        signal::ctrl_c()
+-            .await
+-            .expect("failed to install Ctrl+C handler");
++        if let Err(err) = signal::ctrl_c().await {
++            warn!(%err, "failed to install Ctrl+C handler; Ctrl+C will not trigger graceful shutdown");
++            std::future::pending::<()>().await
++        }
+     };
+ 
+     #[cfg(unix)]
+     let terminate = async {
+-        signal::unix::signal(signal::unix::SignalKind::terminate())
+-            .expect("failed to install SIGTERM handler")
+-            .recv()
+-            .await;
++        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
++            Ok(mut sig) => {
++                sig.recv().await;
++            }
++            Err(err) => {
++                warn!(%err, "failed to install SIGTERM handler; SIGTERM will not trigger graceful shutdown");
++                std::future::pending::<()>().await
++            }
++        }
+     };
+ 
+     #[cfg(not(unix))]
+diff --git a/lib/crates/fabro-telemetry/src/lib.rs b/lib/crates/fabro-telemetry/src/lib.rs
+index d80dea4f9..6b9a3a1a3 100644
+--- a/lib/crates/fabro-telemetry/src/lib.rs
++++ b/lib/crates/fabro-telemetry/src/lib.rs
+@@ -80,7 +80,7 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {
+     let ctx = context::build_context();
+     let (tx, rx) = mpsc::channel();
+ 
+-    let handle = std::thread::Builder::new()
++    let handle = match std::thread::Builder::new()
+         .name("telemetry".to_string())
+         .spawn(move || {
+             buffer::consumer_loop(
+@@ -95,8 +95,13 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {
+                     sender::emit(tracks);
+                 },
+             );
+-        })
+-        .expect("failed to spawn telemetry thread");
++        }) {
++        Ok(h) => h,
++        Err(err) => {
++            tracing::debug!(%err, "telemetry: failed to spawn background thread; telemetry disabled");
++            return;
++        }
++    };
+ 
+     let _ = GLOBAL.set(Global {
+         sender: Mutex::new(Some(tx)),
+diff --git a/lib/crates/fabro-util/src/dev_token.rs b/lib/crates/fabro-util/src/dev_token.rs
+index f9486a9a7..7b1f3ccc8 100644
+--- a/lib/crates/fabro-util/src/dev_token.rs
++++ b/lib/crates/fabro-util/src/dev_token.rs
+@@ -23,7 +23,9 @@ const DEV_TOKEN_LEN: usize = DEV_TOKEN_PREFIX.len() + DEV_TOKEN_HEX_LEN;
+ 
+ pub fn generate_dev_token() -> String {
+     let mut bytes = [0_u8; DEV_TOKEN_RANDOM_BYTES];
+-    OsRng.try_fill_bytes(&mut bytes).expect("OS RNG");
++    OsRng
++        .try_fill_bytes(&mut bytes)
++        .expect("OS RNG should always be available; a failure indicates a broken system RNG that would compromise token security");
+ 
+     let mut token = String::with_capacity(DEV_TOKEN_LEN);
+     token.push_str(DEV_TOKEN_PREFIX);
+diff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs
+index 684af5164..ee2d46c1e 100644
+--- a/lib/crates/fabro-workflow/src/event/convert.rs
++++ b/lib/crates/fabro-workflow/src/event/convert.rs
+@@ -46,8 +46,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
+         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
+             title:            title.clone(),
+             settings:         serde_json::from_value(settings.clone())
+-                .expect("run.created settings"),
+-            graph:            serde_json::from_value(graph.clone()).expect("run.created graph"),
++                .expect("run.created settings should deserialize: value was serialized from a typed struct in this session"),
++            graph:            serde_json::from_value(graph.clone()).expect("run.created graph should deserialize: value was serialized from a typed struct in this session"),
+             workflow_source:  workflow_source.clone(),
+             workflow_config:  workflow_config.clone(),
+             labels:           labels.clone(),
