@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "LLM error: Invalid request to openai: No tool call found for function call output with call_id call_nHZa1IdsdPwIiBzOhmQ2nMMP.",
+  "timestamp": "2026-05-27T03:12:31.892027Z"
+}

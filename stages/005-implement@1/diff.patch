@@ -1,0 +1,2737 @@
+diff --git a/apps/fabro-web/app/components/run-summary-panel.test.tsx b/apps/fabro-web/app/components/run-summary-panel.test.tsx
+index f93a3fd8a..fd6c603ac 100644
+--- a/apps/fabro-web/app/components/run-summary-panel.test.tsx
++++ b/apps/fabro-web/app/components/run-summary-panel.test.tsx
+@@ -53,13 +53,22 @@ function cellAfterLabel(
+ function makeRun(overrides: Record<string, any> = {}) {
+   return {
+     id:         "run_1",
+-    created_by: null,
++    created_by: testPrincipal(),
+     diff:       null,
+     billing:    null,
+     ...overrides,
+   } as any;
+ }
+ 
++function testPrincipal() {
++  return {
++    kind:        "user",
++    identity:    { issuer: "fabro:test", subject: "test-user" },
++    login:       "test",
++    auth_method: "dev_token",
++  };
++}
++
+ const EMPTY_VALUE = "Not available";
+ 
+ describe("RunSummaryPanelView", () => {
+@@ -73,7 +82,6 @@ describe("RunSummaryPanelView", () => {
+ 
+   test("shows unavailable copy for missing run fields after load", () => {
+     const tree = render({ run: makeRun() });
+-    expect(instanceText(cellAfterLabel(tree, "Created by"))).toBe(EMPTY_VALUE);
+     expect(instanceText(cellAfterLabel(tree, "Changes"))).toBe(EMPTY_VALUE);
+     expect(instanceText(cellAfterLabel(tree, "Cost"))).toBe(EMPTY_VALUE);
+   });
+@@ -200,7 +208,7 @@ describe("RunSummaryPanelView", () => {
+   });
+ 
+   test("renders non-user actor with kind label", () => {
+-    for (const kind of ["agent", "system", "slack", "webhook", "worker", "anonymous"]) {
++    for (const kind of ["agent", "system", "slack", "webhook", "worker"]) {
+       const tree = render({ run: makeRun({ created_by: { kind } as any }) });
+       expect(instanceText(cellAfterLabel(tree, "Created by"))).toContain(kind);
+     }
+diff --git a/apps/fabro-web/app/components/run-summary-panel.tsx b/apps/fabro-web/app/components/run-summary-panel.tsx
+index 5d9c78ce4..0c552e5aa 100644
+--- a/apps/fabro-web/app/components/run-summary-panel.tsx
++++ b/apps/fabro-web/app/components/run-summary-panel.tsx
+@@ -92,7 +92,7 @@ export function RunSummaryPanelView({
+   artifactsCount,
+   artifactsLoading,
+ }: RunSummaryPanelViewProps) {
+-  const created = run?.created_by ? principalDisplay(run.created_by) : null;
++  const created = run ? principalDisplay(run.created_by) : null;
+   const diff = run?.diff ?? null;
+   const cost = formatUsdMicros(run?.billing?.total_usd_micros);
+ 
+@@ -108,7 +108,7 @@ export function RunSummaryPanelView({
+               <span className={VALUE_CLASS}>{created.label}</span>
+             </div>
+           ) : (
+-          <EmptyValue />
++            <EmptyValue />
+           )}
+         </Cell>
+ 
+diff --git a/apps/fabro-web/app/components/runs-list/run-table-row.tsx b/apps/fabro-web/app/components/runs-list/run-table-row.tsx
+index ca521fb92..f1dedb6d0 100644
+--- a/apps/fabro-web/app/components/runs-list/run-table-row.tsx
++++ b/apps/fabro-web/app/components/runs-list/run-table-row.tsx
+@@ -54,7 +54,7 @@ export function RunTableRow({
+       </td>
+       {show("created_by") && (
+         <td className="relative z-10 w-8 whitespace-nowrap px-3 py-2.5">
+-          {run.createdBy && (() => {
++          {(() => {
+             const display = principalDisplay(run.createdBy);
+             return (
+               <Tooltip label={display.label}>
+diff --git a/apps/fabro-web/app/data/runs.test.ts b/apps/fabro-web/app/data/runs.test.ts
+index 98586b2c4..e8a461cf3 100644
+--- a/apps/fabro-web/app/data/runs.test.ts
++++ b/apps/fabro-web/app/data/runs.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, test } from "bun:test";
+-import type { Run, RunStatus as ApiRunStatus } from "@qltysh/fabro-api-client";
++import type { Principal, Run, RunStatus as ApiRunStatus } from "@qltysh/fabro-api-client";
+ import {
+   columnForStatus,
+   columnStatusDisplay,
+@@ -9,6 +9,15 @@ import {
+   runStatusDisplay,
+ } from "./runs";
+ 
++function testPrincipal(): Principal {
++  return {
++    kind:        "user",
++    identity:    { issuer: "fabro:test", subject: "test-user" },
++    login:       "test",
++    auth_method: "dev_token",
++  };
++}
++
+ function makeRun(overrides: Partial<Run> = {}): Run {
+   return {
+     id:               "01ABC",
+@@ -17,7 +26,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
+     workflow:         { slug: "fix_build", name: "Fix Build", graph_name: "FixBuild", node_count: 0, edge_count: 0 },
+     automation:       null,
+     repository:       { name: "myrepo", origin_url: null, provider: "unknown" },
+-    created_by:       null,
++    created_by:       testPrincipal(),
+     origin:           { kind: "api" },
+     labels:           {},
+     lifecycle:        {
+diff --git a/apps/fabro-web/app/data/runs.ts b/apps/fabro-web/app/data/runs.ts
+index f820b24c1..e5595cf81 100644
+--- a/apps/fabro-web/app/data/runs.ts
++++ b/apps/fabro-web/app/data/runs.ts
+@@ -40,7 +40,7 @@ export interface RunItem {
+   sandboxWorkingDirectory?: string;
+   sourceDirectory?: string;
+   createdAt?: string;
+-  createdBy?: Principal | null;
++  createdBy: Principal;
+   lastEventAt?: string;
+   size?: RunSize;
+ }
+diff --git a/apps/fabro-web/app/lib/mutations.test.ts b/apps/fabro-web/app/lib/mutations.test.ts
+index 0eed33ec4..b8704839a 100644
+--- a/apps/fabro-web/app/lib/mutations.test.ts
++++ b/apps/fabro-web/app/lib/mutations.test.ts
+@@ -1,4 +1,4 @@
+-import { describe, expect, mock, test, beforeEach } from "bun:test";
++import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+ 
+ const mutateMock = mock((..._args: unknown[]) => Promise.resolve(undefined));
+ let lastMutationOptions: { onSuccess?: (result: unknown) => void } | null = null;
+@@ -20,23 +20,6 @@ mock.module("swr/mutation", () => ({
+   default: useSWRMutationMock,
+ }));
+ 
+-mock.module("./api-client", () => ({
+-  apiData: mock(),
+-  authApi: {},
+-  humanInTheLoopApi: {},
+-  runsApi: {},
+-}));
+-
+-mock.module("./run-actions", () => ({
+-  approveRun: mock(),
+-  archiveRun: mock(),
+-  cancelRun: mock(),
+-  denyRun: mock(),
+-  isLifecycleActionError: () => false,
+-  retryRun: mock(),
+-  unarchiveRun: mock(),
+-}));
+-
+ const { useArchiveRun } = await import("./mutations");
+ 
+ beforeEach(() => {
+@@ -45,6 +28,10 @@ beforeEach(() => {
+   lastMutationOptions = null;
+ });
+ 
++afterAll(() => {
++  mock.restore();
++});
++
+ describe("lifecycle mutations", () => {
+   test("successful archive invalidates run list caches via a matcher", () => {
+     useArchiveRun("run-1");
+diff --git a/apps/fabro-web/app/lib/principal-display.tsx b/apps/fabro-web/app/lib/principal-display.tsx
+index fa9d4ec16..666f0f64c 100644
+--- a/apps/fabro-web/app/lib/principal-display.tsx
++++ b/apps/fabro-web/app/lib/principal-display.tsx
+@@ -4,7 +4,6 @@ import {
+   ChatBubbleLeftEllipsisIcon,
+   Cog6ToothIcon,
+   CpuChipIcon,
+-  QuestionMarkCircleIcon,
+   ServerIcon,
+ } from "@heroicons/react/20/solid";
+ import type { Principal } from "@qltysh/fabro-api-client";
+@@ -57,10 +56,5 @@ export function principalDisplay(actor: Principal): PrincipalDisplay {
+       return { glyph: principalIconGlyph(<BoltIcon className="size-3" />), label: "webhook" };
+     case "worker":
+       return { glyph: principalIconGlyph(<ServerIcon className="size-3" />), label: "worker" };
+-    case "anonymous":
+-      return {
+-        glyph: principalIconGlyph(<QuestionMarkCircleIcon className="size-3" />),
+-        label: "anonymous",
+-      };
+   }
+ }
+diff --git a/apps/fabro-web/app/lib/run-actions.test.ts b/apps/fabro-web/app/lib/run-actions.test.ts
+index 8acde997f..bfb4a813c 100644
+--- a/apps/fabro-web/app/lib/run-actions.test.ts
++++ b/apps/fabro-web/app/lib/run-actions.test.ts
+@@ -3,6 +3,7 @@ import type { AxiosAdapter } from "axios";
+ import type {
+   BatchDeleteRunsResponse,
+   BatchRunLifecycleResponse,
++  Principal,
+   Run,
+   RunStatus,
+ } from "@qltysh/fabro-api-client";
+@@ -39,6 +40,15 @@ type CapturedRequest = {
+ 
+ const originalAdapter = generatedAxios.defaults.adapter;
+ 
++function testPrincipal(): Principal {
++  return {
++    kind:        "user",
++    identity:    { issuer: "fabro:test", subject: "test-user" },
++    login:       "test",
++    auth_method: "dev_token",
++  };
++}
++
+ function makeRun(status: RunStatus, archived = false): Run {
+   return {
+     id:               "run-1",
+@@ -47,7 +57,7 @@ function makeRun(status: RunStatus, archived = false): Run {
+     workflow:         { slug: "fix_build", name: "Fix Build", graph_name: null, node_count: 0, edge_count: 0 },
+     automation:       null,
+     repository:       null,
+-    created_by:       null,
++    created_by:       testPrincipal(),
+     origin:           { kind: "api" },
+     labels:           {},
+     lifecycle:        {
+diff --git a/apps/fabro-web/app/routes/run-detail.test.ts b/apps/fabro-web/app/routes/run-detail.test.ts
+index 6d0bd0427..f99c6432f 100644
+--- a/apps/fabro-web/app/routes/run-detail.test.ts
++++ b/apps/fabro-web/app/routes/run-detail.test.ts
+@@ -184,6 +184,15 @@ type RunDetailActionResult = import("./run-detail/lifecycle-toasts").RunDetailAc
+ 
+ const h = createElement;
+ 
++function testPrincipal() {
++  return {
++    kind:        "user",
++    identity:    { issuer: "fabro:test", subject: "test-user" },
++    login:       "test",
++    auth_method: "dev_token",
++  };
++}
++
+ function makeRunSummary(
+   status = "succeeded",
+   diffSummary: any = null,
+@@ -209,7 +218,7 @@ function makeRunSummary(
+     workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
+     automation:       null,
+     repository:       { name: "fabro", origin_url: null, provider: "unknown" },
+-    created_by:       null,
++    created_by:       testPrincipal(),
+     origin:           { kind: "api" },
+     labels:           {},
+     lifecycle:        {
+diff --git a/apps/fabro-web/app/routes/run-files.render.test.tsx b/apps/fabro-web/app/routes/run-files.render.test.tsx
+index 5c9a24722..7970a5bd2 100644
+--- a/apps/fabro-web/app/routes/run-files.render.test.tsx
++++ b/apps/fabro-web/app/routes/run-files.render.test.tsx
+@@ -17,6 +17,15 @@ const virtualizerCalls: any[] = [];
+ const providerCalls: any[] = [];
+ const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
+ 
++function testPrincipal() {
++  return {
++    kind:        "user",
++    identity:    { issuer: "fabro:test", subject: "test-user" },
++    login:       "test",
++    auth_method: "dev_token",
++  };
++}
++
+ mock.module("@pierre/diffs/react", () => ({
+   MultiFileDiff: (props: any) => {
+     multiFileDiffCalls.push(props);
+@@ -50,7 +59,7 @@ mock.module("../lib/queries", () => ({
+       workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
+       automation:       null,
+       repository:       { name: "fabro", origin_url: null, provider: "unknown" },
+-      created_by:       null,
++      created_by:       testPrincipal(),
+       origin:           { kind: "api" },
+       labels:           {},
+       lifecycle:        {
+diff --git a/apps/fabro-web/app/routes/runs.preferences.test.tsx b/apps/fabro-web/app/routes/runs.preferences.test.tsx
+index 648d8e35a..94aa0d79b 100644
+--- a/apps/fabro-web/app/routes/runs.preferences.test.tsx
++++ b/apps/fabro-web/app/routes/runs.preferences.test.tsx
+@@ -1,7 +1,7 @@
+ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+ import TestRenderer, { act } from "react-test-renderer";
+ import { createMemoryRouter, RouterProvider } from "react-router";
+-import type { PaginatedRunList, Run } from "@qltysh/fabro-api-client";
++import type { PaginatedRunList, Principal, Run } from "@qltysh/fabro-api-client";
+ 
+ import { ToastProvider } from "../components/toast";
+ import { setupReactTestEnv } from "../lib/test-utils";
+@@ -26,6 +26,15 @@ let previousElement: unknown;
+ let hadElement = false;
+ const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
+ 
++function testPrincipal(): Principal {
++  return {
++    kind:        "user",
++    identity:    { issuer: "fabro:test", subject: "test-user" },
++    login:       "test",
++    auth_method: "dev_token",
++  };
++}
++
+ function run(id: string, repo = "qlty/fabro", workflow = "release"): Run {
+   return {
+     id,
+@@ -34,7 +43,7 @@ function run(id: string, repo = "qlty/fabro", workflow = "release"): Run {
+     workflow:         { slug: workflow, name: workflow, graph_name: null, node_count: 0, edge_count: 0 },
+     automation:       null,
+     repository:       { name: repo, origin_url: null, provider: "github" },
+-    created_by:       null,
++    created_by:       testPrincipal(),
+     origin:           { kind: "api" },
+     labels:           {},
+     lifecycle:        {
+diff --git a/apps/fabro-web/app/routes/runs.test.tsx b/apps/fabro-web/app/routes/runs.test.tsx
+index 51483cff2..6f71938c9 100644
+--- a/apps/fabro-web/app/routes/runs.test.tsx
++++ b/apps/fabro-web/app/routes/runs.test.tsx
+@@ -1,5 +1,5 @@
+ import { describe, expect, test } from "bun:test";
+-import type { BoardColumn, Run } from "@qltysh/fabro-api-client";
++import type { BoardColumn, Principal, Run } from "@qltysh/fabro-api-client";
+ 
+ import {
+   buildBoardColumns,
+@@ -12,6 +12,15 @@ import {
+ } from "./runs";
+ import { summarizeBatchLifecycleAction } from "../components/runs-list/batch-lifecycle";
+ 
++function testPrincipal(): Principal {
++  return {
++    kind:        "user",
++    identity:    { issuer: "fabro:test", subject: "test-user" },
++    login:       "test",
++    auth_method: "dev_token",
++  };
++}
++
+ function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
+   const status =
+     column === "blocked"
+@@ -34,7 +43,7 @@ function boardRun(id: string, column: BoardColumn, questionText?: string): Run {
+     workflow:         { slug: "test", name: "Test", graph_name: null, node_count: 0, edge_count: 0 },
+     automation:       null,
+     repository:       { name: "repo", origin_url: null, provider: "unknown" },
+-    created_by:       null,
++    created_by:       testPrincipal(),
+     origin:           { kind: "api" },
+     labels:           {},
+     lifecycle:        {
+diff --git a/docs/internal/logging-strategy.md b/docs/internal/logging-strategy.md
+index 63f6f8f54..728a7c031 100644
+--- a/docs/internal/logging-strategy.md
++++ b/docs/internal/logging-strategy.md
+@@ -118,7 +118,7 @@ Fields are key-value pairs that make events queryable. Include enough context th
+ | `error` | Error value on failure |
+ | `path` | File system path |
+ | `duration_ms` | Elapsed time in milliseconds |
+-| `principal_kind` | HTTP caller category (`user`, `worker`, `webhook`, `anonymous`, etc.) |
++| `principal_kind` | HTTP caller category (`user`, `worker`, `webhook`, `none`, etc.) |
+ | `auth_status` | HTTP authentication result (`missing`, `invalid`, `expired`, `authenticated`) |
+ | `idp_issuer`, `idp_subject` | Canonical user identity for authenticated user requests |
+ 
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index b39bd5f1a..8a49fb17a 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -7863,6 +7863,8 @@ components:
+ 
+     RunProvenance:
+       type: object
++      required:
++        - subject
+       properties:
+         server:
+           oneOf:
+@@ -7873,9 +7875,7 @@ components:
+             - $ref: "#/components/schemas/RunClientProvenance"
+             - type: "null"
+         subject:
+-          oneOf:
+-            - $ref: "#/components/schemas/Principal"
+-            - type: "null"
++          $ref: "#/components/schemas/Principal"
+ 
+     Principal:
+       oneOf:
+@@ -7885,7 +7885,6 @@ components:
+         - $ref: "#/components/schemas/PrincipalSlack"
+         - $ref: "#/components/schemas/PrincipalAgent"
+         - $ref: "#/components/schemas/PrincipalSystem"
+-        - $ref: "#/components/schemas/PrincipalAnonymous"
+       discriminator:
+         propertyName: kind
+         mapping:
+@@ -7895,7 +7894,6 @@ components:
+           slack: "#/components/schemas/PrincipalSlack"
+           agent: "#/components/schemas/PrincipalAgent"
+           system: "#/components/schemas/PrincipalSystem"
+-          anonymous: "#/components/schemas/PrincipalAnonymous"
+ 
+     PrincipalUser:
+       type: object
+@@ -7985,15 +7983,6 @@ components:
+         system_kind:
+           $ref: "#/components/schemas/SystemActorKind"
+ 
+-    PrincipalAnonymous:
+-      type: object
+-      required:
+-        - kind
+-      properties:
+-        kind:
+-          type: string
+-          enum: [anonymous]
+-
+     RunEvent:
+       description: >
+         Internal RunEvent-compatible JSON payload. The server validates this
+@@ -9121,6 +9110,7 @@ components:
+         - run_id
+         - settings
+         - graph
++        - provenance
+       properties:
+         run_id:
+           type: string
+@@ -9140,9 +9130,7 @@ components:
+           additionalProperties:
+             type: string
+         provenance:
+-          oneOf:
+-            - $ref: "#/components/schemas/RunProvenance"
+-            - type: "null"
++          $ref: "#/components/schemas/RunProvenance"
+         manifest_blob:
+           type: ["string", "null"]
+         definition_blob:
+@@ -9454,9 +9442,7 @@ components:
+             - $ref: "#/components/schemas/RepositoryRef"
+             - type: "null"
+         created_by:
+-          oneOf:
+-            - $ref: "#/components/schemas/Principal"
+-            - type: "null"
++          $ref: "#/components/schemas/Principal"
+         origin:
+           $ref: "#/components/schemas/RunOrigin"
+         labels:
+diff --git a/docs/public/changelog/2026-05-02.mdx b/docs/public/changelog/2026-05-02.mdx
+index 48a501a59..2d55f8d05 100644
+--- a/docs/public/changelog/2026-05-02.mdx
++++ b/docs/public/changelog/2026-05-02.mdx
+@@ -11,7 +11,7 @@ The dock listens to interview events and refreshes as questions arrive, so a par
+ 
+ ## Principal attribution and auth routing
+ 
+-Run events and run creation now carry clearer principal information for users, workers, systems, Slack interactions, webhooks, agents, and anonymous actors. API clients get explicit provenance objects instead of older actor-shaped fields that could lose where a run came from.
++Run events and run creation now carry clearer principal information for users, workers, systems, Slack interactions, webhooks, and agents. API clients get explicit provenance objects instead of older actor-shaped fields that could lose where a run came from.
+ 
+ This also closes attribution gaps across web, CLI, worker-token, Slack, and human-interview paths. Runs created or advanced through different surfaces now preserve who or what took the action more consistently.
+ 
+@@ -19,7 +19,7 @@ This also closes attribution gaps across web, CLI, worker-token, Slack, and huma
+ 
+ <Accordion title="API">
+ - Run specs now include client and server provenance shapes
+-- Run events use unified principal shapes for user, worker, system, Slack, webhook, agent, and anonymous subjects
++- Run events use unified principal shapes for user, worker, system, Slack, webhook, and agent subjects
+ </Accordion>
+ 
+ <Accordion title="CLI">
+diff --git a/lib/crates/fabro-api/Cargo.toml b/lib/crates/fabro-api/Cargo.toml
+index 8b347f032..beb625632 100644
+--- a/lib/crates/fabro-api/Cargo.toml
++++ b/lib/crates/fabro-api/Cargo.toml
+@@ -25,6 +25,9 @@ serde.workspace = true
+ serde_json.workspace = true
+ uuid = { workspace = true, features = ["serde"] }
+ 
++[dev-dependencies]
++fabro-types = { path = "../fabro-types", features = ["test-support"] }
++
+ [build-dependencies]
+ openapiv3 = "2"
+ progenitor = "0.13"
+diff --git a/lib/crates/fabro-api/tests/principal_round_trip.rs b/lib/crates/fabro-api/tests/principal_round_trip.rs
+index ca1180e60..ac2b2c258 100644
+--- a/lib/crates/fabro-api/tests/principal_round_trip.rs
++++ b/lib/crates/fabro-api/tests/principal_round_trip.rs
+@@ -118,7 +118,6 @@ fn principal_round_trips_every_variant_through_api_type() {
+         Principal::System {
+             system_kind: SystemActorKind::Watchdog,
+         },
+-        Principal::Anonymous,
+     ];
+ 
+     for principal in variants {
+@@ -140,9 +139,9 @@ fn run_provenance_subject_round_trips_as_principal() {
+             name:       Some("fabro-cli".to_string()),
+             version:    Some("0.1.0".to_string()),
+         }),
+-        subject: Some(Principal::Worker {
++        subject: Principal::Worker {
+             run_id: fixtures::RUN_1,
+-        }),
++        },
+     };
+     let json = serde_json::to_value(&provenance).unwrap();
+ 
+diff --git a/lib/crates/fabro-api/tests/run_event_round_trip.rs b/lib/crates/fabro-api/tests/run_event_round_trip.rs
+index e39f3d8f4..8c1db23da 100644
+--- a/lib/crates/fabro-api/tests/run_event_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_event_round_trip.rs
+@@ -19,6 +19,7 @@ fn run_event_round_trips_run_created() {
+         "properties": {
+             "settings": WorkflowSettings::default(),
+             "graph": Graph::new("test"),
++            "provenance": fabro_types::test_support::test_run_provenance(),
+             "run_dir": "/tmp/fabro/run-1",
+             "source_directory": "/tmp/fabro/run-1"
+         }
+@@ -37,6 +38,7 @@ fn run_event_round_trips_run_created_with_web_url() {
+         "properties": {
+             "settings": WorkflowSettings::default(),
+             "graph": Graph::new("test"),
++            "provenance": fabro_types::test_support::test_run_provenance(),
+             "run_dir": "/tmp/fabro/run-1",
+             "source_directory": "/tmp/fabro/run-1",
+             "web_url": format!("http://localhost:3000/runs/{}", fixtures::RUN_1)
+diff --git a/lib/crates/fabro-api/tests/run_projection_round_trip.rs b/lib/crates/fabro-api/tests/run_projection_round_trip.rs
+index 64a00df91..599d83368 100644
+--- a/lib/crates/fabro-api/tests/run_projection_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_projection_round_trip.rs
+@@ -130,7 +130,7 @@ fn run_spec_json() -> serde_json::Value {
+         workflow_slug:    None,
+         source_directory: None,
+         labels:           std::collections::HashMap::new(),
+-        provenance:       None,
++        provenance:       fabro_types::test_support::test_run_provenance(),
+         manifest_blob:    None,
+         definition_blob:  None,
+         git:              None,
+diff --git a/lib/crates/fabro-api/tests/run_summary_round_trip.rs b/lib/crates/fabro-api/tests/run_summary_round_trip.rs
+index 21d237434..29a6a0dab 100644
+--- a/lib/crates/fabro-api/tests/run_summary_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_summary_round_trip.rs
+@@ -64,6 +64,7 @@ fn run_summary_json_matches_openapi_shape() {
+     let run_id = RunId::with_timestamp(created_at, 7);
+     let last_event_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 42).unwrap();
+     let archived_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 1, 0).unwrap();
++    let created_by = fabro_types::test_support::test_principal();
+     let summary = Run {
+         id:               run_id,
+         parent_id:        None,
+@@ -83,7 +84,7 @@ fn run_summary_json_matches_openapi_shape() {
+             origin_url: None,
+             provider:   RepositoryProvider::Unknown,
+         }),
+-        created_by:       None,
++        created_by:       created_by.clone(),
+         origin:           RunOrigin::default(),
+         labels:           HashMap::from([("team".to_string(), "core".to_string())]),
+         lifecycle:        RunLifecycle {
+@@ -152,7 +153,7 @@ fn run_summary_json_matches_openapi_shape() {
+                 "origin_url": null,
+                 "provider": "unknown"
+             },
+-            "created_by": null,
++            "created_by": serde_json::to_value(&created_by).unwrap(),
+             "origin": {
+                 "kind": "api"
+             },
+@@ -220,6 +221,7 @@ fn run_summary_json_matches_openapi_shape() {
+ fn run_summary_deserializes_when_optional_fields_are_absent() {
+     let created_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 0).unwrap();
+     let run_id = RunId::with_timestamp(created_at, 7);
++    let created_by = fabro_types::test_support::test_principal();
+     let summary: Run = serde_json::from_value(json!({
+         "id": run_id.to_string(),
+         "goal": "ship it",
+@@ -232,6 +234,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
+         "origin": {
+             "kind": "api"
+         },
++        "created_by": created_by,
+         "labels": {},
+         "lifecycle": {
+             "status": {
+@@ -266,6 +269,10 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
+     assert_eq!(summary.workflow.edge_count, 0);
+     assert_eq!(summary.goal, "ship it");
+     assert_eq!(summary.title, "ship it");
++    assert_eq!(
++        summary.created_by,
++        fabro_types::test_support::test_principal()
++    );
+     assert_eq!(summary.labels, HashMap::new());
+     assert_eq!(summary.source_directory, None);
+     assert_eq!(
+diff --git a/lib/crates/fabro-cli/Cargo.toml b/lib/crates/fabro-cli/Cargo.toml
+index 4bff98f8d..27e70d967 100644
+--- a/lib/crates/fabro-cli/Cargo.toml
++++ b/lib/crates/fabro-cli/Cargo.toml
+@@ -118,6 +118,7 @@ assert_cmd = "2"
+ fabro-acp = { path = "../fabro-acp", features = ["test-support"] }
+ fabro-build-support = { path = "../build-support" }
+ fabro-server = { path = "../fabro-server", features = ["test-support"] }
++fabro-types = { path = "../fabro-types", features = ["clap", "test-support"] }
+ insta = { workspace = true, features = ["filters"] }
+ paste = "1"
+ predicates = "3"
+diff --git a/lib/crates/fabro-cli/src/commands/run/attach.rs b/lib/crates/fabro-cli/src/commands/run/attach.rs
+index c8ad2fff2..caeb21933 100644
+--- a/lib/crates/fabro-cli/src/commands/run/attach.rs
++++ b/lib/crates/fabro-cli/src/commands/run/attach.rs
+@@ -840,7 +840,7 @@ mod tests {
+             workflow_slug: None,
+             source_directory: None,
+             labels: std::collections::HashMap::default(),
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             definition_blob: None,
+             git: None,
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/inspect.rs b/lib/crates/fabro-cli/tests/it/cmd/inspect.rs
+index ebcf1a2a0..0cae2a595 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/inspect.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/inspect.rs
+@@ -221,7 +221,26 @@ fn inspect_resolves_selector_via_server_endpoint() {
+             "attrs": {}
+           },
+           "workflow_slug": "remote-workflow",
+-          "source_directory": "/srv/repo"
++          "source_directory": "/srv/repo",
++          "provenance": {
++            "server": {
++              "version": "test"
++            },
++            "client": {
++              "user_agent": "fabro-test/0.0.0",
++              "name": "fabro-test",
++              "version": "0.0.0"
++            },
++            "subject": {
++              "kind": "user",
++              "identity": {
++                "issuer": "fabro:test",
++                "subject": "test-user"
++              },
++              "login": "test",
++              "auth_method": "dev_token"
++            }
++          }
+         },
+         "start_record": null,
+         "conclusion": null,
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/support.rs b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+index 9ac2e7673..ffd319c1d 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/support.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+@@ -180,6 +180,7 @@ pub(crate) fn remote_run_summary_json(
+         "origin": {
+             "kind": "api"
+         },
++        "created_by": fabro_types::test_support::test_principal(),
+         "labels": {},
+         "lifecycle": {
+             "status": status,
+diff --git a/lib/crates/fabro-cli/tests/it/support/mod.rs b/lib/crates/fabro-cli/tests/it/support/mod.rs
+index 7c7c59a22..b46aaa663 100644
+--- a/lib/crates/fabro-cli/tests/it/support/mod.rs
++++ b/lib/crates/fabro-cli/tests/it/support/mod.rs
+@@ -48,7 +48,7 @@ pub(crate) fn run_projection_json(run_id: &str, status: &serde_json::Value) -> s
+         workflow_slug: Some("remote-workflow".to_string()),
+         source_directory: Some("/srv/repo".to_string()),
+         labels: std::collections::HashMap::default(),
+-        provenance: None,
++        provenance: fabro_types::test_support::test_run_provenance(),
+         manifest_blob: None,
+         definition_blob: None,
+         git: None,
+diff --git a/lib/crates/fabro-dump/src/lib.rs b/lib/crates/fabro-dump/src/lib.rs
+index d44e01215..0ff19608d 100644
+--- a/lib/crates/fabro-dump/src/lib.rs
++++ b/lib/crates/fabro-dump/src/lib.rs
+@@ -472,6 +472,7 @@ mod tests {
+     use fabro_store::{RunProjection, StageId};
+     use fabro_types::graph::Graph;
+     use fabro_types::run::RunSpec;
++    use fabro_types::test_support::test_run_provenance;
+     use fabro_types::{
+         Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunSandbox, RunStatus,
+         SandboxProviderKind, StageCompletion, StageModelUsage, StageOutcome, StartRecord,
+@@ -497,7 +498,7 @@ mod tests {
+                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+             }),
+             labels:           HashMap::from([("team".to_string(), "platform".to_string())]),
+-            provenance:       None,
++            provenance:       test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-server/src/auth/cli_flow.rs b/lib/crates/fabro-server/src/auth/cli_flow.rs
+index 5e6a9f9cc..e45b933de 100644
+--- a/lib/crates/fabro-server/src/auth/cli_flow.rs
++++ b/lib/crates/fabro-server/src/auth/cli_flow.rs
+@@ -1667,11 +1667,11 @@ client_id = "github-client-id"
+         let [first, second, third] = <[RequestAuthContext; 3]>::try_from(contexts)
+             .expect("expected three captured auth contexts");
+         assert_eq!(first.auth_status, AuthStatus::Authenticated);
+-        assert_eq!(first.principal.display(), "octocat");
++        assert_eq!(first.principal.as_ref().unwrap().display(), "octocat");
+         assert_eq!(second.auth_status, AuthStatus::Authenticated);
+-        assert_eq!(second.principal.display(), "octocat");
++        assert_eq!(second.principal.as_ref().unwrap().display(), "octocat");
+         assert_eq!(third.auth_status, AuthStatus::Authenticated);
+-        assert_eq!(third.principal.display(), "octocat");
++        assert_eq!(third.principal.as_ref().unwrap().display(), "octocat");
+     }
+ 
+     #[tokio::test]
+@@ -2076,7 +2076,7 @@ client_id = "github-client-id"
+ 
+         let contexts = captured.lock().expect("captured auth contexts").clone();
+         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
+-        assert_eq!(contexts[0].principal.display(), "octocat");
++        assert_eq!(contexts[0].principal.as_ref().unwrap().display(), "octocat");
+         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
+         assert_eq!(
+             contexts[1].auth_error_code,
+@@ -2269,8 +2269,8 @@ client_id = "github-client-id"
+ 
+         let contexts = captured.lock().expect("captured auth contexts").clone();
+         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
+-        assert_eq!(contexts[0].principal.display(), "octocat");
+-        let Principal::User(user) = &contexts[0].principal else {
++        assert_eq!(contexts[0].principal.as_ref().unwrap().display(), "octocat");
++        let Some(Principal::User(user)) = &contexts[0].principal else {
+             panic!("expected user principal");
+         };
+         assert_eq!(
+diff --git a/lib/crates/fabro-server/src/demo/mod.rs b/lib/crates/fabro-server/src/demo/mod.rs
+index 42e19a97c..df08f3f8c 100644
+--- a/lib/crates/fabro-server/src/demo/mod.rs
++++ b/lib/crates/fabro-server/src/demo/mod.rs
+@@ -1080,7 +1080,7 @@ fn ts(s: &str) -> DateTime<Utc> {
+ 
+ mod runs {
+     use std::collections::HashMap;
+-    use std::sync::OnceLock;
++    use std::sync::{LazyLock, OnceLock};
+     use std::time::Duration;
+ 
+     use fabro_api::types::*;
+@@ -1091,8 +1091,9 @@ mod runs {
+     };
+     use fabro_types::settings::{InterpString, ProjectNamespace, WorkflowNamespace};
+     use fabro_types::{
+-        PendingReason, RepositoryRef, RunBillingSummary, RunId, RunLifecycle, RunLinks, RunOrigin,
+-        RunSize, RunTimestamps, StageId, WorkflowRef, WorkflowSettings,
++        AuthMethod, IdpIdentity, PendingReason, Principal, RepositoryRef, RunBillingSummary, RunId,
++        RunLifecycle, RunLinks, RunOrigin, RunSize, RunTimestamps, StageId, WorkflowRef,
++        WorkflowSettings,
+     };
+ 
+     use super::ts;
+@@ -1105,6 +1106,15 @@ mod runs {
+             .collect()
+     }
+ 
++    static DEMO_PRINCIPAL: LazyLock<Principal> = LazyLock::new(|| {
++        Principal::user(
++            IdpIdentity::new("fabro:demo", "demo")
++                .expect("demo identity issuer and subject should be valid"),
++            "demo".to_string(),
++            AuthMethod::DevToken,
++        )
++    });
++
+     fn billing_model(provider: fabro_model::ProviderId, model_id: &str) -> BillingModelRef {
+         BillingModelRef {
+             provider,
+@@ -1170,7 +1180,7 @@ mod runs {
+                 repo_origin_url,
+                 source_directory.as_deref(),
+             )),
+-            created_by: None,
++            created_by: DEMO_PRINCIPAL.clone(),
+             origin: RunOrigin::default(),
+             labels: labels(entries),
+             lifecycle: RunLifecycle {
+diff --git a/lib/crates/fabro-server/src/principal_middleware.rs b/lib/crates/fabro-server/src/principal_middleware.rs
+index acc9eb250..4491e5d43 100644
+--- a/lib/crates/fabro-server/src/principal_middleware.rs
++++ b/lib/crates/fabro-server/src/principal_middleware.rs
+@@ -19,7 +19,7 @@ use crate::worker_token::{self, WORKER_TOKEN_KID, WorkerScopeSet};
+ 
+ #[derive(Clone, Debug)]
+ pub(crate) struct RequestAuthContext {
+-    pub principal:       Principal,
++    pub principal:       Option<Principal>,
+     pub auth_status:     AuthStatus,
+     pub auth_error_code: Option<AuthErrorCode>,
+     pub user_profile:    Option<UserProfile>,
+@@ -74,7 +74,7 @@ impl RequestAuthContext {
+     #[must_use]
+     pub(crate) fn initial() -> Self {
+         Self {
+-            principal:       Principal::Anonymous,
++            principal:       None,
+             auth_status:     AuthStatus::Missing,
+             auth_error_code: None,
+             user_profile:    None,
+@@ -85,7 +85,7 @@ impl RequestAuthContext {
+     #[must_use]
+     pub(crate) fn authenticated(principal: Principal, user_profile: Option<UserProfile>) -> Self {
+         Self {
+-            principal,
++            principal: Some(principal),
+             auth_status: AuthStatus::Authenticated,
+             auth_error_code: None,
+             user_profile,
+@@ -96,7 +96,7 @@ impl RequestAuthContext {
+     #[must_use]
+     pub(crate) fn authenticated_worker(run_id: RunId, scopes: WorkerScopeSet) -> Self {
+         Self {
+-            principal:       Principal::Worker { run_id },
++            principal:       Some(Principal::Worker { run_id }),
+             auth_status:     AuthStatus::Authenticated,
+             auth_error_code: None,
+             user_profile:    None,
+@@ -123,7 +123,7 @@ impl RequestAuthContext {
+     #[must_use]
+     pub(crate) fn rejected(status: AuthStatus, code: Option<AuthErrorCode>) -> Self {
+         Self {
+-            principal:       Principal::Anonymous,
++            principal:       None,
+             auth_status:     status,
+             auth_error_code: code,
+             user_profile:    None,
+@@ -146,7 +146,7 @@ impl AuthStatus {
+ 
+ #[derive(Clone, Debug)]
+ pub(crate) struct RequestAuthLogContext {
+-    pub principal:       Principal,
++    pub principal:       Option<Principal>,
+     pub auth_status:     AuthStatus,
+     pub auth_error_code: Option<AuthErrorCode>,
+ }
+@@ -170,22 +170,22 @@ impl AuthContextSlot {
+     pub(crate) fn log_snapshot(&self) -> RequestAuthLogContext {
+         let context = self.0.lock().expect("auth context lock poisoned");
+         RequestAuthLogContext {
+-            principal:       principal_without_log_unused_fields(&context.principal),
++            principal:       principal_without_log_unused_fields(context.principal.as_ref()),
+             auth_status:     context.auth_status,
+             auth_error_code: context.auth_error_code,
+         }
+     }
+ }
+ 
+-fn principal_without_log_unused_fields(principal: &Principal) -> Principal {
++fn principal_without_log_unused_fields(principal: Option<&Principal>) -> Option<Principal> {
+     match principal {
+-        Principal::User(user) => Principal::User(UserPrincipal {
++        Some(Principal::User(user)) => Some(Principal::User(UserPrincipal {
+             identity:    user.identity.clone(),
+             login:       user.login.clone(),
+             auth_method: user.auth_method,
+             avatar_url:  None,
+-        }),
+-        principal => principal.clone(),
++        })),
++        principal => principal.cloned(),
+     }
+ }
+ 
+@@ -370,7 +370,7 @@ fn auth_slot_from_parts(parts: &Parts) -> AuthContextSlot {
+ pub(crate) fn require_user(slot: &AuthContextSlot) -> Result<UserPrincipal, ApiError> {
+     let context = slot.0.lock().expect("auth context lock poisoned");
+     match &context.principal {
+-        Principal::User(user) => Ok(user.clone()),
++        Some(Principal::User(user)) => Ok(user.clone()),
+         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
+     }
+ }
+@@ -380,7 +380,7 @@ pub(crate) fn require_authenticated_user(
+ ) -> Result<AuthenticatedUser, ApiError> {
+     let context = slot.snapshot();
+     match context.principal {
+-        Principal::User(principal) => {
++        Some(Principal::User(principal)) => {
+             let Some(profile) = context.user_profile else {
+                 return Err(ApiError::new(
+                     StatusCode::INTERNAL_SERVER_ERROR,
+@@ -396,11 +396,11 @@ pub(crate) fn require_authenticated_user(
+ pub(crate) fn require_run_management_actor(slot: &AuthContextSlot) -> Result<Principal, ApiError> {
+     let context = slot.0.lock().expect("auth context lock poisoned");
+     match &context.principal {
+-        Principal::User(user) => Ok(Principal::User(user.clone())),
+-        Principal::Worker { run_id } if context.worker_scopes.has_agent_run_tools() => {
++        Some(Principal::User(user)) => Ok(Principal::User(user.clone())),
++        Some(Principal::Worker { run_id }) if context.worker_scopes.has_agent_run_tools() => {
+             Ok(Principal::Worker { run_id: *run_id })
+         }
+-        Principal::Worker { .. } => Err(ApiError::forbidden()),
++        Some(Principal::Worker { .. }) => Err(ApiError::forbidden()),
+         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
+     }
+ }
+@@ -411,9 +411,9 @@ fn require_worker_or_user_for_run(
+ ) -> Result<(), ApiError> {
+     let context = slot.0.lock().expect("auth context lock poisoned");
+     match &context.principal {
+-        Principal::User(_) => Ok(()),
+-        Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
+-        Principal::Worker { .. } => Err(ApiError::forbidden()),
++        Some(Principal::User(_)) => Ok(()),
++        Some(Principal::Worker { run_id }) if run_id == route_run_id => Ok(()),
++        Some(Principal::Worker { .. }) => Err(ApiError::forbidden()),
+         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
+     }
+ }
+@@ -424,13 +424,13 @@ fn require_run_management_target(
+ ) -> Result<Principal, ApiError> {
+     let context = slot.0.lock().expect("auth context lock poisoned");
+     match &context.principal {
+-        Principal::User(user) => Ok(Principal::User(user.clone())),
+-        Principal::Worker { run_id }
++        Some(Principal::User(user)) => Ok(Principal::User(user.clone())),
++        Some(Principal::Worker { run_id })
+             if run_id == route_run_id || context.worker_scopes.has_agent_run_tools() =>
+         {
+             Ok(Principal::Worker { run_id: *run_id })
+         }
+-        Principal::Worker { .. } => Err(ApiError::forbidden()),
++        Some(Principal::Worker { .. }) => Err(ApiError::forbidden()),
+         _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
+     }
+ }
+@@ -646,7 +646,7 @@ mod tests {
+         let context = classify_request(&request, state.as_ref());
+ 
+         assert_eq!(context.auth_status, AuthStatus::Authenticated);
+-        assert!(matches!(context.principal, Principal::User(_)));
++        assert!(matches!(context.principal, Some(Principal::User(_))));
+         assert!(context.user_profile.is_some());
+     }
+ 
+@@ -686,7 +686,7 @@ mod tests {
+         let context = classify_request(&request, state.as_ref());
+ 
+         assert_eq!(context.auth_status, AuthStatus::Authenticated);
+-        assert_eq!(context.principal, Principal::Worker { run_id });
++        assert_eq!(context.principal, Some(Principal::Worker { run_id }));
+         assert!(!context.worker_scopes.has_agent_run_tools());
+     }
+ 
+@@ -705,7 +705,7 @@ mod tests {
+         let context = classify_request(&request, state.as_ref());
+ 
+         assert_eq!(context.auth_status, AuthStatus::Authenticated);
+-        assert_eq!(context.principal, Principal::Worker { run_id });
++        assert_eq!(context.principal, Some(Principal::Worker { run_id }));
+         assert!(context.worker_scopes.has_agent_run_tools());
+     }
+ 
+@@ -784,7 +784,7 @@ mod tests {
+ 
+         assert_eq!(context.auth_status, AuthStatus::Missing);
+         assert_eq!(context.auth_error_code, None);
+-        assert_eq!(context.principal, Principal::Anonymous);
++        assert_eq!(context.principal, None);
+     }
+ 
+     #[test]
+diff --git a/lib/crates/fabro-server/src/run_files.rs b/lib/crates/fabro-server/src/run_files.rs
+index 53657282a..96bfc27c4 100644
+--- a/lib/crates/fabro-server/src/run_files.rs
++++ b/lib/crates/fabro-server/src/run_files.rs
+@@ -2386,7 +2386,7 @@ index 1111111..2222222 160000
+                 workflow_slug:    None,
+                 source_directory: None,
+                 labels:           HashMap::default(),
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 definition_blob:  None,
+                 git:              None,
+diff --git a/lib/crates/fabro-server/src/run_manifest.rs b/lib/crates/fabro-server/src/run_manifest.rs
+index a004872cb..1760d76cf 100644
+--- a/lib/crates/fabro-server/src/run_manifest.rs
++++ b/lib/crates/fabro-server/src/run_manifest.rs
+@@ -26,7 +26,9 @@ use fabro_static::EnvVars;
+ use fabro_types::settings::cli::OutputVerbosity;
+ use fabro_types::settings::interp::InterpString;
+ use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
+-use fabro_types::{ManifestPath, RunId, SandboxProviderKind, ServerSettings, WorkflowSettings};
++use fabro_types::{
++    ManifestPath, RunId, RunProvenance, SandboxProviderKind, ServerSettings, WorkflowSettings,
++};
+ use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
+ use fabro_validate::Severity;
+ use fabro_workflow::Error as WorkflowError;
+@@ -201,6 +203,7 @@ pub(crate) fn validate_prepared_manifest(
+ pub(crate) fn create_run_input(
+     prepared: PreparedManifest,
+     configured_providers: Vec<ProviderId>,
++    provenance: RunProvenance,
+     web_url: Option<String>,
+ ) -> CreateRunInput {
+     CreateRunInput {
+@@ -216,7 +219,7 @@ pub(crate) fn create_run_input(
+         git: prepared.git,
+         fork_source_ref: None,
+         parent_id: prepared.parent_id,
+-        provenance: None,
++        provenance,
+         configured_providers,
+         web_url,
+     }
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index b0bb8432c..25316c66a 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -1764,7 +1764,10 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
+     let status = response.status().as_u16();
+     let latency_ms = start.elapsed().as_millis();
+     let auth_context = auth_slot.log_snapshot();
+-    let principal_kind = auth_context.principal.kind();
++    let principal_kind = auth_context
++        .principal
++        .as_ref()
++        .map_or("none", Principal::kind);
+     let auth_status = auth_context.auth_status.as_str();
+ 
+     macro_rules! emit_http_log {
+@@ -1802,27 +1805,27 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
+     macro_rules! emit_principal_http_log {
+         ($level:ident) => {{
+             match &auth_context.principal {
+-                Principal::User(user) => emit_http_log!(
++                Some(Principal::User(user)) => emit_http_log!(
+                     $level,
+                     user_auth_method = user.auth_method.as_str(),
+                     idp_issuer = user.identity.issuer(),
+                     idp_subject = user.identity.subject(),
+                     login = user.login.as_str(),
+                 ),
+-                Principal::Worker { run_id } => {
++                Some(Principal::Worker { run_id }) => {
+                     emit_http_log!($level, run_id = run_id.to_string().as_str(),)
+                 }
+-                Principal::Webhook { delivery_id } => {
++                Some(Principal::Webhook { delivery_id }) => {
+                     emit_http_log!($level, delivery_id = delivery_id.as_str(),)
+                 }
+-                Principal::Slack {
++                Some(Principal::Slack {
+                     team_id, user_id, ..
+-                } => emit_http_log!(
++                }) => emit_http_log!(
+                     $level,
+                     team_id = team_id.as_str(),
+                     user_id = user_id.as_str(),
+                 ),
+-                Principal::Agent { .. } | Principal::System { .. } | Principal::Anonymous => {
++                None | Some(Principal::Agent { .. } | Principal::System { .. }) => {
+                     emit_http_log!($level)
+                 }
+             }
+diff --git a/lib/crates/fabro-server/src/server/handler/events.rs b/lib/crates/fabro-server/src/server/handler/events.rs
+index 8e7806522..9501a74e5 100644
+--- a/lib/crates/fabro-server/src/server/handler/events.rs
++++ b/lib/crates/fabro-server/src/server/handler/events.rs
+@@ -569,7 +569,7 @@ mod stage_events_tests {
+             source_directory: None,
+             workflow_slug:    None,
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-server/src/server/handler/lifecycle.rs b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+index 0c2697133..2d55e9b33 100644
+--- a/lib/crates/fabro-server/src/server/handler/lifecycle.rs
++++ b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+@@ -864,7 +864,7 @@ async fn retry_run(
+     let input = operations::RetryRunInput {
+         source_run_id: id,
+         new_run_id,
+-        provenance: Some(run_provenance(&headers, &actor)),
++        provenance: run_provenance(&headers, &actor),
+         web_url: state.run_web_url(&new_run_id),
+     };
+     match Box::pin(operations::retry_run(&state.store, &input)).await {
+diff --git a/lib/crates/fabro-server/src/server/handler/pair.rs b/lib/crates/fabro-server/src/server/handler/pair.rs
+index e43f4e6f8..23fff1e15 100644
+--- a/lib/crates/fabro-server/src/server/handler/pair.rs
++++ b/lib/crates/fabro-server/src/server/handler/pair.rs
+@@ -1023,7 +1023,7 @@ mod tests {
+             source_directory: None,
+             workflow_slug: None,
+             db_prefix: None,
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             git: None,
+             fork_source_ref: None,
+diff --git a/lib/crates/fabro-server/src/server/handler/runs.rs b/lib/crates/fabro-server/src/server/handler/runs.rs
+index 090d1ba5d..e581c8048 100644
+--- a/lib/crates/fabro-server/src/server/handler/runs.rs
++++ b/lib/crates/fabro-server/src/server/handler/runs.rs
+@@ -641,13 +641,14 @@ async fn create_run(
+         .as_ref()
+         .map(LlmClientResult::provider_ids)
+         .unwrap_or_default();
++    let provenance = run_provenance(&headers, &actor);
+     let mut create_input = run_manifest::create_run_input(
+         prepared.clone(),
+         ready_provider_ids.clone(),
++        provenance,
+         web_url.clone(),
+     );
+     create_input.run_id = Some(run_id);
+-    create_input.provenance = Some(run_provenance(&headers, &actor));
+     create_input.submitted_manifest_bytes = Some(body.to_vec());
+ 
+     let storage_root = match resolve_interp_string(&state.server_settings().server.storage.root) {
+@@ -817,7 +818,7 @@ pub(super) fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunPro
+             version: FABRO_VERSION.to_string(),
+         }),
+         client:  run_client_provenance(headers),
+-        subject: Some(subject.clone()),
++        subject: subject.clone(),
+     }
+ }
+ 
+diff --git a/lib/crates/fabro-server/src/server/handler/sandbox.rs b/lib/crates/fabro-server/src/server/handler/sandbox.rs
+index bfba9c242..d661bdf4f 100644
+--- a/lib/crates/fabro-server/src/server/handler/sandbox.rs
++++ b/lib/crates/fabro-server/src/server/handler/sandbox.rs
+@@ -1346,6 +1346,7 @@ mod retrieve_sandbox_tests {
+                 "properties": {
+                     "settings": WorkflowSettings::default(),
+                     "graph": Graph::new("test"),
++                    "provenance": fabro_types::test_support::test_run_provenance(),
+                     "run_dir": "/tmp/test",
+                 },
+             }),
+diff --git a/lib/crates/fabro-server/src/server/handler/sessions.rs b/lib/crates/fabro-server/src/server/handler/sessions.rs
+index 1791ee57b..ca5edad99 100644
+--- a/lib/crates/fabro-server/src/server/handler/sessions.rs
++++ b/lib/crates/fabro-server/src/server/handler/sessions.rs
+@@ -1701,7 +1701,7 @@ mod tests {
+             workflow_slug: None,
+             source_directory: None,
+             labels: HashMap::default(),
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             definition_blob: None,
+             git: None,
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index ba4520d87..70298316f 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -3367,7 +3367,7 @@ async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id
+         source_directory: None,
+         workflow_slug: None,
+         db_prefix: None,
+-        provenance: None,
++        provenance: fabro_types::test_support::test_run_provenance(),
+         manifest_blob: None,
+         git: None,
+         fork_source_ref: None,
+@@ -3412,7 +3412,7 @@ async fn create_slack_notification_run(
+         source_directory: None,
+         workflow_slug: workflow_slug.map(str::to_string),
+         db_prefix: None,
+-        provenance: None,
++        provenance: fabro_types::test_support::test_run_provenance(),
+         manifest_blob: None,
+         git: None,
+         fork_source_ref: None,
+@@ -4418,7 +4418,7 @@ async fn list_run_stages_distinguishes_visits() {
+             source_directory: None,
+             workflow_slug: Some("test".to_string()),
+             db_prefix: None,
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             git: None,
+             fork_source_ref: None,
+@@ -5470,7 +5470,7 @@ async fn create_completed_run_ready_for_pull_request(
+         source_directory: Some("/tmp/project".to_string()),
+         git: git.clone(),
+         labels: HashMap::new(),
+-        provenance: None,
++        provenance: fabro_types::test_support::test_run_provenance(),
+         manifest_blob: None,
+         definition_blob: None,
+         fork_source_ref: None,
+@@ -9272,15 +9272,10 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
+         .unwrap()
+         .expect("created run should be cached");
+     assert_eq!(
+-        cached
+-            .projection
+-            .spec
+-            .provenance
+-            .as_ref()
+-            .and_then(|provenance| provenance.subject.as_ref()),
+-        Some(&Principal::Worker {
++        cached.projection.spec.provenance.subject,
++        Principal::Worker {
+             run_id: parent_run_id,
+-        }),
++        },
+     );
+ 
+     let response = app
+@@ -11604,7 +11599,7 @@ async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId
+             source_directory: Some("/tmp/fabro-run".to_string()),
+             workflow_slug: Some("test".to_string()),
+             db_prefix: None,
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             git: None,
+             fork_source_ref: None,
+@@ -12353,7 +12348,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
+             source_directory: Some("/tmp/fabro-run".to_string()),
+             workflow_slug: Some("test".to_string()),
+             db_prefix: None,
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             git: None,
+             fork_source_ref: None,
+diff --git a/lib/crates/fabro-server/src/web_auth.rs b/lib/crates/fabro-server/src/web_auth.rs
+index 5f10aba10..9ecd7b68a 100644
+--- a/lib/crates/fabro-server/src/web_auth.rs
++++ b/lib/crates/fabro-server/src/web_auth.rs
+@@ -1365,7 +1365,7 @@ client_id = "github-client-id"
+ 
+         let contexts = captured.lock().expect("captured auth contexts").clone();
+         assert_eq!(contexts[0].auth_status, AuthStatus::Authenticated);
+-        assert!(matches!(contexts[0].principal, Principal::User(_)));
++        assert!(matches!(contexts[0].principal, Some(Principal::User(_))));
+         assert_eq!(contexts[1].auth_status, AuthStatus::Invalid);
+         assert_eq!(
+             contexts[1].auth_error_code,
+diff --git a/lib/crates/fabro-server/tests/it/api/run_files.rs b/lib/crates/fabro-server/tests/it/api/run_files.rs
+index e820b00f9..e3e77e8b0 100644
+--- a/lib/crates/fabro-server/tests/it/api/run_files.rs
++++ b/lib/crates/fabro-server/tests/it/api/run_files.rs
+@@ -68,7 +68,7 @@ async fn append_completed_run_with_final_patch(
+         source_directory: None,
+         workflow_slug:    None,
+         db_prefix:        None,
+-        provenance:       None,
++        provenance:       fabro_types::test_support::test_run_provenance(),
+         manifest_blob:    None,
+         git:              None,
+         fork_source_ref:  None,
+diff --git a/lib/crates/fabro-store/Cargo.toml b/lib/crates/fabro-store/Cargo.toml
+index 016b55d3d..c81bca853 100644
+--- a/lib/crates/fabro-store/Cargo.toml
++++ b/lib/crates/fabro-store/Cargo.toml
+@@ -32,6 +32,7 @@ futures.workspace = true
+ uuid.workspace = true
+ 
+ [dev-dependencies]
++fabro-types = { path = "../fabro-types", features = ["test-support"] }
+ tokio = { workspace = true, features = ["test-util", "macros"] }
+ tempfile = "3"
+ ulid.workspace = true
+diff --git a/lib/crates/fabro-store/src/run_state.rs b/lib/crates/fabro-store/src/run_state.rs
+index 552891d2e..60b754c6b 100644
+--- a/lib/crates/fabro-store/src/run_state.rs
++++ b/lib/crates/fabro-store/src/run_state.rs
+@@ -902,11 +902,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
+         })
+         .map(|(_, record)| record.question.clone());
+     let models = run_models(state);
+-    let created_by = state
+-        .spec
+-        .provenance
+-        .as_ref()
+-        .and_then(|provenance| provenance.subject.clone());
++    let created_by = state.spec.provenance.subject.clone();
+     let source_directory = state.spec.source_directory.clone();
+     let repo_origin_url = state.spec.git.as_ref().map(|git| git.origin_url.clone());
+     let start_time = state.start.as_ref().map(|start| start.start_time);
+@@ -1255,7 +1251,7 @@ mod tests {
+         StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
+         StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowWarning,
+         StageModelUsage, StageOutcome, StageState, SubAgentStatus, SuccessReason, WorkflowSettings,
+-        first_event_seq, fixtures,
++        first_event_seq, fixtures, test_support,
+     };
+     use serde_json::json;
+ 
+@@ -1336,7 +1332,7 @@ mod tests {
+             workflow_slug:    None,
+             source_directory: None,
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             git:              None,
+@@ -1372,7 +1368,7 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn legacy_run_created_projects_retried_from_none() {
++    fn run_created_without_retried_from_projects_none() {
+         let event = test_raw_event(
+             1,
+             "run.created",
+@@ -1380,6 +1376,7 @@ mod tests {
+                 "settings": WorkflowSettings::default(),
+                 "graph": Graph::new("test"),
+                 "labels": {},
++                "provenance": test_support::test_run_provenance(),
+                 "run_dir": "/tmp/run"
+             }),
+             None,
+@@ -1577,7 +1574,9 @@ mod tests {
+                 "repo_origin_url": null,
+                 "base_branch": null,
+                 "labels": {},
+-                "provenance": null,
++                "provenance": serde_json::to_value(
++                    test_support::test_run_provenance(),
++                ).unwrap(),
+                 "manifest_blob": null,
+                 "definition_blob": null,
+                 "git": null,
+@@ -2605,7 +2604,7 @@ mod tests {
+             source_directory: Some("/tmp/repo".to_string()),
+             git:              None,
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -2630,7 +2629,7 @@ mod tests {
+             source_directory: Some("/tmp/repo".to_string()),
+             git:              None,
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -2669,6 +2668,7 @@ mod tests {
+                     "attrs": { "goal": { "String": "Goal title" } }
+                 },
+                 "labels": {},
++                "provenance": test_support::test_run_provenance(),
+                 "run_dir": "/tmp/run"
+             }),
+             None,
+@@ -2696,6 +2696,7 @@ mod tests {
+                     "attrs": { "goal": { "String": "## Plan: Legacy title\n\nDetails" } }
+                 },
+                 "labels": {},
++                "provenance": test_support::test_run_provenance(),
+                 "run_dir": "/tmp/run"
+             }),
+             None,
+@@ -2725,6 +2726,7 @@ mod tests {
+                         "attrs": { "goal": { "String": "Goal title" } }
+                     },
+                     "labels": {},
++                    "provenance": test_support::test_run_provenance(),
+                     "run_dir": "/tmp/run"
+                 }),
+                 None,
+@@ -2767,6 +2769,7 @@ mod tests {
+                             "attrs": {}
+                         },
+                         "labels": {},
++                        "provenance": test_support::test_run_provenance(),
+                         "run_dir": "/tmp/run",
+                         "source_directory": "/tmp/run",
+                         "manifest_blob": manifest_blob
+diff --git a/lib/crates/fabro-store/src/slate/mod.rs b/lib/crates/fabro-store/src/slate/mod.rs
+index 784868ace..3a66b0270 100644
+--- a/lib/crates/fabro-store/src/slate/mod.rs
++++ b/lib/crates/fabro-store/src/slate/mod.rs
+@@ -472,7 +472,7 @@ mod tests {
+     use chrono::{DateTime, Utc};
+     use fabro_types::{
+         AttrValue, FailureReason, Graph, RunControlAction, RunSpec, RunStatus, StageId,
+-        SuccessReason, WorkflowSettings,
++        SuccessReason, WorkflowSettings, test_support,
+     };
+     use futures::TryStreamExt;
+     use object_store::memory::InMemory;
+@@ -541,7 +541,7 @@ mod tests {
+             workflow_slug: Some("night-sky".to_string()),
+             source_directory: Some(format!("/tmp/{label}")),
+             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
+-            provenance: None,
++            provenance: test_support::test_run_provenance(),
+             manifest_blob: None,
+             definition_blob: None,
+             git: Some(fabro_types::GitContext {
+@@ -600,6 +600,7 @@ mod tests {
+                 "run_dir": format!("/tmp/{label}"),
+                 "git": run_spec.git,
+                 "labels": run_spec.labels,
++                "provenance": run_spec.provenance,
+             }),
+         ))
+         .await
+@@ -626,6 +627,7 @@ mod tests {
+                 "git": run_spec.git,
+                 "labels": run_spec.labels,
+                 "parent_id": parent_id,
++                "provenance": run_spec.provenance,
+             }),
+         ))
+         .await
+@@ -1299,6 +1301,7 @@ mod tests {
+                     "run_dir": "/tmp/run-2",
+                     "git": run_spec["git"],
+                     "labels": run_spec["labels"],
++                    "provenance": run_spec["provenance"],
+                 },
+             }))
+             .unwrap(),
+diff --git a/lib/crates/fabro-store/src/slate/run_store.rs b/lib/crates/fabro-store/src/slate/run_store.rs
+index 1718cb662..f94a97646 100644
+--- a/lib/crates/fabro-store/src/slate/run_store.rs
++++ b/lib/crates/fabro-store/src/slate/run_store.rs
+@@ -667,7 +667,7 @@ mod tests {
+     use std::sync::Arc;
+     use std::time::Duration;
+ 
+-    use fabro_types::{Graph, RunId, SessionId, StageId, WorkflowSettings};
++    use fabro_types::{Graph, RunId, SessionId, StageId, WorkflowSettings, test_support};
+     use object_store::memory::InMemory;
+     use serde_json::json;
+ 
+@@ -722,6 +722,7 @@ mod tests {
+                 "properties": {
+                     "settings": WorkflowSettings::default(),
+                     "graph": Graph::new("test"),
++                    "provenance": test_support::test_run_provenance(),
+                     "run_dir": "/tmp/test",
+                 },
+             }),
+diff --git a/lib/crates/fabro-store/tests/serializable_projection.rs b/lib/crates/fabro-store/tests/serializable_projection.rs
+index f6aa256fd..db0ccf309 100644
+--- a/lib/crates/fabro-store/tests/serializable_projection.rs
++++ b/lib/crates/fabro-store/tests/serializable_projection.rs
+@@ -4,6 +4,7 @@ use chrono::{TimeZone, Utc};
+ use fabro_store::{RunProjection, SerializableProjection, StageId};
+ use fabro_types::graph::Graph;
+ use fabro_types::run::RunSpec;
++use fabro_types::test_support::test_run_provenance;
+ use fabro_types::{
+     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
+     QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProviderKind,
+@@ -21,7 +22,7 @@ fn sample_run_spec() -> RunSpec {
+         workflow_slug:    Some("demo".to_string()),
+         source_directory: Some("/tmp/project".to_string()),
+         labels:           HashMap::from([("team".to_string(), "platform".to_string())]),
+-        provenance:       None,
++        provenance:       test_run_provenance(),
+         manifest_blob:    None,
+         definition_blob:  None,
+         git:              Some(fabro_types::GitContext {
+diff --git a/lib/crates/fabro-tool/Cargo.toml b/lib/crates/fabro-tool/Cargo.toml
+index 08b6df7cf..c50ea6a38 100644
+--- a/lib/crates/fabro-tool/Cargo.toml
++++ b/lib/crates/fabro-tool/Cargo.toml
+@@ -29,4 +29,5 @@ tokio.workspace = true
+ toml.workspace = true
+ 
+ [dev-dependencies]
++fabro-types = { path = "../fabro-types", features = ["test-support"] }
+ tempfile = "3"
+diff --git a/lib/crates/fabro-tool/src/common.rs b/lib/crates/fabro-tool/src/common.rs
+index 9dd64599a..1595dc28f 100644
+--- a/lib/crates/fabro-tool/src/common.rs
++++ b/lib/crates/fabro-tool/src/common.rs
+@@ -307,6 +307,7 @@ fn format_tool_error(err: &anyhow::Error) -> String {
+ #[cfg(test)]
+ mod tests {
+     use chrono::{TimeZone, Utc};
++    use fabro_types::test_support::test_principal;
+     use fabro_types::{RunLifecycle, RunLinks, RunOrigin, RunStatus, RunTimestamps, WorkflowRef};
+ 
+     use super::*;
+@@ -413,7 +414,7 @@ mod tests {
+             },
+             automation:       None,
+             repository:       None,
+-            created_by:       None,
++            created_by:       test_principal(),
+             origin:           RunOrigin::default(),
+             labels:           HashMap::new(),
+             lifecycle:        RunLifecycle {
+diff --git a/lib/crates/fabro-tool/src/create.rs b/lib/crates/fabro-tool/src/create.rs
+index 8488f8f0b..8988d1a4e 100644
+--- a/lib/crates/fabro-tool/src/create.rs
++++ b/lib/crates/fabro-tool/src/create.rs
+@@ -506,6 +506,7 @@ mod tests {
+     use async_trait::async_trait;
+     use chrono::{TimeZone, Utc};
+     use fabro_api::types;
++    use fabro_types::test_support::test_principal;
+     use fabro_types::{
+         EventEnvelope, Run, RunLifecycle, RunLinks, RunOrigin, RunProjection, RunStatus,
+         RunTimestamps, WorkflowRef,
+@@ -902,7 +903,7 @@ mod tests {
+             },
+             automation: None,
+             repository: None,
+-            created_by: None,
++            created_by: test_principal(),
+             origin: RunOrigin::default(),
+             labels: HashMap::new(),
+             lifecycle: RunLifecycle {
+diff --git a/lib/crates/fabro-tool/src/interact.rs b/lib/crates/fabro-tool/src/interact.rs
+index 34023120d..9f7957d15 100644
+--- a/lib/crates/fabro-tool/src/interact.rs
++++ b/lib/crates/fabro-tool/src/interact.rs
+@@ -451,6 +451,7 @@ mod tests {
+ 
+     use async_trait::async_trait;
+     use chrono::{TimeZone, Utc};
++    use fabro_types::test_support::test_principal;
+     use fabro_types::{
+         EventEnvelope, FailureReason, Run, RunId, RunLifecycle, RunLinks, RunOrigin, RunProjection,
+         RunStatus, RunTimestamps, WorkflowRef,
+@@ -690,7 +691,7 @@ mod tests {
+             },
+             automation:       None,
+             repository:       None,
+-            created_by:       None,
++            created_by:       test_principal(),
+             origin:           RunOrigin::default(),
+             labels:           HashMap::new(),
+             lifecycle:        RunLifecycle {
+diff --git a/lib/crates/fabro-tool/src/search.rs b/lib/crates/fabro-tool/src/search.rs
+index 0df7e391a..379806d07 100644
+--- a/lib/crates/fabro-tool/src/search.rs
++++ b/lib/crates/fabro-tool/src/search.rs
+@@ -293,6 +293,7 @@ mod tests {
+     use std::collections::HashMap;
+ 
+     use chrono::{TimeZone, Utc};
++    use fabro_types::test_support::test_principal;
+     use fabro_types::{RunLifecycle, RunLinks, RunOrigin, RunStatus, RunTimestamps, WorkflowRef};
+ 
+     use super::*;
+@@ -444,7 +445,7 @@ mod tests {
+             },
+             automation:       None,
+             repository:       None,
+-            created_by:       None,
++            created_by:       test_principal(),
+             origin:           RunOrigin::default(),
+             labels:           HashMap::from([("group".to_string(), group.to_string())]),
+             lifecycle:        RunLifecycle {
+diff --git a/lib/crates/fabro-types/src/lib.rs b/lib/crates/fabro-types/src/lib.rs
+index 318f982ad..731da2168 100644
+--- a/lib/crates/fabro-types/src/lib.rs
++++ b/lib/crates/fabro-types/src/lib.rs
+@@ -48,6 +48,9 @@ pub mod timing;
+ pub mod todo;
+ pub mod transcript;
+ 
++#[cfg(any(test, feature = "test-support"))]
++pub mod test_support;
++
+ pub use artifact::ArtifactUpload;
+ pub use auth::{IdpIdentity, IdpIdentityError};
+ pub use billing::{
+diff --git a/lib/crates/fabro-types/src/principal.rs b/lib/crates/fabro-types/src/principal.rs
+index 2c0ff3807..4f1962ea2 100644
+--- a/lib/crates/fabro-types/src/principal.rs
++++ b/lib/crates/fabro-types/src/principal.rs
+@@ -39,7 +39,6 @@ pub enum Principal {
+     System {
+         system_kind: SystemActorKind,
+     },
+-    Anonymous,
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
+@@ -97,7 +96,6 @@ impl Principal {
+             Self::Slack { .. } => "slack",
+             Self::Agent { .. } => "agent",
+             Self::System { .. } => "system",
+-            Self::Anonymous => "anonymous",
+         }
+     }
+ 
+@@ -123,7 +121,6 @@ impl Principal {
+             } => session_id.clone(),
+             Self::Agent { .. } => "agent".to_string(),
+             Self::System { system_kind } => format!("system:{system_kind}"),
+-            Self::Anonymous => "anonymous".to_string(),
+         }
+     }
+ }
+@@ -291,11 +288,6 @@ mod tests {
+         });
+     }
+ 
+-    #[test]
+-    fn round_trips_anonymous_variant() {
+-        assert_round_trip(&Principal::Anonymous);
+-    }
+-
+     #[test]
+     fn auth_method_as_str_matches_serde() {
+         assert_eq!(AuthMethod::Github.as_str(), "github");
+diff --git a/lib/crates/fabro-types/src/run.rs b/lib/crates/fabro-types/src/run.rs
+index 269db43ee..afb2a1f24 100644
+--- a/lib/crates/fabro-types/src/run.rs
++++ b/lib/crates/fabro-types/src/run.rs
+@@ -23,14 +23,13 @@ pub struct RunClientProvenance {
+     pub version:    Option<String>,
+ }
+ 
+-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ pub struct RunProvenance {
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub server:  Option<RunServerProvenance>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub client:  Option<RunClientProvenance>,
+-    #[serde(default, skip_serializing_if = "Option::is_none")]
+-    pub subject: Option<Principal>,
++    pub subject: Principal,
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+@@ -90,8 +89,7 @@ pub struct RunSpec {
+     pub source_directory: Option<String>,
+     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+     pub labels:           HashMap<String, String>,
+-    #[serde(default, skip_serializing_if = "Option::is_none")]
+-    pub provenance:       Option<RunProvenance>,
++    pub provenance:       RunProvenance,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub manifest_blob:    Option<RunBlobId>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+diff --git a/lib/crates/fabro-types/src/run_event/mod.rs b/lib/crates/fabro-types/src/run_event/mod.rs
+index 01ed04f4d..02b89f3a3 100644
+--- a/lib/crates/fabro-types/src/run_event/mod.rs
++++ b/lib/crates/fabro-types/src/run_event/mod.rs
+@@ -961,7 +961,7 @@ mod tests {
+     use super::*;
+     use crate::{
+         AuthMethod, Edge, Graph, IdpIdentity, Node, PendingReason, RunBlobId, WorkflowSettings,
+-        fixtures,
++        fixtures, test_support,
+     };
+ 
+     fn user_principal(login: &str) -> Principal {
+@@ -1044,6 +1044,7 @@ mod tests {
+                 "settings": settings,
+                 "graph": graph,
+                 "labels": {},
++                "provenance": test_support::test_run_provenance(),
+                 "run_dir": "/tmp/run",
+                 "source_directory": "/tmp/run"
+             }
+@@ -1064,6 +1065,7 @@ mod tests {
+                 "settings": WorkflowSettings::default(),
+                 "graph": Graph::new("test"),
+                 "labels": {},
++                "provenance": test_support::test_run_provenance(),
+                 "run_dir": "/tmp/run",
+                 "source_directory": "/tmp/run",
+                 "manifest_blob": RunBlobId::new(br#"{"version":1}"#).to_string()
+diff --git a/lib/crates/fabro-types/src/run_event/run.rs b/lib/crates/fabro-types/src/run_event/run.rs
+index fa189171f..be16946e2 100644
+--- a/lib/crates/fabro-types/src/run_event/run.rs
++++ b/lib/crates/fabro-types/src/run_event/run.rs
+@@ -28,8 +28,7 @@ pub struct RunCreatedProps {
+     pub workflow_slug:    Option<String>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub db_prefix:        Option<String>,
+-    #[serde(default, skip_serializing_if = "Option::is_none")]
+-    pub provenance:       Option<RunProvenance>,
++    pub provenance:       RunProvenance,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub manifest_blob:    Option<RunBlobId>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+diff --git a/lib/crates/fabro-types/src/run_projection.rs b/lib/crates/fabro-types/src/run_projection.rs
+index 3bba6d43e..b667f4fc8 100644
+--- a/lib/crates/fabro-types/src/run_projection.rs
++++ b/lib/crates/fabro-types/src/run_projection.rs
+@@ -680,7 +680,7 @@ mod title_tests {
+ 
+     use chrono::Utc;
+ 
+-    use crate::{AttrValue, Graph, RunId, RunProjection, RunSpec, WorkflowSettings};
++    use crate::{AttrValue, Graph, RunId, RunProjection, RunSpec, WorkflowSettings, test_support};
+ 
+     fn projection_with_goal(goal: Option<&str>) -> RunProjection {
+         let mut graph = Graph::new("test");
+@@ -698,7 +698,7 @@ mod title_tests {
+             workflow_slug: None,
+             source_directory: None,
+             labels: HashMap::new(),
+-            provenance: None,
++            provenance: test_support::test_run_provenance(),
+             manifest_blob: None,
+             definition_blob: None,
+             git: None,
+@@ -750,7 +750,7 @@ mod iter_stages_tests {
+     use serde_json::json;
+ 
+     use super::RunProjection;
+-    use crate::{Graph, RunId, RunSpec, StageProjection, WorkflowSettings};
++    use crate::{Graph, RunId, RunSpec, StageProjection, WorkflowSettings, test_support};
+ 
+     fn seq(n: u32) -> NonZeroU32 {
+         NonZeroU32::new(n).unwrap()
+@@ -767,7 +767,7 @@ mod iter_stages_tests {
+                 workflow_slug:    None,
+                 source_directory: None,
+                 labels:           HashMap::default(),
+-                provenance:       None,
++                provenance:       test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 definition_blob:  None,
+                 git:              None,
+diff --git a/lib/crates/fabro-types/src/run_summary.rs b/lib/crates/fabro-types/src/run_summary.rs
+index 1cde31614..509303d3c 100644
+--- a/lib/crates/fabro-types/src/run_summary.rs
++++ b/lib/crates/fabro-types/src/run_summary.rs
+@@ -52,8 +52,7 @@ pub struct Run {
+     pub automation:       Option<AutomationRef>,
+     #[serde(default)]
+     pub repository:       Option<RepositoryRef>,
+-    #[serde(default)]
+-    pub created_by:       Option<Principal>,
++    pub created_by:       Principal,
+     pub origin:           RunOrigin,
+     pub labels:           HashMap<String, String>,
+     pub lifecycle:        RunLifecycle,
+diff --git a/lib/crates/fabro-types/src/test_support.rs b/lib/crates/fabro-types/src/test_support.rs
+new file mode 100644
+index 000000000..c35634249
+--- /dev/null
++++ b/lib/crates/fabro-types/src/test_support.rs
+@@ -0,0 +1,27 @@
++use crate::{
++    AuthMethod, IdpIdentity, Principal, RunClientProvenance, RunProvenance, RunServerProvenance,
++};
++
++#[must_use]
++pub fn test_principal() -> Principal {
++    Principal::user(
++        IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
++        "test".to_string(),
++        AuthMethod::DevToken,
++    )
++}
++
++#[must_use]
++pub fn test_run_provenance() -> RunProvenance {
++    RunProvenance {
++        server:  Some(RunServerProvenance {
++            version: "test".to_string(),
++        }),
++        client:  Some(RunClientProvenance {
++            user_agent: Some("fabro-test/0.0.0".to_string()),
++            name:       Some("fabro-test".to_string()),
++            version:    Some("0.0.0".to_string()),
++        }),
++        subject: test_principal(),
++    }
++}
+diff --git a/lib/crates/fabro-types/tests/run_event_serde.rs b/lib/crates/fabro-types/tests/run_event_serde.rs
+index 8f2df1972..2e62eb5a1 100644
+--- a/lib/crates/fabro-types/tests/run_event_serde.rs
++++ b/lib/crates/fabro-types/tests/run_event_serde.rs
+@@ -6,7 +6,22 @@ use fabro_types::run_event::run::{RunCreatedProps, RunParentLinkedProps, RunPare
+ use fabro_types::run_event::{RunSessionTurnFailedCode, RunSessionTurnFailedProps};
+ use fabro_types::settings::InterpString;
+ use fabro_types::settings::run::RunGoal;
+-use fabro_types::{EventBody, TurnId, WorkflowSettings, fixtures};
++use fabro_types::{
++    AuthMethod, EventBody, IdpIdentity, Principal, RunProvenance, TurnId, WorkflowSettings,
++    fixtures,
++};
++
++fn test_run_provenance() -> RunProvenance {
++    RunProvenance {
++        server:  None,
++        client:  None,
++        subject: Principal::user(
++            IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
++            "test".to_string(),
++            AuthMethod::DevToken,
++        ),
++    }
++}
+ 
+ fn templated_settings() -> WorkflowSettings {
+     let mut settings = WorkflowSettings::default();
+@@ -27,7 +42,7 @@ fn run_created_props_round_trip_templated_settings() {
+         source_directory: Some("/Users/client/project".to_string()),
+         workflow_slug:    Some("demo".to_string()),
+         db_prefix:        Some("run_".to_string()),
+-        provenance:       None,
++        provenance:       test_run_provenance(),
+         manifest_blob:    None,
+         git:              Some(GitContext {
+             origin_url:   "https://github.com/fabro-sh/fabro.git".to_string(),
+@@ -89,7 +104,7 @@ fn run_created_props_omits_web_url_when_absent() {
+         source_directory: None,
+         workflow_slug:    None,
+         db_prefix:        None,
+-        provenance:       None,
++        provenance:       test_run_provenance(),
+         manifest_blob:    None,
+         git:              None,
+         fork_source_ref:  None,
+@@ -126,7 +141,8 @@ fn run_created_props_defaults_retried_from_for_legacy_events() {
+         "settings": WorkflowSettings::default(),
+         "graph": Graph::new("ship"),
+         "labels": {},
+-        "run_dir": "/tmp/run"
++        "run_dir": "/tmp/run",
++        "provenance": test_run_provenance()
+     });
+ 
+     let props: RunCreatedProps =
+diff --git a/lib/crates/fabro-types/tests/run_spec_methods.rs b/lib/crates/fabro-types/tests/run_spec_methods.rs
+index f5e8cf25f..bb1020b81 100644
+--- a/lib/crates/fabro-types/tests/run_spec_methods.rs
++++ b/lib/crates/fabro-types/tests/run_spec_methods.rs
+@@ -3,7 +3,19 @@ use std::collections::HashMap;
+ use fabro_types::graph::Graph;
+ use fabro_types::run::{DirtyStatus, GitContext, PreRunPushOutcome, RunSpec};
+ use fabro_types::settings::{ProjectNamespace, WorkflowNamespace};
+-use fabro_types::{WorkflowSettings, fixtures};
++use fabro_types::{AuthMethod, IdpIdentity, Principal, RunProvenance, WorkflowSettings, fixtures};
++
++fn test_run_provenance() -> RunProvenance {
++    RunProvenance {
++        server:  None,
++        client:  None,
++        subject: Principal::user(
++            IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
++            "test".to_string(),
++            AuthMethod::DevToken,
++        ),
++    }
++}
+ 
+ fn sample_run_spec() -> RunSpec {
+     let settings = WorkflowSettings {
+@@ -26,7 +38,7 @@ fn sample_run_spec() -> RunSpec {
+         workflow_slug: Some("demo".to_string()),
+         source_directory: Some("/Users/client/project".to_string()),
+         labels: HashMap::from([("team".to_string(), "platform".to_string())]),
+-        provenance: None,
++        provenance: test_run_provenance(),
+         manifest_blob: None,
+         definition_blob: None,
+         git: Some(GitContext {
+diff --git a/lib/crates/fabro-types/tests/run_spec_serde.rs b/lib/crates/fabro-types/tests/run_spec_serde.rs
+index f6278ff34..adcfce7db 100644
+--- a/lib/crates/fabro-types/tests/run_spec_serde.rs
++++ b/lib/crates/fabro-types/tests/run_spec_serde.rs
+@@ -4,7 +4,19 @@ use fabro_types::graph::Graph;
+ use fabro_types::run::{DirtyStatus, ForkSourceRef, GitContext, PreRunPushOutcome, RunSpec};
+ use fabro_types::settings::InterpString;
+ use fabro_types::settings::run::RunGoal;
+-use fabro_types::{WorkflowSettings, fixtures};
++use fabro_types::{AuthMethod, IdpIdentity, Principal, RunProvenance, WorkflowSettings, fixtures};
++
++fn test_run_provenance() -> RunProvenance {
++    RunProvenance {
++        server:  None,
++        client:  None,
++        subject: Principal::user(
++            IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
++            "test".to_string(),
++            AuthMethod::DevToken,
++        ),
++    }
++}
+ 
+ fn templated_settings() -> WorkflowSettings {
+     let mut settings = WorkflowSettings::default();
+@@ -22,7 +34,7 @@ fn run_spec_round_trips_templated_settings() {
+         workflow_slug:    Some("demo".to_string()),
+         source_directory: Some("/Users/client/project".to_string()),
+         labels:           HashMap::from([("team".to_string(), "platform".to_string())]),
+-        provenance:       None,
++        provenance:       test_run_provenance(),
+         manifest_blob:    None,
+         definition_blob:  None,
+         git:              Some(GitContext {
+diff --git a/lib/crates/fabro-workflow/src/billing_rollup.rs b/lib/crates/fabro-workflow/src/billing_rollup.rs
+index feceb0e12..1ceda2dd6 100644
+--- a/lib/crates/fabro-workflow/src/billing_rollup.rs
++++ b/lib/crates/fabro-workflow/src/billing_rollup.rs
+@@ -352,7 +352,7 @@ mod tests {
+             workflow_slug: None,
+             source_directory: None,
+             labels: HashMap::new(),
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             definition_blob: None,
+             git: None,
+diff --git a/lib/crates/fabro-workflow/src/event/convert.rs b/lib/crates/fabro-workflow/src/event/convert.rs
+index 684af5164..17eb5d157 100644
+--- a/lib/crates/fabro-workflow/src/event/convert.rs
++++ b/lib/crates/fabro-workflow/src/event/convert.rs
+@@ -2403,28 +2403,28 @@ mod tests {
+         let provenance = RunProvenance {
+             server:  None,
+             client:  None,
+-            subject: Some(user_principal("alice")),
++            subject: user_principal("alice"),
+         };
+ 
+         let stored = to_run_event(&fixtures::RUN_1, &Event::RunCreated {
+-            run_id:           fixtures::RUN_1,
+-            title:            None,
+-            settings:         serde_json::to_value(WorkflowSettings::default()).unwrap(),
+-            graph:            serde_json::to_value(Graph::new("test")).unwrap(),
+-            workflow_source:  None,
+-            workflow_config:  None,
+-            labels:           BTreeMap::default(),
+-            run_dir:          "/tmp/run".to_string(),
++            run_id: fixtures::RUN_1,
++            title: None,
++            settings: serde_json::to_value(WorkflowSettings::default()).unwrap(),
++            graph: serde_json::to_value(Graph::new("test")).unwrap(),
++            workflow_source: None,
++            workflow_config: None,
++            labels: BTreeMap::default(),
++            run_dir: "/tmp/run".to_string(),
+             source_directory: Some("/tmp/run".to_string()),
+-            workflow_slug:    None,
+-            db_prefix:        None,
+-            provenance:       Some(provenance),
+-            manifest_blob:    None,
+-            git:              None,
+-            fork_source_ref:  None,
+-            retried_from:     None,
+-            parent_id:        None,
+-            web_url:          None,
++            workflow_slug: None,
++            db_prefix: None,
++            provenance,
++            manifest_blob: None,
++            git: None,
++            fork_source_ref: None,
++            retried_from: None,
++            parent_id: None,
++            web_url: None,
+         });
+         let actor = stored.actor.as_ref().expect("actor set");
+         assert_eq!(actor, &user_principal("alice"));
+diff --git a/lib/crates/fabro-workflow/src/event/events.rs b/lib/crates/fabro-workflow/src/event/events.rs
+index cf458c121..5a70af52c 100644
+--- a/lib/crates/fabro-workflow/src/event/events.rs
++++ b/lib/crates/fabro-workflow/src/event/events.rs
+@@ -39,8 +39,7 @@ pub enum Event {
+         workflow_slug:    Option<String>,
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         db_prefix:        Option<String>,
+-        #[serde(default, skip_serializing_if = "Option::is_none")]
+-        provenance:       Option<RunProvenance>,
++        provenance:       RunProvenance,
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         manifest_blob:    Option<RunBlobId>,
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+diff --git a/lib/crates/fabro-workflow/src/event/sink.rs b/lib/crates/fabro-workflow/src/event/sink.rs
+index 967f0570a..f5b5dff03 100644
+--- a/lib/crates/fabro-workflow/src/event/sink.rs
++++ b/lib/crates/fabro-workflow/src/event/sink.rs
+@@ -243,7 +243,7 @@ mod tests {
+             source_directory: None,
+             workflow_slug:    None,
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/event/stored_fields.rs b/lib/crates/fabro-workflow/src/event/stored_fields.rs
+index 94fba25ad..4ada17b67 100644
+--- a/lib/crates/fabro-workflow/src/event/stored_fields.rs
++++ b/lib/crates/fabro-workflow/src/event/stored_fields.rs
+@@ -57,7 +57,7 @@ pub(super) fn stored_event_fields(event: &Event, scope: Option<&StageScope>) ->
+ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
+     match event {
+         Event::RunCreated { provenance, .. } => StoredEventFields {
+-            actor: provenance.as_ref().and_then(|p| p.subject.clone()),
++            actor: Some(provenance.subject.clone()),
+             ..StoredEventFields::default()
+         },
+         Event::RunCancelRequested { actor }
+diff --git a/lib/crates/fabro-workflow/src/git.rs b/lib/crates/fabro-workflow/src/git.rs
+index f48683dd0..abf7e9402 100644
+--- a/lib/crates/fabro-workflow/src/git.rs
++++ b/lib/crates/fabro-workflow/src/git.rs
+@@ -468,7 +468,7 @@ mod tests {
+             source_directory: None,
+             workflow_slug:    None,
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/handler/agent.rs b/lib/crates/fabro-workflow/src/handler/agent.rs
+index 648f00c4b..604ad7f0b 100644
+--- a/lib/crates/fabro-workflow/src/handler/agent.rs
++++ b/lib/crates/fabro-workflow/src/handler/agent.rs
+@@ -483,7 +483,7 @@ mod tests {
+                 source_directory: None,
+                 workflow_slug:    None,
+                 db_prefix:        None,
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 git:              None,
+                 fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/handler/command.rs b/lib/crates/fabro-workflow/src/handler/command.rs
+index dde68dd5d..247d8428e 100644
+--- a/lib/crates/fabro-workflow/src/handler/command.rs
++++ b/lib/crates/fabro-workflow/src/handler/command.rs
+@@ -255,7 +255,7 @@ mod tests {
+                     workflow_slug:    None,
+                     source_directory: None,
+                     labels:           std::collections::HashMap::default(),
+-                    provenance:       None,
++                    provenance:       fabro_types::test_support::test_run_provenance(),
+                     manifest_blob:    None,
+                     definition_blob:  None,
+                     git:              None,
+@@ -355,7 +355,7 @@ mod tests {
+                 source_directory: None,
+                 workflow_slug:    None,
+                 db_prefix:        None,
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 git:              None,
+                 fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/handler/llm/api.rs b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+index 91753f4c9..8520a0c93 100644
+--- a/lib/crates/fabro-workflow/src/handler/llm/api.rs
++++ b/lib/crates/fabro-workflow/src/handler/llm/api.rs
+@@ -2133,7 +2133,7 @@ reasoning = false
+             },
+             automation: None,
+             repository: None,
+-            created_by: None,
++            created_by: fabro_types::test_support::test_principal(),
+             origin: RunOrigin::default(),
+             labels: HashMap::new(),
+             lifecycle: RunLifecycle {
+diff --git a/lib/crates/fabro-workflow/src/handler/parallel.rs b/lib/crates/fabro-workflow/src/handler/parallel.rs
+index 7c85042cc..80afa5319 100644
+--- a/lib/crates/fabro-workflow/src/handler/parallel.rs
++++ b/lib/crates/fabro-workflow/src/handler/parallel.rs
+@@ -727,7 +727,7 @@ mod tests {
+                 source_directory: None,
+                 workflow_slug:    None,
+                 db_prefix:        None,
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 git:              None,
+                 fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/handler/prompt.rs b/lib/crates/fabro-workflow/src/handler/prompt.rs
+index 8d5b2fdf6..d660ed91b 100644
+--- a/lib/crates/fabro-workflow/src/handler/prompt.rs
++++ b/lib/crates/fabro-workflow/src/handler/prompt.rs
+@@ -282,7 +282,7 @@ mod tests {
+                 source_directory: None,
+                 workflow_slug:    None,
+                 db_prefix:        None,
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 git:              None,
+                 fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/lifecycle/git.rs b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+index fefaafa8c..0149c76f4 100644
+--- a/lib/crates/fabro-workflow/src/lifecycle/git.rs
++++ b/lib/crates/fabro-workflow/src/lifecycle/git.rs
+@@ -735,7 +735,7 @@ mod tests {
+             source_directory: Some("/tmp/project".to_string()),
+             workflow_slug: Some("metadata".to_string()),
+             db_prefix: None,
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             git: None,
+             fork_source_ref: None,
+diff --git a/lib/crates/fabro-workflow/src/operations/archive.rs b/lib/crates/fabro-workflow/src/operations/archive.rs
+index bb3693398..725d79476 100644
+--- a/lib/crates/fabro-workflow/src/operations/archive.rs
++++ b/lib/crates/fabro-workflow/src/operations/archive.rs
+@@ -225,7 +225,7 @@ mod tests {
+             source_directory: None,
+             workflow_slug:    None,
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/operations/create.rs b/lib/crates/fabro-workflow/src/operations/create.rs
+index 0460a1874..519de7c65 100644
+--- a/lib/crates/fabro-workflow/src/operations/create.rs
++++ b/lib/crates/fabro-workflow/src/operations/create.rs
+@@ -44,7 +44,7 @@ pub struct CreateRunInput {
+     pub git: Option<GitContext>,
+     pub fork_source_ref: Option<ForkSourceRef>,
+     pub parent_id: Option<RunId>,
+-    pub provenance: Option<RunProvenance>,
++    pub provenance: RunProvenance,
+     pub configured_providers: Vec<ProviderId>,
+     /// Public URL where this run can be viewed in the web UI, when the server
+     /// has the web UI enabled. Recorded on the `run.created` event so attach
+@@ -70,7 +70,7 @@ struct PersistCreateOptions {
+     source_directory:     Option<String>,
+     git:                  Option<GitContext>,
+     fork_source_ref:      Option<ForkSourceRef>,
+-    provenance:           Option<RunProvenance>,
++    provenance:           RunProvenance,
+     configured_providers: Vec<ProviderId>,
+     catalog:              Arc<Catalog>,
+ }
+@@ -1099,7 +1099,7 @@ mod tests {
+                 git: None,
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+@@ -1166,7 +1166,7 @@ mod tests {
+                 }),
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+@@ -1277,7 +1277,7 @@ mod tests {
+                 git: None,
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+@@ -1322,7 +1322,7 @@ mod tests {
+                 }),
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+@@ -1389,7 +1389,7 @@ mod tests {
+                 git: None,
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+@@ -1435,7 +1435,7 @@ mod tests {
+                 git: None,
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: Some(fabro_types::RunProvenance {
++                provenance: fabro_types::RunProvenance {
+                     server:  Some(fabro_types::RunServerProvenance {
+                         version: "0.9.0".to_string(),
+                     }),
+@@ -1444,12 +1444,12 @@ mod tests {
+                         name:       Some("fabro-cli".to_string()),
+                         version:    Some("0.9.0".to_string()),
+                     }),
+-                    subject: Some(fabro_types::Principal::user(
++                    subject: fabro_types::Principal::user(
+                         fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
+                         "octocat".to_string(),
+                         fabro_types::AuthMethod::Github,
+-                    )),
+-                }),
++                    ),
++                },
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+@@ -1462,7 +1462,7 @@ mod tests {
+         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
+         let state = run_store.state().await.unwrap();
+         let run = state.spec;
+-        let provenance = run.provenance.expect("provenance should be projected");
++        let provenance = run.provenance;
+ 
+         assert_eq!(provenance.server.unwrap().version, "0.9.0");
+         assert_eq!(
+@@ -1470,7 +1470,7 @@ mod tests {
+             Some("fabro-cli")
+         );
+         assert_eq!(
+-            provenance.subject.unwrap(),
++            provenance.subject,
+             fabro_types::Principal::user(
+                 fabro_types::IdpIdentity::new("https://github.com", "12345").unwrap(),
+                 "octocat".to_string(),
+diff --git a/lib/crates/fabro-workflow/src/operations/fork.rs b/lib/crates/fabro-workflow/src/operations/fork.rs
+index 513975d71..d9a68c179 100644
+--- a/lib/crates/fabro-workflow/src/operations/fork.rs
++++ b/lib/crates/fabro-workflow/src/operations/fork.rs
+@@ -381,7 +381,7 @@ mod tests {
+             source_directory: Some("/client/source".to_string()),
+             workflow_slug:    Some("fork-source".to_string()),
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              Some(fabro_types::GitContext {
+                 origin_url:   "https://github.com/example/repo.git".to_string(),
+diff --git a/lib/crates/fabro-workflow/src/operations/retry.rs b/lib/crates/fabro-workflow/src/operations/retry.rs
+index 6551687c5..15b7f8ea6 100644
+--- a/lib/crates/fabro-workflow/src/operations/retry.rs
++++ b/lib/crates/fabro-workflow/src/operations/retry.rs
+@@ -12,7 +12,7 @@ use crate::event::{self, Event};
+ pub struct RetryRunInput {
+     pub source_run_id: RunId,
+     pub new_run_id:    RunId,
+-    pub provenance:    Option<RunProvenance>,
++    pub provenance:    RunProvenance,
+     pub web_url:       Option<String>,
+ }
+ 
+@@ -149,7 +149,7 @@ mod tests {
+                 version: "test".to_string(),
+             }),
+             client:  None,
+-            subject: Some(actor(login)),
++            subject: actor(login),
+         }
+     }
+ 
+@@ -187,7 +187,7 @@ mod tests {
+             source_directory: Some("/workspace/source".to_string()),
+             workflow_slug: Some("retry-source".to_string()),
+             db_prefix: None,
+-            provenance: Some(provenance("source-user")),
++            provenance: provenance("source-user"),
+             manifest_blob,
+             git: Some(git_context()),
+             fork_source_ref,
+@@ -345,7 +345,7 @@ mod tests {
+         let outcome = retry_run(&store, &RetryRunInput {
+             source_run_id,
+             new_run_id: RunId::new(),
+-            provenance: Some(provenance("retry-user")),
++            provenance: provenance("retry-user"),
+             web_url: Some("http://localhost:3000/runs/retry".to_string()),
+         })
+         .await
+@@ -379,14 +379,7 @@ mod tests {
+         assert_eq!(retry_state.spec.manifest_blob, manifest_blob);
+         assert_eq!(retry_state.spec.definition_blob, definition_blob);
+         assert_eq!(retry_state.spec.fork_source_ref, Some(fork_source_ref));
+-        assert_eq!(
+-            retry_state
+-                .spec
+-                .provenance
+-                .as_ref()
+-                .and_then(|provenance| provenance.subject.as_ref()),
+-            Some(&actor("retry-user"))
+-        );
++        assert_eq!(retry_state.spec.provenance.subject, actor("retry-user"));
+         assert_eq!(
+             retry_state.web_url.as_deref(),
+             Some("http://localhost:3000/runs/retry")
+@@ -469,7 +462,7 @@ mod tests {
+             let err = retry_run(&store, &RetryRunInput {
+                 source_run_id: run_id,
+                 new_run_id:    RunId::new(),
+-                provenance:    None,
++                provenance:    provenance("retry-user"),
+                 web_url:       None,
+             })
+             .await
+@@ -487,7 +480,7 @@ mod tests {
+         let err = retry_run(&store, &RetryRunInput {
+             source_run_id: fixtures::RUN_1,
+             new_run_id:    RunId::new(),
+-            provenance:    None,
++            provenance:    provenance("retry-user"),
+             web_url:       None,
+         })
+         .await
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index a962cd0e5..bdde928ec 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -1416,7 +1416,7 @@ reasoning = false
+                 git: None,
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+@@ -1837,7 +1837,7 @@ reasoning = false
+                 git: None,
+                 fork_source_ref: None,
+                 parent_id: None,
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 configured_providers: Vec::new(),
+                 web_url: None,
+             },
+diff --git a/lib/crates/fabro-workflow/src/operations/timeline.rs b/lib/crates/fabro-workflow/src/operations/timeline.rs
+index 2170dc28a..44cbb7ed0 100644
+--- a/lib/crates/fabro-workflow/src/operations/timeline.rs
++++ b/lib/crates/fabro-workflow/src/operations/timeline.rs
+@@ -247,7 +247,7 @@ mod tests {
+                 workflow_slug:    None,
+                 source_directory: None,
+                 labels:           HashMap::new(),
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 definition_blob:  None,
+                 git:              None,
+diff --git a/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs b/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
+index cef35cc39..741bb70a2 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/execute/tests.rs
+@@ -164,7 +164,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
+                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+             }),
+             labels: HashMap::new(),
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             definition_blob: None,
+             fork_source_ref: None,
+@@ -207,7 +207,7 @@ async fn seed_created_and_starting(
+         source_directory: Some(std::env::current_dir().unwrap().display().to_string()),
+         workflow_slug:    run_options.workflow_slug.clone(),
+         db_prefix:        None,
+-        provenance:       None,
++        provenance:       fabro_types::test_support::test_run_provenance(),
+         manifest_blob:    None,
+         git:              run_options.pre_run_git.clone(),
+         fork_source_ref:  run_options.fork_source_ref.clone(),
+diff --git a/lib/crates/fabro-workflow/src/pipeline/finalize.rs b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+index 05d6db1d0..b5da54bb2 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/finalize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/finalize.rs
+@@ -738,7 +738,7 @@ mod tests {
+             source_directory: Some("/tmp/project".to_string()),
+             workflow_slug:    Some("metadata".to_string()),
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+@@ -854,7 +854,7 @@ mod tests {
+                 workflow_slug:    None,
+                 source_directory: None,
+                 labels:           HashMap::new(),
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 definition_blob:  None,
+                 git:              None,
+diff --git a/lib/crates/fabro-workflow/src/pipeline/initialize.rs b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+index 761a58e42..ce5bfdaaa 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/initialize.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/initialize.rs
+@@ -888,7 +888,7 @@ mod tests {
+                     push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+                 }),
+                 labels: HashMap::new(),
+-                provenance: None,
++                provenance: fabro_types::test_support::test_run_provenance(),
+                 manifest_blob: None,
+                 definition_blob: None,
+                 fork_source_ref: None,
+diff --git a/lib/crates/fabro-workflow/src/pipeline/persist.rs b/lib/crates/fabro-workflow/src/pipeline/persist.rs
+index ee6150696..865caaf01 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/persist.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/persist.rs
+@@ -147,7 +147,7 @@ mod tests {
+                 ("env".to_string(), "test".to_string()),
+                 ("team".to_string(), "workflow".to_string()),
+             ]),
+-            provenance: None,
++            provenance: fabro_types::test_support::test_run_provenance(),
+             manifest_blob: None,
+             definition_blob: None,
+             fork_source_ref: None,
+diff --git a/lib/crates/fabro-workflow/src/pipeline/pull_request.rs b/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
+index 92f4a0bc3..ef2ab9f1e 100644
+--- a/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
++++ b/lib/crates/fabro-workflow/src/pipeline/pull_request.rs
+@@ -822,7 +822,7 @@ mod tests {
+                 workflow_slug:    None,
+                 source_directory: None,
+                 labels:           HashMap::new(),
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 definition_blob:  None,
+                 git:              None,
+@@ -1146,7 +1146,7 @@ mod tests {
+                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+             }),
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -1215,7 +1215,7 @@ mod tests {
+                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+             }),
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -1569,7 +1569,7 @@ mod tests {
+             source_directory: Some(tmp.path().display().to_string()),
+             git:              None,
+             labels:           std::collections::HashMap::new(),
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -1696,7 +1696,7 @@ mod tests {
+             source_directory: Some("/tmp/project".to_string()),
+             git:              None,
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -1713,7 +1713,7 @@ mod tests {
+             source_directory: run_spec.source_directory.clone(),
+             workflow_slug:    run_spec.workflow_slug.clone(),
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+@@ -1865,7 +1865,7 @@ mod tests {
+             source_directory: None,
+             git:              None,
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -1882,7 +1882,7 @@ mod tests {
+             source_directory: None,
+             workflow_slug:    None,
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/run_lookup.rs b/lib/crates/fabro-workflow/src/run_lookup.rs
+index 5d8cdeb3b..13324a880 100644
+--- a/lib/crates/fabro-workflow/src/run_lookup.rs
++++ b/lib/crates/fabro-workflow/src/run_lookup.rs
+@@ -490,7 +490,7 @@ mod tests {
+                 push_outcome: fabro_types::PreRunPushOutcome::NotAttempted,
+             }),
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/run_metadata.rs b/lib/crates/fabro-workflow/src/run_metadata.rs
+index 9d679d0b4..d037567f9 100644
+--- a/lib/crates/fabro-workflow/src/run_metadata.rs
++++ b/lib/crates/fabro-workflow/src/run_metadata.rs
+@@ -638,7 +638,7 @@ mod tests {
+                     push_outcome: PreRunPushOutcome::NotAttempted,
+                 }),
+                 labels:           HashMap::new(),
+-                provenance:       None,
++                provenance:       fabro_types::test_support::test_run_provenance(),
+                 manifest_blob:    None,
+                 definition_blob:  None,
+                 fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/runtime_store.rs b/lib/crates/fabro-workflow/src/runtime_store.rs
+index 0f590c70f..e4c15b30a 100644
+--- a/lib/crates/fabro-workflow/src/runtime_store.rs
++++ b/lib/crates/fabro-workflow/src/runtime_store.rs
+@@ -147,7 +147,7 @@ mod tests {
+             source_directory: Some("/tmp/test".to_string()),
+             git:              None,
+             labels:           HashMap::new(),
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             definition_blob:  None,
+             fork_source_ref:  None,
+@@ -168,7 +168,7 @@ mod tests {
+             source_directory: Some("/tmp/test".to_string()),
+             workflow_slug:    Some("test".to_string()),
+             db_prefix:        None,
+-            provenance:       None,
++            provenance:       fabro_types::test_support::test_run_provenance(),
+             manifest_blob:    None,
+             git:              None,
+             fork_source_ref:  None,
+diff --git a/lib/crates/fabro-workflow/src/test_support.rs b/lib/crates/fabro-workflow/src/test_support.rs
+index c587e49fa..ae270dd3a 100644
+--- a/lib/crates/fabro-workflow/src/test_support.rs
++++ b/lib/crates/fabro-workflow/src/test_support.rs
+@@ -10,6 +10,7 @@ use fabro_graphviz::graph::Graph as GvGraph;
+ use fabro_interview::AutoApproveInterviewer;
+ use fabro_model::Catalog;
+ use fabro_store::{ArtifactStore, Database, RunProjection};
++use fabro_types::{AuthMethod, IdpIdentity, Principal, RunProvenance};
+ use object_store::local::LocalFileSystem;
+ 
+ use crate::artifact_upload::ArtifactSink;
+@@ -26,6 +27,18 @@ use crate::run_options::RunOptions;
+ use crate::sandbox_git_runtime::SandboxGitRuntime;
+ use crate::services::{EngineServices, RunLocations, RunServices};
+ 
++fn test_run_provenance() -> RunProvenance {
++    RunProvenance {
++        server:  None,
++        client:  None,
++        subject: Principal::user(
++            IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
++            "test".to_string(),
++            AuthMethod::DevToken,
++        ),
++    }
++}
++
+ /// These helpers stop at EXECUTE, so they emit the terminal event here to
+ /// keep test consumers seeing the same end-of-run signal as production
+ /// (FINALIZE).
+@@ -174,7 +187,7 @@ async fn initialized(
+         source_directory: Some(sandbox.working_directory().to_string()),
+         workflow_slug:    run_options.workflow_slug.clone(),
+         db_prefix:        None,
+-        provenance:       None,
++        provenance:       test_run_provenance(),
+         manifest_blob:    None,
+         git:              run_options.pre_run_git.clone(),
+         fork_source_ref:  run_options.fork_source_ref.clone(),
+diff --git a/lib/packages/fabro-api-client/src/.openapi-generator/FILES b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+index 8e4fa7d1d..03e4463f9 100644
+--- a/lib/packages/fabro-api-client/src/.openapi-generator/FILES
++++ b/lib/packages/fabro-api-client/src/.openapi-generator/FILES
+@@ -256,7 +256,6 @@ models/preflight-workflow-summary.ts
+ models/preview-url-request.ts
+ models/preview-url-response.ts
+ models/principal-agent.ts
+-models/principal-anonymous.ts
+ models/principal-slack.ts
+ models/principal-system.ts
+ models/principal-user.ts
+diff --git a/lib/packages/fabro-api-client/src/models/index.ts b/lib/packages/fabro-api-client/src/models/index.ts
+index 4a208f5e3..2cca8d321 100644
+--- a/lib/packages/fabro-api-client/src/models/index.ts
++++ b/lib/packages/fabro-api-client/src/models/index.ts
+@@ -232,7 +232,6 @@ export * from './preview-url-request';
+ export * from './preview-url-response';
+ export * from './principal';
+ export * from './principal-agent';
+-export * from './principal-anonymous';
+ export * from './principal-slack';
+ export * from './principal-system';
+ export * from './principal-user';
+diff --git a/lib/packages/fabro-api-client/src/models/principal-anonymous.ts b/lib/packages/fabro-api-client/src/models/principal-anonymous.ts
+deleted file mode 100644
+index daac61df0..000000000
+--- a/lib/packages/fabro-api-client/src/models/principal-anonymous.ts
++++ /dev/null
+@@ -1,25 +0,0 @@
+-/* tslint:disable */
+-/* eslint-disable */
+-/**
+- * Fabro Run API
+- * HTTP API for managing Fabro workflow run executions.
+- *
+- * The version of the OpenAPI document: 0.1.0
+- *
+- *
+- * NOTE: This class is auto generated by OpenAPI Generator (https://openapi-generator.tech).
+- * https://openapi-generator.tech
+- * Do not edit the class manually.
+- */
+-
+-
+-
+-export interface PrincipalAnonymous {
+-    'kind': PrincipalAnonymousKindEnum;
+-}
+-
+-export const PrincipalAnonymousKindEnum = {
+-    ANONYMOUS: 'anonymous'
+-} as const;
+-
+-export type PrincipalAnonymousKindEnum = typeof PrincipalAnonymousKindEnum[keyof typeof PrincipalAnonymousKindEnum];
+diff --git a/lib/packages/fabro-api-client/src/models/principal.ts b/lib/packages/fabro-api-client/src/models/principal.ts
+index e3597295d..08b5422df 100644
+--- a/lib/packages/fabro-api-client/src/models/principal.ts
++++ b/lib/packages/fabro-api-client/src/models/principal.ts
+@@ -24,9 +24,6 @@ import type { IdpIdentity } from './idp-identity';
+ import type { PrincipalAgent } from './principal-agent';
+ // May contain unused imports in some cases
+ // @ts-ignore
+-import type { PrincipalAnonymous } from './principal-anonymous';
+-// May contain unused imports in some cases
+-// @ts-ignore
+ import type { PrincipalSlack } from './principal-slack';
+ // May contain unused imports in some cases
+ // @ts-ignore
+@@ -47,4 +44,4 @@ import type { SystemActorKind } from './system-actor-kind';
+ /**
+  * @type Principal
+  */
+-export type Principal = { kind: 'agent' } & PrincipalAgent | { kind: 'anonymous' } & PrincipalAnonymous | { kind: 'slack' } & PrincipalSlack | { kind: 'system' } & PrincipalSystem | { kind: 'user' } & PrincipalUser | { kind: 'webhook' } & PrincipalWebhook | { kind: 'worker' } & PrincipalWorker;
++export type Principal = { kind: 'agent' } & PrincipalAgent | { kind: 'slack' } & PrincipalSlack | { kind: 'system' } & PrincipalSystem | { kind: 'user' } & PrincipalUser | { kind: 'webhook' } & PrincipalWebhook | { kind: 'worker' } & PrincipalWorker;
+diff --git a/lib/packages/fabro-api-client/src/models/run-provenance.ts b/lib/packages/fabro-api-client/src/models/run-provenance.ts
+index 7276857f8..59fa7a063 100644
+--- a/lib/packages/fabro-api-client/src/models/run-provenance.ts
++++ b/lib/packages/fabro-api-client/src/models/run-provenance.ts
+@@ -26,5 +26,5 @@ import type { RunServerProvenance } from './run-server-provenance';
+ export interface RunProvenance {
+     'server'?: RunServerProvenance | null;
+     'client'?: RunClientProvenance | null;
+-    'subject'?: Principal | null;
++    'subject': Principal;
+ }
+diff --git a/lib/packages/fabro-api-client/src/models/run-spec.ts b/lib/packages/fabro-api-client/src/models/run-spec.ts
+index 2be7312b7..f86098a2d 100644
+--- a/lib/packages/fabro-api-client/src/models/run-spec.ts
++++ b/lib/packages/fabro-api-client/src/models/run-spec.ts
+@@ -37,7 +37,7 @@ export interface RunSpec {
+     'workflow_slug'?: string | null;
+     'source_directory'?: string | null;
+     'labels'?: { [key: string]: string; };
+-    'provenance'?: RunProvenance | null;
++    'provenance': RunProvenance;
+     'manifest_blob'?: string | null;
+     'definition_blob'?: string | null;
+     'git'?: GitContext | null;
+diff --git a/lib/packages/fabro-api-client/src/models/run.ts b/lib/packages/fabro-api-client/src/models/run.ts
+index 1ed6c6c26..a4ade38a3 100644
+--- a/lib/packages/fabro-api-client/src/models/run.ts
++++ b/lib/packages/fabro-api-client/src/models/run.ts
+@@ -83,7 +83,7 @@ export interface Run {
+     'workflow': WorkflowRef;
+     'automation': AutomationRef | null;
+     'repository': RepositoryRef | null;
+-    'created_by': Principal | null;
++    'created_by': Principal;
+     'origin': RunOrigin;
+     'labels': { [key: string]: string; };
+     'lifecycle': RunLifecycle;
+diff --git a/lib/packages/fabro-api-client/tests/principal-exhaustive.ts b/lib/packages/fabro-api-client/tests/principal-exhaustive.ts
+index 7b6bd4afd..568a21780 100644
+--- a/lib/packages/fabro-api-client/tests/principal-exhaustive.ts
++++ b/lib/packages/fabro-api-client/tests/principal-exhaustive.ts
+@@ -12,8 +12,6 @@ export function principalKind(principal: Principal): string {
+   switch (principal.kind) {
+     case "agent":
+       return "agent";
+-    case "anonymous":
+-      return "anonymous";
+     case "slack":
+       return "slack";
+     case "system":
