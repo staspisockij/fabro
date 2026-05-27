@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "Remaining effect wrappers are not all proven approved external integrations; at least the Ask Fabro layout context bridge, install session loader server fetch, and insights-editor useMountEffect cleanup-only usage need repair or stronger justification.",
+  "timestamp": "2026-05-27T04:25:55.242594Z"
+}
