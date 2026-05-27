@@ -496,14 +496,112 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KSNT7Q18FX9NYD0XQDC9J4Q2",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-27T22:52:56.405330Z",
+    "run_branch": "fabro/run/01KSNT7Q18FX9NYD0XQDC9J4Q2",
+    "base_sha": "a992a7d76b22f6206d5ea107feadeba852677da1"
   },
-  "status_updated_at": "2026-05-27T22:52:41.437261Z",
-  "last_event_at": "2026-05-27T22:52:55.995541Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-27T22:52:56.405369Z",
+  "last_event_at": "2026-05-27T22:52:58.465712Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 20,
+      "checkpoint": {
+        "timestamp": "2026-05-27T22:52:58.465607Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "failure_signature": "",
+          "internal.fidelity": "compact",
+          "internal.run_id": "01KSNT7Q18FX9NYD0XQDC9J4Q2",
+          "outcome": "succeeded",
+          "current_node": "start",
+          "failure_class": "",
+          "graph.goal": "# Issue #398: Build automation run materialization core\n\nSource: https://github.com/fabro-sh/fabro/issues/398\nState: OPEN\nAuthor: brynary\nCreated: 2026-05-25T15:06:26Z\nUpdated: 2026-05-27T21:42:25Z\nLabels: none\nAssignees: none\nComments: none\n\n## Body\n\n## Goal\n\nRefactor server run creation so automation-triggered runs can share the existing run creation pipeline, and add a production materializer that turns an automation target into a run manifest.\n\n## Scope\n\nExtract the common body of `handler/runs.rs::create_run` into a crate-private helper that accepts a request object shaped like:\n\n```rust\nstruct CreateRunFromManifestRequest {\n    manifest: fabro_api::types::RunManifest,\n    submitted_manifest_bytes: Vec<u8>,\n    explicit_run_id: Option<fabro_types::RunId>,\n    explicit_title_supplied: bool,\n    actor: fabro_types::Principal,\n    headers: axum::http::HeaderMap,\n    automation: Option<fabro_types::AutomationRef>,\n}\n```\n\nKeep existing `POST /runs` behavior unchanged by calling the helper with `automation: None`.\n\nAdd a crate-private materializer abstraction:\n\n```rust\npub(crate) struct AutomationRunMaterializeInput {\n    pub automation_id: fabro_automation::AutomationId,\n    pub target: fabro_automation::AutomationTarget,\n    pub run_id: fabro_types::RunId,\n    pub user_settings_path: std::path::PathBuf,\n    pub temp_root: std::path::PathBuf,\n}\n\npub(crate) struct AutomationRunMaterialized {\n    pub manifest: fabro_api::types::RunManifest,\n    pub submitted_manifest_bytes: Vec<u8>,\n}\n\n#[derive(thiserror::Error, Debug)]\npub(crate) enum AutomationRunMaterializeError {\n    #[error(\"invalid automation target: {0}\")]\n    InvalidTarget(String),\n    #[error(\"failed to clone automation repository: {0}\")]\n    CloneFailed(String),\n    #[error(\"failed to resolve automation workflow: {0}\")]\n    WorkflowNotFound(String),\n    #[error(\"failed to build run manifest: {0}\")]\n    Manifest(String),\n}\n\n#[async_trait::async_trait]\npub(crate) trait AutomationRunMaterializer: Send + Sync {\n    async fn materialize(\n        &self,\n        input: AutomationRunMaterializeInput,\n    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError>;\n}\n```\n\nProduction materializer behavior:\n\n- Validate target repository as GitHub `owner/repo`.\n- Construct uncredentialed metadata URLs only; never persist credentialed clone URLs.\n- Use server GitHub credentials and existing clone credential helpers when configured.\n- Create a per-run temp directory under `AutomationRunMaterializeInput.temp_root`.\n- Shallow clone `https://github.com/{owner}/{repo}.git`.\n- Check out the configured ref.\n- Resolve the workflow selector with `fabro_config::project::WorkflowLocation::resolve`.\n- Build a `RunManifest` with `fabro_manifest::build_run_manifest`.\n- Pass `user_settings_path: Some(state.active_config_path().to_path_buf())`.\n- Run git commands with `tokio::process::Command` argv values, not shell command strings.\n- Set `GIT_TERMINAL_PROMPT=0` and explicit command timeouts.\n\nTest support:\n\n- Add test-only injection for a fake `AutomationRunMaterializer` behind tests or the existing `test-support` feature.\n- The fake should let route tests assert the input and return a controlled manifest without live GitHub access.\n\n## Files\n\nCreate:\n\n- `lib/crates/fabro-server/src/automation_materializer.rs`\n\nModify:\n\n- `lib/crates/fabro-server/src/server.rs`\n- `lib/crates/fabro-server/src/server/handler/runs.rs`\n- `lib/crates/fabro-server/src/test_support.rs`\n- Relevant server tests around run creation and test support\n\nRead before implementation:\n\n- `docs/internal/error-handling-strategy.md`\n- `docs/internal/server-secrets-strategy.md`\n- `docs/internal/testing-strategy.md`\n\n## Acceptance Criteria\n\n- Existing `POST /runs` behavior and response shape are unchanged.\n- Shared run creation can attach optional automation metadata to the created run.\n- The production materializer builds a run manifest from a GitHub automation target.\n- Git operations use argv-based process execution, disable terminal prompts, and have explicit timeouts.\n- Credentialed URLs are never stored in run metadata or error text.\n- Tests can use a fake materializer without network or live GitHub access.\n\n## Verification\n\nAdd tests for:\n\n- Existing `POST /runs` regression behavior.\n- Helper-created runs with `automation: None` and with automation metadata.\n- Fake materializer injection.\n- Target URL construction.\n- Credential redaction.\n- Ref checkout command planning.\n- Workflow path resolution using temp directories.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server runs\ncargo nextest run -p fabro-server automation_materializer\n```\n",
+          "internal.node_visit_count": 1,
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "graph.rankdir": "LR",
+          "internal.retry_count.start": 0,
+          "internal.thread_id": null
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-27T22:53:01.065899Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.thread_id": "start",
+          "failure_class": "",
+          "internal.run_id": "01KSNT7Q18FX9NYD0XQDC9J4Q2",
+          "internal.retry_count.toolchain": 0,
+          "graph.rankdir": "LR",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.node_visit_count": 1,
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "current_node": "toolchain",
+          "internal.fidelity": "compact",
+          "internal.retry_count.start": 0,
+          "thread.start.current_node": "toolchain",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "graph.goal": "# Issue #398: Build automation run materialization core\n\nSource: https://github.com/fabro-sh/fabro/issues/398\nState: OPEN\nAuthor: brynary\nCreated: 2026-05-25T15:06:26Z\nUpdated: 2026-05-27T21:42:25Z\nLabels: none\nAssignees: none\nComments: none\n\n## Body\n\n## Goal\n\nRefactor server run creation so automation-triggered runs can share the existing run creation pipeline, and add a production materializer that turns an automation target into a run manifest.\n\n## Scope\n\nExtract the common body of `handler/runs.rs::create_run` into a crate-private helper that accepts a request object shaped like:\n\n```rust\nstruct CreateRunFromManifestRequest {\n    manifest: fabro_api::types::RunManifest,\n    submitted_manifest_bytes: Vec<u8>,\n    explicit_run_id: Option<fabro_types::RunId>,\n    explicit_title_supplied: bool,\n    actor: fabro_types::Principal,\n    headers: axum::http::HeaderMap,\n    automation: Option<fabro_types::AutomationRef>,\n}\n```\n\nKeep existing `POST /runs` behavior unchanged by calling the helper with `automation: None`.\n\nAdd a crate-private materializer abstraction:\n\n```rust\npub(crate) struct AutomationRunMaterializeInput {\n    pub automation_id: fabro_automation::AutomationId,\n    pub target: fabro_automation::AutomationTarget,\n    pub run_id: fabro_types::RunId,\n    pub user_settings_path: std::path::PathBuf,\n    pub temp_root: std::path::PathBuf,\n}\n\npub(crate) struct AutomationRunMaterialized {\n    pub manifest: fabro_api::types::RunManifest,\n    pub submitted_manifest_bytes: Vec<u8>,\n}\n\n#[derive(thiserror::Error, Debug)]\npub(crate) enum AutomationRunMaterializeError {\n    #[error(\"invalid automation target: {0}\")]\n    InvalidTarget(String),\n    #[error(\"failed to clone automation repository: {0}\")]\n    CloneFailed(String),\n    #[error(\"failed to resolve automation workflow: {0}\")]\n    WorkflowNotFound(String),\n    #[error(\"failed to build run manifest: {0}\")]\n    Manifest(String),\n}\n\n#[async_trait::async_trait]\npub(crate) trait AutomationRunMaterializer: Send + Sync {\n    async fn materialize(\n        &self,\n        input: AutomationRunMaterializeInput,\n    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError>;\n}\n```\n\nProduction materializer behavior:\n\n- Validate target repository as GitHub `owner/repo`.\n- Construct uncredentialed metadata URLs only; never persist credentialed clone URLs.\n- Use server GitHub credentials and existing clone credential helpers when configured.\n- Create a per-run temp directory under `AutomationRunMaterializeInput.temp_root`.\n- Shallow clone `https://github.com/{owner}/{repo}.git`.\n- Check out the configured ref.\n- Resolve the workflow selector with `fabro_config::project::WorkflowLocation::resolve`.\n- Build a `RunManifest` with `fabro_manifest::build_run_manifest`.\n- Pass `user_settings_path: Some(state.active_config_path().to_path_buf())`.\n- Run git commands with `tokio::process::Command` argv values, not shell command strings.\n- Set `GIT_TERMINAL_PROMPT=0` and explicit command timeouts.\n\nTest support:\n\n- Add test-only injection for a fake `AutomationRunMaterializer` behind tests or the existing `test-support` feature.\n- The fake should let route tests assert the input and return a controlled manifest without live GitHub access.\n\n## Files\n\nCreate:\n\n- `lib/crates/fabro-server/src/automation_materializer.rs`\n\nModify:\n\n- `lib/crates/fabro-server/src/server.rs`\n- `lib/crates/fabro-server/src/server/handler/runs.rs`\n- `lib/crates/fabro-server/src/test_support.rs`\n- Relevant server tests around run creation and test support\n\nRead before implementation:\n\n- `docs/internal/error-handling-strategy.md`\n- `docs/internal/server-secrets-strategy.md`\n- `docs/internal/testing-strategy.md`\n\n## Acceptance Criteria\n\n- Existing `POST /runs` behavior and response shape are unchanged.\n- Shared run creation can attach optional automation metadata to the created run.\n- The production materializer builds a run manifest from a GitHub automation target.\n- Git operations use argv-based process execution, disable terminal prompts, and have explicit timeouts.\n- Credentialed URLs are never stored in run metadata or error text.\n- Tests can use a fake materializer without network or live GitHub access.\n\n## Verification\n\nAdd tests for:\n\n- Existing `POST /runs` regression behavior.\n- Helper-created runs with `automation: None` and with automation metadata.\n- Fake materializer injection.\n- Target URL construction.\n- Credential redaction.\n- Ref checkout command planning.\n- Workflow path resolution using temp directories.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server runs\ncargo nextest run -p fabro-server automation_materializer\n```\n",
+          "outcome": "succeeded",
+          "failure_signature": ""
+        },
+        "node_outcomes": {
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 2593,
+              "active_time_ms": 2593
+            }
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "node_visits": {
+          "toolchain": 1,
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "kind": "ready",
@@ -529,5 +627,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 17,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-27T22:52:58.465496Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-27T22:52:58.465407Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "toolchain@1": {
+      "first_event_seq": 21,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-27T22:52:58.465687Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    }
+  }
 }
