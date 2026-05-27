@@ -1,4 +1,4 @@
-import { describe, expect, mock, test, beforeEach } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 
 const mutateMock = mock((..._args: unknown[]) => Promise.resolve(undefined));
 let lastMutationOptions: { onSuccess?: (result: unknown) => void } | null = null;
@@ -20,29 +20,16 @@ mock.module("swr/mutation", () => ({
   default: useSWRMutationMock,
 }));
 
-mock.module("./api-client", () => ({
-  apiData: mock(),
-  authApi: {},
-  humanInTheLoopApi: {},
-  runsApi: {},
-}));
-
-mock.module("./run-actions", () => ({
-  approveRun: mock(),
-  archiveRun: mock(),
-  cancelRun: mock(),
-  denyRun: mock(),
-  isLifecycleActionError: () => false,
-  retryRun: mock(),
-  unarchiveRun: mock(),
-}));
-
 const { useArchiveRun } = await import("./mutations");
 
 beforeEach(() => {
   mutateMock.mockClear();
   useSWRMutationMock.mockClear();
   lastMutationOptions = null;
+});
+
+afterAll(() => {
+  mock.restore();
 });
 
 describe("lifecycle mutations", () => {

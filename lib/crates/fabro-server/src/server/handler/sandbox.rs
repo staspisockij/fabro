@@ -1346,6 +1346,7 @@ mod retrieve_sandbox_tests {
                 "properties": {
                     "settings": WorkflowSettings::default(),
                     "graph": Graph::new("test"),
+                    "provenance": fabro_types::test_support::test_run_provenance(),
                     "run_dir": "/tmp/test",
                 },
             }),

@@ -10,6 +10,7 @@ use fabro_graphviz::graph::Graph as GvGraph;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_model::Catalog;
 use fabro_store::{ArtifactStore, Database, RunProjection};
+use fabro_types::{AuthMethod, IdpIdentity, Principal, RunProvenance};
 use object_store::local::LocalFileSystem;
 
 use crate::artifact_upload::ArtifactSink;
@@ -25,6 +26,18 @@ use crate::run_metadata::RunMetadataRuntime;
 use crate::run_options::RunOptions;
 use crate::sandbox_git_runtime::SandboxGitRuntime;
 use crate::services::{EngineServices, RunLocations, RunServices};
+
+fn test_run_provenance() -> RunProvenance {
+    RunProvenance {
+        server:  None,
+        client:  None,
+        subject: Principal::user(
+            IdpIdentity::new("fabro:test", "test-user").expect("test identity should be valid"),
+            "test".to_string(),
+            AuthMethod::DevToken,
+        ),
+    }
+}
 
 /// These helpers stop at EXECUTE, so they emit the terminal event here to
 /// keep test consumers seeing the same end-of-run signal as production
@@ -174,7 +187,7 @@ async fn initialized(
         source_directory: Some(sandbox.working_directory().to_string()),
         workflow_slug:    run_options.workflow_slug.clone(),
         db_prefix:        None,
-        provenance:       None,
+        provenance:       test_run_provenance(),
         manifest_blob:    None,
         git:              run_options.pre_run_git.clone(),
         fork_source_ref:  run_options.fork_source_ref.clone(),

@@ -902,11 +902,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         })
         .map(|(_, record)| record.question.clone());
     let models = run_models(state);
-    let created_by = state
-        .spec
-        .provenance
-        .as_ref()
-        .and_then(|provenance| provenance.subject.clone());
+    let created_by = state.spec.provenance.subject.clone();
     let source_directory = state.spec.source_directory.clone();
     let repo_origin_url = state.spec.git.as_ref().map(|git| git.origin_url.clone());
     let start_time = state.start.as_ref().map(|start| start.start_time);
@@ -1255,7 +1251,7 @@ mod tests {
         StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
         StageContextWindowProjection, StageContextWindowStaleness, StageContextWindowWarning,
         StageModelUsage, StageOutcome, StageState, SubAgentStatus, SuccessReason, WorkflowSettings,
-        first_event_seq, fixtures,
+        first_event_seq, fixtures, test_support,
     };
     use serde_json::json;
 
@@ -1336,7 +1332,7 @@ mod tests {
             workflow_slug:    None,
             source_directory: None,
             labels:           HashMap::new(),
-            provenance:       None,
+            provenance:       test_support::test_run_provenance(),
             manifest_blob:    None,
             definition_blob:  None,
             git:              None,
@@ -1372,7 +1368,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_run_created_projects_retried_from_none() {
+    fn run_created_without_retried_from_projects_none() {
         let event = test_raw_event(
             1,
             "run.created",
@@ -1380,6 +1376,7 @@ mod tests {
                 "settings": WorkflowSettings::default(),
                 "graph": Graph::new("test"),
                 "labels": {},
+                "provenance": test_support::test_run_provenance(),
                 "run_dir": "/tmp/run"
             }),
             None,
@@ -1577,7 +1574,9 @@ mod tests {
                 "repo_origin_url": null,
                 "base_branch": null,
                 "labels": {},
-                "provenance": null,
+                "provenance": serde_json::to_value(
+                    test_support::test_run_provenance(),
+                ).unwrap(),
                 "manifest_blob": null,
                 "definition_blob": null,
                 "git": null,
@@ -2605,7 +2604,7 @@ mod tests {
             source_directory: Some("/tmp/repo".to_string()),
             git:              None,
             labels:           HashMap::new(),
-            provenance:       None,
+            provenance:       test_support::test_run_provenance(),
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -2630,7 +2629,7 @@ mod tests {
             source_directory: Some("/tmp/repo".to_string()),
             git:              None,
             labels:           HashMap::new(),
-            provenance:       None,
+            provenance:       test_support::test_run_provenance(),
             manifest_blob:    None,
             definition_blob:  None,
             fork_source_ref:  None,
@@ -2669,6 +2668,7 @@ mod tests {
                     "attrs": { "goal": { "String": "Goal title" } }
                 },
                 "labels": {},
+                "provenance": test_support::test_run_provenance(),
                 "run_dir": "/tmp/run"
             }),
             None,
@@ -2696,6 +2696,7 @@ mod tests {
                     "attrs": { "goal": { "String": "## Plan: Legacy title\n\nDetails" } }
                 },
                 "labels": {},
+                "provenance": test_support::test_run_provenance(),
                 "run_dir": "/tmp/run"
             }),
             None,
@@ -2725,6 +2726,7 @@ mod tests {
                         "attrs": { "goal": { "String": "Goal title" } }
                     },
                     "labels": {},
+                    "provenance": test_support::test_run_provenance(),
                     "run_dir": "/tmp/run"
                 }),
                 None,
@@ -2767,6 +2769,7 @@ mod tests {
                             "attrs": {}
                         },
                         "labels": {},
+                        "provenance": test_support::test_run_provenance(),
                         "run_dir": "/tmp/run",
                         "source_directory": "/tmp/run",
                         "manifest_blob": manifest_blob

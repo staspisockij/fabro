@@ -19,6 +19,7 @@ fn run_event_round_trips_run_created() {
         "properties": {
             "settings": WorkflowSettings::default(),
             "graph": Graph::new("test"),
+            "provenance": fabro_types::test_support::test_run_provenance(),
             "run_dir": "/tmp/fabro/run-1",
             "source_directory": "/tmp/fabro/run-1"
         }
@@ -37,6 +38,7 @@ fn run_event_round_trips_run_created_with_web_url() {
         "properties": {
             "settings": WorkflowSettings::default(),
             "graph": Graph::new("test"),
+            "provenance": fabro_types::test_support::test_run_provenance(),
             "run_dir": "/tmp/fabro/run-1",
             "source_directory": "/tmp/fabro/run-1",
             "web_url": format!("http://localhost:3000/runs/{}", fixtures::RUN_1)

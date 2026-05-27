@@ -180,6 +180,7 @@ pub(crate) fn remote_run_summary_json(
         "origin": {
             "kind": "api"
         },
+        "created_by": fabro_types::test_support::test_principal(),
         "labels": {},
         "lifecycle": {
             "status": status,

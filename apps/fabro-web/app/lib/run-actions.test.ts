@@ -3,6 +3,7 @@ import type { AxiosAdapter } from "axios";
 import type {
   BatchDeleteRunsResponse,
   BatchRunLifecycleResponse,
+  Principal,
   Run,
   RunStatus,
 } from "@qltysh/fabro-api-client";
@@ -39,6 +40,15 @@ type CapturedRequest = {
 
 const originalAdapter = generatedAxios.defaults.adapter;
 
+function testPrincipal(): Principal {
+  return {
+    kind:        "user",
+    identity:    { issuer: "fabro:test", subject: "test-user" },
+    login:       "test",
+    auth_method: "dev_token",
+  };
+}
+
 function makeRun(status: RunStatus, archived = false): Run {
   return {
     id:               "run-1",
@@ -47,7 +57,7 @@ function makeRun(status: RunStatus, archived = false): Run {
     workflow:         { slug: "fix_build", name: "Fix Build", graph_name: null, node_count: 0, edge_count: 0 },
     automation:       null,
     repository:       null,
-    created_by:       null,
+    created_by:       testPrincipal(),
     origin:           { kind: "api" },
     labels:           {},
     lifecycle:        {

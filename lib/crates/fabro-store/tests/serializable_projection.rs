@@ -4,6 +4,7 @@ use chrono::{TimeZone, Utc};
 use fabro_store::{RunProjection, SerializableProjection, StageId};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
+use fabro_types::test_support::test_run_provenance;
 use fabro_types::{
     BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
     QuestionType, RunDiff, RunSandbox, RunSandboxRuntime, RunStatus, SandboxProviderKind,
@@ -21,7 +22,7 @@ fn sample_run_spec() -> RunSpec {
         workflow_slug:    Some("demo".to_string()),
         source_directory: Some("/tmp/project".to_string()),
         labels:           HashMap::from([("team".to_string(), "platform".to_string())]),
-        provenance:       None,
+        provenance:       test_run_provenance(),
         manifest_blob:    None,
         definition_blob:  None,
         git:              Some(fabro_types::GitContext {

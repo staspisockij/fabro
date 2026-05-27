@@ -48,6 +48,9 @@ pub mod timing;
 pub mod todo;
 pub mod transcript;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+
 pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
 pub use billing::{

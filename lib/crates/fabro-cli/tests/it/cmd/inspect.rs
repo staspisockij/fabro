@@ -221,7 +221,26 @@ fn inspect_resolves_selector_via_server_endpoint() {
             "attrs": {}
           },
           "workflow_slug": "remote-workflow",
-          "source_directory": "/srv/repo"
+          "source_directory": "/srv/repo",
+          "provenance": {
+            "server": {
+              "version": "test"
+            },
+            "client": {
+              "user_agent": "fabro-test/0.0.0",
+              "name": "fabro-test",
+              "version": "0.0.0"
+            },
+            "subject": {
+              "kind": "user",
+              "identity": {
+                "issuer": "fabro:test",
+                "subject": "test-user"
+              },
+              "login": "test",
+              "auth_method": "dev_token"
+            }
+          }
         },
         "start_record": null,
         "conclusion": null,

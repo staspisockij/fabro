@@ -638,7 +638,7 @@ mod tests {
                     push_outcome: PreRunPushOutcome::NotAttempted,
                 }),
                 labels:           HashMap::new(),
-                provenance:       None,
+                provenance:       fabro_types::test_support::test_run_provenance(),
                 manifest_blob:    None,
                 definition_blob:  None,
                 fork_source_ref:  None,

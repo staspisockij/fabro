@@ -64,6 +64,7 @@ fn run_summary_json_matches_openapi_shape() {
     let run_id = RunId::with_timestamp(created_at, 7);
     let last_event_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 42).unwrap();
     let archived_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 1, 0).unwrap();
+    let created_by = fabro_types::test_support::test_principal();
     let summary = Run {
         id:               run_id,
         parent_id:        None,
@@ -83,7 +84,7 @@ fn run_summary_json_matches_openapi_shape() {
             origin_url: None,
             provider:   RepositoryProvider::Unknown,
         }),
-        created_by:       None,
+        created_by:       created_by.clone(),
         origin:           RunOrigin::default(),
         labels:           HashMap::from([("team".to_string(), "core".to_string())]),
         lifecycle:        RunLifecycle {
@@ -152,7 +153,7 @@ fn run_summary_json_matches_openapi_shape() {
                 "origin_url": null,
                 "provider": "unknown"
             },
-            "created_by": null,
+            "created_by": serde_json::to_value(&created_by).unwrap(),
             "origin": {
                 "kind": "api"
             },
@@ -220,6 +221,7 @@ fn run_summary_json_matches_openapi_shape() {
 fn run_summary_deserializes_when_optional_fields_are_absent() {
     let created_at = Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 0).unwrap();
     let run_id = RunId::with_timestamp(created_at, 7);
+    let created_by = fabro_types::test_support::test_principal();
     let summary: Run = serde_json::from_value(json!({
         "id": run_id.to_string(),
         "goal": "ship it",
@@ -232,6 +234,7 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
         "origin": {
             "kind": "api"
         },
+        "created_by": created_by,
         "labels": {},
         "lifecycle": {
             "status": {
@@ -266,6 +269,10 @@ fn run_summary_deserializes_when_optional_fields_are_absent() {
     assert_eq!(summary.workflow.edge_count, 0);
     assert_eq!(summary.goal, "ship it");
     assert_eq!(summary.title, "ship it");
+    assert_eq!(
+        summary.created_by,
+        fabro_types::test_support::test_principal()
+    );
     assert_eq!(summary.labels, HashMap::new());
     assert_eq!(summary.source_directory, None);
     assert_eq!(

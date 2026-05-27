@@ -53,11 +53,20 @@ function cellAfterLabel(
 function makeRun(overrides: Record<string, any> = {}) {
   return {
     id:         "run_1",
-    created_by: null,
+    created_by: testPrincipal(),
     diff:       null,
     billing:    null,
     ...overrides,
   } as any;
+}
+
+function testPrincipal() {
+  return {
+    kind:        "user",
+    identity:    { issuer: "fabro:test", subject: "test-user" },
+    login:       "test",
+    auth_method: "dev_token",
+  };
 }
 
 const EMPTY_VALUE = "Not available";
@@ -73,7 +82,6 @@ describe("RunSummaryPanelView", () => {
 
   test("shows unavailable copy for missing run fields after load", () => {
     const tree = render({ run: makeRun() });
-    expect(instanceText(cellAfterLabel(tree, "Created by"))).toBe(EMPTY_VALUE);
     expect(instanceText(cellAfterLabel(tree, "Changes"))).toBe(EMPTY_VALUE);
     expect(instanceText(cellAfterLabel(tree, "Cost"))).toBe(EMPTY_VALUE);
   });

@@ -1701,7 +1701,7 @@ mod tests {
             workflow_slug: None,
             source_directory: None,
             labels: HashMap::default(),
-            provenance: None,
+            provenance: fabro_types::test_support::test_run_provenance(),
             manifest_blob: None,
             definition_blob: None,
             git: None,

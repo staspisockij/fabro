@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import TestRenderer, { act } from "react-test-renderer";
 import { createMemoryRouter, RouterProvider } from "react-router";
-import type { PaginatedRunList, Run } from "@qltysh/fabro-api-client";
+import type { PaginatedRunList, Principal, Run } from "@qltysh/fabro-api-client";
 
 import { ToastProvider } from "../components/toast";
 import { setupReactTestEnv } from "../lib/test-utils";
@@ -26,6 +26,15 @@ let previousElement: unknown;
 let hadElement = false;
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
+function testPrincipal(): Principal {
+  return {
+    kind:        "user",
+    identity:    { issuer: "fabro:test", subject: "test-user" },
+    login:       "test",
+    auth_method: "dev_token",
+  };
+}
+
 function run(id: string, repo = "qlty/fabro", workflow = "release"): Run {
   return {
     id,
@@ -34,7 +43,7 @@ function run(id: string, repo = "qlty/fabro", workflow = "release"): Run {
     workflow:         { slug: workflow, name: workflow, graph_name: null, node_count: 0, edge_count: 0 },
     automation:       null,
     repository:       { name: repo, origin_url: null, provider: "github" },
-    created_by:       null,
+    created_by:       testPrincipal(),
     origin:           { kind: "api" },
     labels:           {},
     lifecycle:        {

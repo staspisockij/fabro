@@ -381,7 +381,7 @@ mod tests {
             source_directory: Some("/client/source".to_string()),
             workflow_slug:    Some("fork-source".to_string()),
             db_prefix:        None,
-            provenance:       None,
+            provenance:       fabro_types::test_support::test_run_provenance(),
             manifest_blob:    None,
             git:              Some(fabro_types::GitContext {
                 origin_url:   "https://github.com/example/repo.git".to_string(),
