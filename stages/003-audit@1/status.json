@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "apps/fabro-web/app/install-app.tsx still contains direct useEffect calls in route/component-level code, which violates the policy and was explicitly listed as a hotspot needing migration.",
+  "timestamp": "2026-05-27T04:18:58.577217Z"
+}
