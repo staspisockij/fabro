@@ -1,0 +1,536 @@
+{
+  "title": "Server-Owned Environments Implementation Plan",
+  "spec": {
+    "run_id": "01KSPDE8E9ATTVY1VBCS3YRBHT",
+    "settings": {
+      "project": {
+        "name": null,
+        "description": null,
+        "metadata": {}
+      },
+      "workflow": {
+        "name": null,
+        "description": null,
+        "graph": "workflow.fabro",
+        "metadata": {}
+      },
+      "run": {
+        "goal": {
+          "type": "inline",
+          "value": "# Server-Owned Environments Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Move environment definitions from layered run settings into server-owned TOML resources with CRUD API management, matching the Automation store pattern.\n\n**Architecture:** Add a concrete `EnvironmentStore` that loads one environment TOML file per id from a sibling `environments/` directory next to the active server settings file. Runs continue to select an environment by id through `[run.environment]` or `--environment`, but server-side run creation resolves the id from `EnvironmentStore`; project/workflow/user config can no longer define environment catalogs or environment field overrides. The web UI is intentionally deferred.\n\n**Tech Stack:** Rust, Axum, serde/TOML, `toml_edit`, Tokio file I/O, OpenAPI/progenitor, generated TypeScript API client, cargo-nextest.\n\n---\n\n## File Structure\n\n- Create `lib/crates/fabro-environment/`: environment ids, revisions, API/domain DTOs, TOML persistence, canonicalization, validation, and `EnvironmentStore`.\n- Modify workspace manifests: root `Cargo.toml`, `lib/crates/fabro-server/Cargo.toml`, `lib/crates/fabro-api/build.rs`, and generated API/client package files.\n- Modify `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-server/src/server/handler/mod.rs`, and a new `lib/crates/fabro-server/src/server/handler/environments.rs` to wire the store and API.\n- Modify `lib/crates/fabro-config/src/builders.rs`, `lib/crates/fabro-config/src/load.rs`, `lib/crates/fabro-config/src/migrations.rs`, and config tests to treat `[environments]` as migration-only, not runtime configuration.\n- Modify `lib/crates/fabro-manifest/src/lib.rs`, `lib/crates/fabro-server/src/run_manifest.rs`, and CLI run/preflight/graph/validate paths so environment ids are resolved only by the server.\n- Modify install/repo-init/docs/OpenAPI artifacts so new examples use server environment files and run configs only select ids.\n\n## Decisions\n\n- Environment definitions are server-owned operator policy. Project and workflow files may request an id but cannot define or override environment fields.\n- `default`, `local`, `docker`, and `daytona` are seeded if missing. Existing files are never overwritten.\n- `default` is protected from deletion. Other seeded files can be edited or deleted.\n- Environment ids use `[a-z0-9][a-z0-9-]{0,62}`.\n- Environment revisions are SHA-256 hashes of the persisted TOML bytes, returned in JSON as `revision` and in `ETag`.\n- `PUT` and `DELETE` require `If-Match`, following `AutomationStore`.\n- `image.dockerfile = { path = \"Dockerfile\" }` is accepted in persisted files and API input, resolved relative to the environment file or request context, and converted to inline content for runtime use. API writes canonical inline TOML.\n- `--preserve-sandbox` remains a CLI/server argument override. TOML `[run.environment.lifecycle]` is rejected.\n- `--docker-image` is rejected with a targeted message directing operators to create or update a server environment.\n- Existing dense `WorkflowSettings.environments` stays in the API for compatibility and is populated from the server environment catalog during run resolution.\n\n## Task 1: Add `fabro-environment` Store Crate\n\n**Files:**\n- Create: `lib/crates/fabro-environment/Cargo.toml`\n- Create: `lib/crates/fabro-environment/src/lib.rs`\n- Create: `lib/crates/fabro-environment/src/id.rs`\n- Create: `lib/crates/fabro-environment/src/model.rs`\n- Create: `lib/crates/fabro-environment/src/store.rs`\n- Create: `lib/crates/fabro-environment/src/error.rs`\n- Modify: root `Cargo.toml`\n\n- [ ] Create a workspace crate named `fabro-environment`, modeled after `fabro-automation`.\n- [ ] Define `EnvironmentId`, `EnvironmentRevision`, and parse/validation errors.\n- [ ] Define public DTOs:\n  - `Environment`: `id`, `revision`, `provider`, `image`, `resources`, `network`, `lifecycle`, `labels`, `volumes`, `env`.\n  - `EnvironmentDraft`: `id` plus environment fields.\n  - `EnvironmentReplace`: environment fields without id.\n- [ ] Use the existing environment field types from `fabro_types::settings::run` for dense API fields.\n- [ ] Use existing sparse `fabro_config::EnvironmentLayer` only for TOML input/output and conversion; do not create a second environment field vocabulary.\n- [ ] Add conversion helpers that resolve an `EnvironmentLayer` into dense `EnvironmentSettings` using the same provider/network/image validation rules as `fabro-config`.\n- [ ] Implement canonical TOML serialization for persisted files. Omit `id` and `revision`; the filename is the id and the file bytes determine revision.\n- [ ] Implement `EnvironmentStore` with `load_or_seed(dir)`, `list`, `get`, `create`, `replace`, `delete`, and `catalog_layer`.\n- [ ] Seed missing `default`, `local`, `docker`, and `daytona` files from the current built-in defaults. Do not overwrite existing files.\n- [ ] Protect `default` from deletion with a typed store error.\n- [ ] Resolve Dockerfile path references relative to the environment file directory during load and relative to the active settings directory during API create/replace. Store runtime values with inline Dockerfile content.\n- [ ] Add unit tests for loading an absent directory, seeding built-ins, sorted listing, invalid ids, invalid provider, invalid network mode, missing Dockerfile path, create conflict, replace stale revision, default delete rejection, delete success, and canonical revision changes.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-environment\n```\n\nExpected: all `fabro-environment` tests pass.\n\n## Task 2: Make Config Environments Migration-Only\n\n**Files:**\n- Modify: `lib/crates/fabro-config/src/parse.rs`\n- Modify: `lib/crates/fabro-config/src/builders.rs`\n- Modify: `lib/crates/fabro-config/src/load.rs`\n- Modify: `lib/crates/fabro-config/src/migrations.rs`\n- Create: `lib/crates/fabro-config/migrations/2026052801_settings_environments_to_server_files.rs`\n- Modify: `lib/crates/fabro-config/src/defaults.toml`\n- Modify: `lib/crates/fabro-config/src/tests/resolve_run.rs`\n- Modify: `lib/crates/fabro-config/src/tests/resolve_root.rs`\n\n- [ ] Keep `SettingsLayer.environments` in this pass so old files can parse and migrate, but remove environment catalog entries from `defaults.toml`.\n- [ ] Add source-aware validation that rejects `SettingsLayer.environments` for project, workflow, and direct run config layers with this message shape: `[environments.<id>] is now server-managed; move this definition to the server environments directory`.\n- [ ] Add validation that rejects TOML-provided `run.environment.image`, `resources`, `network`, `lifecycle`, `labels`, `volumes`, and `env`. Keep `run.environment.id`.\n- [ ] Ensure CLI/server argument layers can still set `run.environment.lifecycle.preserve` for `--preserve-sandbox`; the rejection applies only to parsed TOML sources.\n- [ ] Add a settings-file migration that extracts top-level `[environments.<id>]` entries from the active `settings.toml` into sibling `environments/<id>.toml` files.\n- [ ] Migration must write a backup before editing `settings.toml`, preserve `[run.environment] id`, remove the top-level `[environments]` table, and fail without changing files if any target environment file already exists.\n- [ ] Chain the existing legacy `[run.sandbox]` migration before the new extraction migration so legacy sandbox settings become a server `default` environment file.\n- [ ] Update run settings tests to assert that `RunSettingsBuilder` no longer resolves a selected environment without an injected server catalog.\n- [ ] Add tests proving project/workflow `[environments]` definitions produce targeted errors rather than silent ignores.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-config\n```\n\nExpected: config tests pass, including migration coverage.\n\n## Task 3: Wire EnvironmentStore Into Server Run Resolution\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server.rs`\n- Modify: `lib/crates/fabro-server/src/serve.rs`\n- Modify: `lib/crates/fabro-server/src/run_manifest.rs`\n- Modify: `lib/crates/fabro-server/src/server/handler/runs.rs`\n- Modify: `lib/crates/fabro-server/src/manifest_validation.rs`\n- Modify: `lib/crates/fabro-server/src/test_support.rs`\n\n- [ ] Add `environment_store: Arc<EnvironmentStore>` to `AppState`, loaded from `active_config_path.parent().join(\"environments\")`.\n- [ ] Replace `manifest_environment_defaults` from `ServerRuntimeSettings` with `environment_store.catalog_layer()` when preparing manifests on the server.\n- [ ] Keep the dense run snapshot unchanged: `prepared.settings.run.environment` contains the resolved environment fields, and `prepared.settings.environments` contains the server catalog used for resolution.\n- [ ] Convert unknown environment ids into `400 Bad Request` during run creation/preflight/graph preparation.\n- [ ] Keep sandbox provider policy checks after environment resolution, so disabled providers still reject runs.\n- [ ] Apply `--preserve-sandbox` after selected environment resolution.\n- [ ] Remove server reliance on `[environments]` in `settings.toml`.\n- [ ] Update server test support so tests can inject environment files or use seeded defaults.\n- [ ] Add server tests for default environment run creation, custom server environment selection, unknown environment id, disabled provider policy, `--preserve-sandbox`, and rejected TOML environment field overrides.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server\n```\n\nExpected: server API and run-manifest tests pass.\n\n## Task 4: Add Environment CRUD API\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Modify: `lib/crates/fabro-api/build.rs`\n- Create: `lib/crates/fabro-server/src/server/handler/environments.rs`\n- Modify: `lib/crates/fabro-server/src/server/handler/mod.rs`\n- Add tests: `lib/crates/fabro-server/tests/it/api/environments.rs`\n- Update generated Rust and TypeScript API artifacts after spec changes.\n\n- [ ] Add OpenAPI tag `Environments`.\n- [ ] Add schemas for `Environment`, `CreateEnvironmentRequest`, `ReplaceEnvironmentRequest`, and `EnvironmentListResponse`.\n- [ ] Reuse existing environment schemas for provider/image/resources/network/lifecycle/volumes/env.\n- [ ] Add endpoints:\n  - `GET /api/v1/environments`\n  - `POST /api/v1/environments`\n  - `GET /api/v1/environments/{id}`\n  - `PUT /api/v1/environments/{id}`\n  - `DELETE /api/v1/environments/{id}`\n- [ ] Return `ETag` on retrieve and replace.\n- [ ] Require `If-Match` on replace and delete.\n- [ ] Map store errors to API responses:\n  - invalid id: `400`\n  - duplicate create: `409`\n  - stale revision: `409`\n  - validation error: `422`\n  - missing resource: `404`\n  - protected default delete: `409`\n  - persistence failure: `500`\n- [ ] Add route tests for empty-seeded list, create, retrieve with ETag, replace, stale replace, missing `If-Match`, delete, protected default delete, invalid provider, invalid CIDR, and missing Dockerfile path.\n- [ ] Regenerate `fabro-api` and TypeScript client artifacts.\n\nRun:\n\n```bash\ncargo build -p fabro-api\ncd lib/packages/fabro-api-client && bun run generate\ncargo nextest run -p fabro-server --test it -- api::environments\n```\n\nExpected: generated artifacts are updated and environment API tests pass.\n\n## Task 5: Adjust CLI And Manifest Behavior\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/commands/run/overrides.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/preflight.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/graph.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/validate.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/repo/init.rs`\n- Modify: `lib/crates/fabro-manifest/src/lib.rs`\n- Modify CLI integration tests under `lib/crates/fabro-cli/tests/it/`\n\n- [ ] Reject `--docker-image` in run, create, preflight, graph, and validate commands with this message shape: `--docker-image is no longer supported; create or update a server environment and select it with --environment`.\n- [ ] Keep `--environment` as an id-only selector in manifest args.\n- [ ] Stop collecting Dockerfile path references from `[environments.<id>]` in project/workflow config because those definitions are invalid.\n- [ ] Keep collecting Dockerfile references for any remaining CLI-created run environment override only when it comes from allowed argument paths; with `--docker-image` rejected, no normal user path should add one.\n- [ ] Update local preflight/graph/validate flows so they either call server preflight for environment resolution or print a clear message that server-owned environment resolution requires a running server.\n- [ ] Update `fabro repo init` to write only `[run.environment] id = \"local\"` and no `[environments.local]` block.\n- [ ] Update CLI tests for manifest args, repo init output, rejected `--docker-image`, and server-owned environment selection.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli\n```\n\nExpected: CLI tests pass and no generated workflow config contains `[environments.*]`.\n\n## Task 6: Update Install, Docs, And Generated References\n\n**Files:**\n- Modify install persistence code in `lib/crates/fabro-cli/src/commands/install.rs` and server install handlers/tests.\n- Modify docs: `docs/public/execution/environments.mdx`, `docs/public/execution/run-configuration.mdx`, `docs/public/reference/user-configuration.mdx`, `docs/public/administration/server-configuration.mdx`, `docs/public/administration/sandboxing.mdx`, `docs/public/integrations/daytona.mdx`, and examples that currently define `[environments.<id>]`.\n- Modify generated settings reference if applicable.\n\n- [ ] Update install flows to write server environment files instead of `[environments.default]` into `settings.toml`.\n- [ ] Keep install-written `[run.environment] id = \"default\"` when a default run environment selection is still needed.\n- [ ] Update tests that assert `settings.toml` contains `[environments.default]` to assert the sibling environment file exists and settings no longer contains `[environments]`.\n- [ ] Rewrite public docs so environment definitions are server-owned TOML files and run configs only select ids.\n- [ ] Add a compatibility note explaining that project/workflow `[environments]` definitions now fail and must be moved to the server.\n- [ ] Keep `Settings > Environments` UI documentation out of this pass.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server --test it -- api::install\ncargo nextest run -p fabro-cli --test it\n```\n\nExpected: install tests pass and docs no longer present project/workflow environment definitions as valid.\n\n## Task 7: Workspace Verification\n\n**Files:**\n- No new files unless test snapshots require reviewed updates.\n\n- [ ] Run Rust formatting check:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\n- [ ] Run clippy:\n\n```bash\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\n- [ ] Run workspace tests:\n\n```bash\ncargo nextest run --workspace\n```\n\n- [ ] Run TypeScript checks if API client changes affect the web package:\n\n```bash\ncd apps/fabro-web && bun run typecheck\ncd apps/fabro-web && bun test\n```\n\n- [ ] Inspect generated files and snapshots before accepting any snapshot changes.\n\n## Acceptance Criteria\n\n- Server startup creates or loads `environments/default.toml`, `local.toml`, `docker.toml`, and `daytona.toml`.\n- `GET /api/v1/environments` returns seeded environments with revisions.\n- API-created environments persist as TOML files and survive server restart.\n- Runs using `[run.environment] id = \"cloud\"` resolve from server files only.\n- Project/workflow/user `[environments.<id>]` definitions no longer affect runs.\n- Existing runs keep their dense environment snapshot after environment files change.\n- `--environment` still works.\n- `--preserve-sandbox` still works.\n- `--docker-image` no longer works and produces the targeted replacement guidance.\n- Web UI changes are not included.\n"
+        },
+        "working_dir": null,
+        "metadata": {},
+        "inputs": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "claude-sonnet-4-6",
+          "fallbacks": [],
+          "controls": {
+            "reasoning_effort": null,
+            "speed": null
+          }
+        },
+        "git": {
+          "author": null
+        },
+        "prepare": {
+          "commands": [],
+          "timeout_ms": 300000
+        },
+        "execution": {
+          "mode": "normal",
+          "approval": "prompt"
+        },
+        "checkpoint": {
+          "exclude_globs": [],
+          "skip_git_hooks": false
+        },
+        "clone": {
+          "enabled": true
+        },
+        "run_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "meta_branch": {
+          "enabled": true,
+          "push": true
+        },
+        "environment": {
+          "id": "fabro-dev",
+          "provider": "daytona",
+          "image": {
+            "docker": null,
+            "dockerfile": {
+              "type": "inline",
+              "value": "FROM ubuntu:24.04\n\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        curl git ripgrep ca-certificates build-essential pkg-config libssl-dev unzip python3 \\\n        xvfb xfce4 xfce4-terminal x11vnc novnc dbus-x11 \\\n        libx11-6 libxrandr2 libxext6 libxrender1 libxfixes3 libxss1 libxtst6 libxi6 \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install real Chromium (not the snap stub) via xtradeb PPA\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n        software-properties-common curl gnupg \\\n    && add-apt-repository -y ppa:xtradeb/apps \\\n    && apt-get update \\\n    && apt-get install -y --no-install-recommends chromium \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Wrapper: Chromium needs --no-sandbox when running as root in a container,\n# and --disable-dev-shm-usage avoids crashes from small /dev/shm\nRUN printf '#!/bin/bash\\nexec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage \"$@\"\\n' \\\n        > /usr/local/bin/chromium-wrapper \\\n    && chmod +x /usr/local/bin/chromium-wrapper\n\n# Make the wrapper the default in the system .desktop file and via alternatives\nRUN sed -i 's|^Exec=.*|Exec=/usr/local/bin/chromium-wrapper %U|' \\\n        /usr/share/applications/chromium.desktop \\\n    && update-alternatives --install /usr/bin/x-www-browser x-www-browser \\\n        /usr/local/bin/chromium-wrapper 100\n\n# Tell XFCE's exo-open that Chromium is the WebBrowser helper (system-wide)\nRUN mkdir -p /etc/xdg/xfce4 /usr/share/xfce4/helpers \\\n    && printf 'WebBrowser=custom-WebBrowser\\n' > /etc/xdg/xfce4/helpers.rc \\\n    && printf '[Desktop Entry]\\n\\\nVersion=1.0\\n\\\nType=X-XFCE-Helper\\n\\\nName=Chromium\\n\\\nIcon=chromium\\n\\\nX-XFCE-Category=WebBrowser\\n\\\nX-XFCE-CommandsWithParameter=/usr/local/bin/chromium-wrapper \"%%s\"\\n\\\nX-XFCE-Commands=/usr/local/bin/chromium-wrapper\\n' \\\n        > /usr/share/xfce4/helpers/custom-WebBrowser.desktop\n\n# GitHub CLI\nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\\n        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \\\n    && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" \\\n        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\\n    && apt-get update && apt-get install -y --no-install-recommends gh \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Rust\nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\nENV PATH=\"/root/.cargo/bin:${PATH}\"\nRUN rustup toolchain install nightly-2026-04-14 --profile minimal --component clippy,rustfmt\nRUN cargo install cargo-nextest --locked\nENV CARGO_INCREMENTAL=0\n\n# Bun\nRUN curl -fsSL https://bun.sh/install | bash\nENV PATH=\"/root/.bun/bin:${PATH}\"\n\nWORKDIR /root\n"
+            }
+          },
+          "resources": {
+            "cpu": 8,
+            "memory": "16GB",
+            "disk": "20GB"
+          },
+          "network": {
+            "mode": "allow_all",
+            "allow": []
+          },
+          "lifecycle": {
+            "preserve": false,
+            "stop_on_terminal": true,
+            "auto_stop": "30m"
+          },
+          "labels": {
+            "repo": "fabro-sh/fabro"
+          },
+          "volumes": [],
+          "env": {}
+        },
+        "notifications": {
+          "feed": {
+            "enabled": true,
+            "provider": "slack",
+            "events": [
+              "run.started",
+              "run.completed",
+              "run.failed"
+            ],
+            "slack": {
+              "channel": "#feed-fabro"
+            }
+          }
+        },
+        "interviews": {
+          "provider": null,
+          "slack": null
+        },
+        "agent": {
+          "fabro_tools": false,
+          "permissions": null,
+          "mcps": {}
+        },
+        "hooks": [],
+        "scm": {
+          "provider": null,
+          "owner": null,
+          "repository": null,
+          "github": null
+        },
+        "pull_request": {
+          "enabled": true,
+          "draft": false,
+          "auto_merge": false,
+          "merge_strategy": "squash"
+        },
+        "artifacts": {
+          "include": []
+        },
+        "integrations": {
+          "github": {
+            "permissions": {}
+          }
+        }
+      }
+    },
+    "graph": {
+      "name": "ImplementPlan",
+      "nodes": {
+        "fix_lints": {
+          "id": "fix_lints",
+          "attrs": {
+            "prompt": {
+              "String": "The preflight lint step failed. Read the build output from context and fix all clippy lint warnings."
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "label": {
+              "String": "Fix Lints"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "toolchain": {
+          "id": "toolchain",
+          "attrs": {
+            "max_retries": {
+              "Integer": 0
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Toolchain"
+            },
+            "script": {
+              "String": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1"
+            }
+          }
+        },
+        "preflight_compile": {
+          "id": "preflight_compile",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Preflight Compile"
+            },
+            "max_retries": {
+              "Integer": 0
+            },
+            "script": {
+              "String": "cargo check -q --workspace 2>&1"
+            }
+          }
+        },
+        "exit": {
+          "id": "exit",
+          "attrs": {
+            "shape": {
+              "String": "Msquare"
+            },
+            "label": {
+              "String": "Exit"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "simplify_opus": {
+          "id": "simplify_opus",
+          "attrs": {
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "label": {
+              "String": "Simplify (Opus)"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "provider": {
+              "String": "anthropic"
+            }
+          }
+        },
+        "implement": {
+          "id": "implement",
+          "attrs": {
+            "prompt": {
+              "String": "Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD."
+            },
+            "reasoning_effort": {
+              "String": "xhigh"
+            },
+            "label": {
+              "String": "Implement"
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            }
+          }
+        },
+        "fixup": {
+          "id": "fixup",
+          "attrs": {
+            "label": {
+              "String": "Fixup"
+            },
+            "prompt": {
+              "String": "The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures."
+            },
+            "max_visits": {
+              "Integer": 3
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            }
+          }
+        },
+        "verify": {
+          "id": "verify",
+          "attrs": {
+            "script": {
+              "String": "git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "goal_gate": {
+              "Boolean": true
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "label": {
+              "String": "Verify"
+            },
+            "retry_target": {
+              "String": "fixup"
+            },
+            "shape": {
+              "String": "parallelogram"
+            }
+          }
+        },
+        "preflight_lint": {
+          "id": "preflight_lint",
+          "attrs": {
+            "shape": {
+              "String": "parallelogram"
+            },
+            "label": {
+              "String": "Preflight Lint"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "script": {
+              "String": "cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1"
+            },
+            "provider": {
+              "String": "anthropic"
+            },
+            "max_retries": {
+              "Integer": 0
+            }
+          }
+        },
+        "simplify_gpt": {
+          "id": "simplify_gpt",
+          "attrs": {
+            "label": {
+              "String": "Simplify (GPT-55)"
+            },
+            "prompt": {
+              "String": "# Simplify: Code Review and Cleanup\n\nReview changes vs. origin for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun git diff (or git diff HEAD if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Review\n\nFor each change:\n\n1. Search for existing utilities and helpers that could replace newly written code. Use Grep to find similar patterns elsewhere in the codebase — common locations are utility directories, shared modules, and files adjacent to the changed ones.\n2. Flag any new function that duplicates existing functionality. Suggest the existing function to use instead.\n3. Flag any inline logic that could use an existing utility — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.\n\nNote: This is a greenfield app, so focus on maximizing simplicity and don't worry about changing things to achieve it.\n\n### Agent 2: Code Quality Review\n\nReview the same changes for hacky patterns:\n\n1. Redundant state: state that duplicates existing state, cached values that could be derived, observers/effects that could be direct calls\n2. Parameter sprawl: adding new parameters to a function instead of generalizing or restructuring existing ones\n3. Copy-paste with slight variation: near-duplicate code blocks that should be unified with a shared abstraction\n4. Leaky abstractions: exposing internal details that should be encapsulated, or breaking existing abstraction boundaries\n5. Stringly-typed code: using raw strings where constants, enums (string unions), or branded types already exist in the codebase\n\nNote: This is a greenfield app, so be aggressive in optimizing quality.\n\n### Agent 3: Efficiency Review\n\nReview the same changes for efficiency:\n\n1. Unnecessary work: redundant computations, repeated file reads, duplicate network/API calls, N+1 patterns\n2. Missed concurrency: independent operations run sequentially when they could run in parallel\n3. Hot-path bloat: new blocking work added to startup or per-request/per-render hot paths\n4. Unnecessary existence checks: pre-checking file/resource existence before operating (TOCTOU anti-pattern) — operate directly and handle the error\n5. Memory: unbounded data structures, missing cleanup, event listener leaks\n6. Overly broad operations: reading entire files when only a portion is needed, loading all items when filtering for one\n\n## Phase 3: Fix Issues\n\nWait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.\n\nWhen done, briefly summarize what was fixed (or confirm the code was already clean)."
+            },
+            "provider": {
+              "String": "openai"
+            },
+            "model": {
+              "String": "gpt-5.5"
+            }
+          }
+        },
+        "start": {
+          "id": "start",
+          "attrs": {
+            "provider": {
+              "String": "anthropic"
+            },
+            "model": {
+              "String": "claude-opus-4-7"
+            },
+            "label": {
+              "String": "Start"
+            },
+            "shape": {
+              "String": "Mdiamond"
+            }
+          }
+        }
+      },
+      "edges": [
+        {
+          "from": "start",
+          "to": "toolchain",
+          "attrs": {}
+        },
+        {
+          "from": "toolchain",
+          "to": "preflight_compile",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "toolchain",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_compile",
+          "to": "preflight_lint",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_compile",
+          "to": "exit",
+          "attrs": {}
+        },
+        {
+          "from": "preflight_lint",
+          "to": "implement",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "preflight_lint",
+          "to": "fix_lints",
+          "attrs": {}
+        },
+        {
+          "from": "fix_lints",
+          "to": "preflight_lint",
+          "attrs": {}
+        },
+        {
+          "from": "implement",
+          "to": "simplify_opus",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_opus",
+          "to": "simplify_gpt",
+          "attrs": {}
+        },
+        {
+          "from": "simplify_gpt",
+          "to": "verify",
+          "attrs": {}
+        },
+        {
+          "from": "verify",
+          "to": "exit",
+          "attrs": {
+            "condition": {
+              "String": "outcome=succeeded"
+            }
+          }
+        },
+        {
+          "from": "verify",
+          "to": "fixup",
+          "attrs": {}
+        },
+        {
+          "from": "fixup",
+          "to": "verify",
+          "attrs": {}
+        }
+      ],
+      "attrs": {
+        "rankdir": {
+          "String": "LR"
+        },
+        "goal": {
+          "String": "# Server-Owned Environments Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Move environment definitions from layered run settings into server-owned TOML resources with CRUD API management, matching the Automation store pattern.\n\n**Architecture:** Add a concrete `EnvironmentStore` that loads one environment TOML file per id from a sibling `environments/` directory next to the active server settings file. Runs continue to select an environment by id through `[run.environment]` or `--environment`, but server-side run creation resolves the id from `EnvironmentStore`; project/workflow/user config can no longer define environment catalogs or environment field overrides. The web UI is intentionally deferred.\n\n**Tech Stack:** Rust, Axum, serde/TOML, `toml_edit`, Tokio file I/O, OpenAPI/progenitor, generated TypeScript API client, cargo-nextest.\n\n---\n\n## File Structure\n\n- Create `lib/crates/fabro-environment/`: environment ids, revisions, API/domain DTOs, TOML persistence, canonicalization, validation, and `EnvironmentStore`.\n- Modify workspace manifests: root `Cargo.toml`, `lib/crates/fabro-server/Cargo.toml`, `lib/crates/fabro-api/build.rs`, and generated API/client package files.\n- Modify `lib/crates/fabro-server/src/server.rs`, `lib/crates/fabro-server/src/server/handler/mod.rs`, and a new `lib/crates/fabro-server/src/server/handler/environments.rs` to wire the store and API.\n- Modify `lib/crates/fabro-config/src/builders.rs`, `lib/crates/fabro-config/src/load.rs`, `lib/crates/fabro-config/src/migrations.rs`, and config tests to treat `[environments]` as migration-only, not runtime configuration.\n- Modify `lib/crates/fabro-manifest/src/lib.rs`, `lib/crates/fabro-server/src/run_manifest.rs`, and CLI run/preflight/graph/validate paths so environment ids are resolved only by the server.\n- Modify install/repo-init/docs/OpenAPI artifacts so new examples use server environment files and run configs only select ids.\n\n## Decisions\n\n- Environment definitions are server-owned operator policy. Project and workflow files may request an id but cannot define or override environment fields.\n- `default`, `local`, `docker`, and `daytona` are seeded if missing. Existing files are never overwritten.\n- `default` is protected from deletion. Other seeded files can be edited or deleted.\n- Environment ids use `[a-z0-9][a-z0-9-]{0,62}`.\n- Environment revisions are SHA-256 hashes of the persisted TOML bytes, returned in JSON as `revision` and in `ETag`.\n- `PUT` and `DELETE` require `If-Match`, following `AutomationStore`.\n- `image.dockerfile = { path = \"Dockerfile\" }` is accepted in persisted files and API input, resolved relative to the environment file or request context, and converted to inline content for runtime use. API writes canonical inline TOML.\n- `--preserve-sandbox` remains a CLI/server argument override. TOML `[run.environment.lifecycle]` is rejected.\n- `--docker-image` is rejected with a targeted message directing operators to create or update a server environment.\n- Existing dense `WorkflowSettings.environments` stays in the API for compatibility and is populated from the server environment catalog during run resolution.\n\n## Task 1: Add `fabro-environment` Store Crate\n\n**Files:**\n- Create: `lib/crates/fabro-environment/Cargo.toml`\n- Create: `lib/crates/fabro-environment/src/lib.rs`\n- Create: `lib/crates/fabro-environment/src/id.rs`\n- Create: `lib/crates/fabro-environment/src/model.rs`\n- Create: `lib/crates/fabro-environment/src/store.rs`\n- Create: `lib/crates/fabro-environment/src/error.rs`\n- Modify: root `Cargo.toml`\n\n- [ ] Create a workspace crate named `fabro-environment`, modeled after `fabro-automation`.\n- [ ] Define `EnvironmentId`, `EnvironmentRevision`, and parse/validation errors.\n- [ ] Define public DTOs:\n  - `Environment`: `id`, `revision`, `provider`, `image`, `resources`, `network`, `lifecycle`, `labels`, `volumes`, `env`.\n  - `EnvironmentDraft`: `id` plus environment fields.\n  - `EnvironmentReplace`: environment fields without id.\n- [ ] Use the existing environment field types from `fabro_types::settings::run` for dense API fields.\n- [ ] Use existing sparse `fabro_config::EnvironmentLayer` only for TOML input/output and conversion; do not create a second environment field vocabulary.\n- [ ] Add conversion helpers that resolve an `EnvironmentLayer` into dense `EnvironmentSettings` using the same provider/network/image validation rules as `fabro-config`.\n- [ ] Implement canonical TOML serialization for persisted files. Omit `id` and `revision`; the filename is the id and the file bytes determine revision.\n- [ ] Implement `EnvironmentStore` with `load_or_seed(dir)`, `list`, `get`, `create`, `replace`, `delete`, and `catalog_layer`.\n- [ ] Seed missing `default`, `local`, `docker`, and `daytona` files from the current built-in defaults. Do not overwrite existing files.\n- [ ] Protect `default` from deletion with a typed store error.\n- [ ] Resolve Dockerfile path references relative to the environment file directory during load and relative to the active settings directory during API create/replace. Store runtime values with inline Dockerfile content.\n- [ ] Add unit tests for loading an absent directory, seeding built-ins, sorted listing, invalid ids, invalid provider, invalid network mode, missing Dockerfile path, create conflict, replace stale revision, default delete rejection, delete success, and canonical revision changes.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-environment\n```\n\nExpected: all `fabro-environment` tests pass.\n\n## Task 2: Make Config Environments Migration-Only\n\n**Files:**\n- Modify: `lib/crates/fabro-config/src/parse.rs`\n- Modify: `lib/crates/fabro-config/src/builders.rs`\n- Modify: `lib/crates/fabro-config/src/load.rs`\n- Modify: `lib/crates/fabro-config/src/migrations.rs`\n- Create: `lib/crates/fabro-config/migrations/2026052801_settings_environments_to_server_files.rs`\n- Modify: `lib/crates/fabro-config/src/defaults.toml`\n- Modify: `lib/crates/fabro-config/src/tests/resolve_run.rs`\n- Modify: `lib/crates/fabro-config/src/tests/resolve_root.rs`\n\n- [ ] Keep `SettingsLayer.environments` in this pass so old files can parse and migrate, but remove environment catalog entries from `defaults.toml`.\n- [ ] Add source-aware validation that rejects `SettingsLayer.environments` for project, workflow, and direct run config layers with this message shape: `[environments.<id>] is now server-managed; move this definition to the server environments directory`.\n- [ ] Add validation that rejects TOML-provided `run.environment.image`, `resources`, `network`, `lifecycle`, `labels`, `volumes`, and `env`. Keep `run.environment.id`.\n- [ ] Ensure CLI/server argument layers can still set `run.environment.lifecycle.preserve` for `--preserve-sandbox`; the rejection applies only to parsed TOML sources.\n- [ ] Add a settings-file migration that extracts top-level `[environments.<id>]` entries from the active `settings.toml` into sibling `environments/<id>.toml` files.\n- [ ] Migration must write a backup before editing `settings.toml`, preserve `[run.environment] id`, remove the top-level `[environments]` table, and fail without changing files if any target environment file already exists.\n- [ ] Chain the existing legacy `[run.sandbox]` migration before the new extraction migration so legacy sandbox settings become a server `default` environment file.\n- [ ] Update run settings tests to assert that `RunSettingsBuilder` no longer resolves a selected environment without an injected server catalog.\n- [ ] Add tests proving project/workflow `[environments]` definitions produce targeted errors rather than silent ignores.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-config\n```\n\nExpected: config tests pass, including migration coverage.\n\n## Task 3: Wire EnvironmentStore Into Server Run Resolution\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server.rs`\n- Modify: `lib/crates/fabro-server/src/serve.rs`\n- Modify: `lib/crates/fabro-server/src/run_manifest.rs`\n- Modify: `lib/crates/fabro-server/src/server/handler/runs.rs`\n- Modify: `lib/crates/fabro-server/src/manifest_validation.rs`\n- Modify: `lib/crates/fabro-server/src/test_support.rs`\n\n- [ ] Add `environment_store: Arc<EnvironmentStore>` to `AppState`, loaded from `active_config_path.parent().join(\"environments\")`.\n- [ ] Replace `manifest_environment_defaults` from `ServerRuntimeSettings` with `environment_store.catalog_layer()` when preparing manifests on the server.\n- [ ] Keep the dense run snapshot unchanged: `prepared.settings.run.environment` contains the resolved environment fields, and `prepared.settings.environments` contains the server catalog used for resolution.\n- [ ] Convert unknown environment ids into `400 Bad Request` during run creation/preflight/graph preparation.\n- [ ] Keep sandbox provider policy checks after environment resolution, so disabled providers still reject runs.\n- [ ] Apply `--preserve-sandbox` after selected environment resolution.\n- [ ] Remove server reliance on `[environments]` in `settings.toml`.\n- [ ] Update server test support so tests can inject environment files or use seeded defaults.\n- [ ] Add server tests for default environment run creation, custom server environment selection, unknown environment id, disabled provider policy, `--preserve-sandbox`, and rejected TOML environment field overrides.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server\n```\n\nExpected: server API and run-manifest tests pass.\n\n## Task 4: Add Environment CRUD API\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Modify: `lib/crates/fabro-api/build.rs`\n- Create: `lib/crates/fabro-server/src/server/handler/environments.rs`\n- Modify: `lib/crates/fabro-server/src/server/handler/mod.rs`\n- Add tests: `lib/crates/fabro-server/tests/it/api/environments.rs`\n- Update generated Rust and TypeScript API artifacts after spec changes.\n\n- [ ] Add OpenAPI tag `Environments`.\n- [ ] Add schemas for `Environment`, `CreateEnvironmentRequest`, `ReplaceEnvironmentRequest`, and `EnvironmentListResponse`.\n- [ ] Reuse existing environment schemas for provider/image/resources/network/lifecycle/volumes/env.\n- [ ] Add endpoints:\n  - `GET /api/v1/environments`\n  - `POST /api/v1/environments`\n  - `GET /api/v1/environments/{id}`\n  - `PUT /api/v1/environments/{id}`\n  - `DELETE /api/v1/environments/{id}`\n- [ ] Return `ETag` on retrieve and replace.\n- [ ] Require `If-Match` on replace and delete.\n- [ ] Map store errors to API responses:\n  - invalid id: `400`\n  - duplicate create: `409`\n  - stale revision: `409`\n  - validation error: `422`\n  - missing resource: `404`\n  - protected default delete: `409`\n  - persistence failure: `500`\n- [ ] Add route tests for empty-seeded list, create, retrieve with ETag, replace, stale replace, missing `If-Match`, delete, protected default delete, invalid provider, invalid CIDR, and missing Dockerfile path.\n- [ ] Regenerate `fabro-api` and TypeScript client artifacts.\n\nRun:\n\n```bash\ncargo build -p fabro-api\ncd lib/packages/fabro-api-client && bun run generate\ncargo nextest run -p fabro-server --test it -- api::environments\n```\n\nExpected: generated artifacts are updated and environment API tests pass.\n\n## Task 5: Adjust CLI And Manifest Behavior\n\n**Files:**\n- Modify: `lib/crates/fabro-cli/src/commands/run/overrides.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/preflight.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/graph.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/validate.rs`\n- Modify: `lib/crates/fabro-cli/src/commands/repo/init.rs`\n- Modify: `lib/crates/fabro-manifest/src/lib.rs`\n- Modify CLI integration tests under `lib/crates/fabro-cli/tests/it/`\n\n- [ ] Reject `--docker-image` in run, create, preflight, graph, and validate commands with this message shape: `--docker-image is no longer supported; create or update a server environment and select it with --environment`.\n- [ ] Keep `--environment` as an id-only selector in manifest args.\n- [ ] Stop collecting Dockerfile path references from `[environments.<id>]` in project/workflow config because those definitions are invalid.\n- [ ] Keep collecting Dockerfile references for any remaining CLI-created run environment override only when it comes from allowed argument paths; with `--docker-image` rejected, no normal user path should add one.\n- [ ] Update local preflight/graph/validate flows so they either call server preflight for environment resolution or print a clear message that server-owned environment resolution requires a running server.\n- [ ] Update `fabro repo init` to write only `[run.environment] id = \"local\"` and no `[environments.local]` block.\n- [ ] Update CLI tests for manifest args, repo init output, rejected `--docker-image`, and server-owned environment selection.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-cli\n```\n\nExpected: CLI tests pass and no generated workflow config contains `[environments.*]`.\n\n## Task 6: Update Install, Docs, And Generated References\n\n**Files:**\n- Modify install persistence code in `lib/crates/fabro-cli/src/commands/install.rs` and server install handlers/tests.\n- Modify docs: `docs/public/execution/environments.mdx`, `docs/public/execution/run-configuration.mdx`, `docs/public/reference/user-configuration.mdx`, `docs/public/administration/server-configuration.mdx`, `docs/public/administration/sandboxing.mdx`, `docs/public/integrations/daytona.mdx`, and examples that currently define `[environments.<id>]`.\n- Modify generated settings reference if applicable.\n\n- [ ] Update install flows to write server environment files instead of `[environments.default]` into `settings.toml`.\n- [ ] Keep install-written `[run.environment] id = \"default\"` when a default run environment selection is still needed.\n- [ ] Update tests that assert `settings.toml` contains `[environments.default]` to assert the sibling environment file exists and settings no longer contains `[environments]`.\n- [ ] Rewrite public docs so environment definitions are server-owned TOML files and run configs only select ids.\n- [ ] Add a compatibility note explaining that project/workflow `[environments]` definitions now fail and must be moved to the server.\n- [ ] Keep `Settings > Environments` UI documentation out of this pass.\n\nRun:\n\n```bash\ncargo nextest run -p fabro-server --test it -- api::install\ncargo nextest run -p fabro-cli --test it\n```\n\nExpected: install tests pass and docs no longer present project/workflow environment definitions as valid.\n\n## Task 7: Workspace Verification\n\n**Files:**\n- No new files unless test snapshots require reviewed updates.\n\n- [ ] Run Rust formatting check:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\n- [ ] Run clippy:\n\n```bash\ncargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings\n```\n\n- [ ] Run workspace tests:\n\n```bash\ncargo nextest run --workspace\n```\n\n- [ ] Run TypeScript checks if API client changes affect the web package:\n\n```bash\ncd apps/fabro-web && bun run typecheck\ncd apps/fabro-web && bun test\n```\n\n- [ ] Inspect generated files and snapshots before accepting any snapshot changes.\n\n## Acceptance Criteria\n\n- Server startup creates or loads `environments/default.toml`, `local.toml`, `docker.toml`, and `daytona.toml`.\n- `GET /api/v1/environments` returns seeded environments with revisions.\n- API-created environments persist as TOML files and survive server restart.\n- Runs using `[run.environment] id = \"cloud\"` resolve from server files only.\n- Project/workflow/user `[environments.<id>]` definitions no longer affect runs.\n- Existing runs keep their dense environment snapshot after environment files change.\n- `--environment` still works.\n- `--preserve-sandbox` still works.\n- `--docker-image` no longer works and produces the targeted replacement guidance.\n- Web UI changes are not included.\n"
+        },
+        "model_stylesheet": {
+          "String": "\n            * { model: claude-opus-4-7; }\n        "
+        }
+      }
+    },
+    "graph_source": "digraph ImplementPlan {\n    graph [\n        goal=\"Implement and simplify\",\n        model_stylesheet=\"\n            * { model: claude-opus-4-7; }\n        \"\n    ]\n    rankdir=LR\n\n    start [shape=Mdiamond, label=\"Start\"]\n    exit  [shape=Msquare, label=\"Exit\"]\n\n    toolchain         [label=\"Toolchain\", shape=parallelogram, script=\"command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1\", max_retries=0]\n    preflight_compile [label=\"Preflight Compile\", shape=parallelogram, script=\"cargo check -q --workspace 2>&1\", max_retries=0]\n    preflight_lint    [label=\"Preflight Lint\", shape=parallelogram, script=\"cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1\", max_retries=0]\n    fix_lints         [label=\"Fix Lints\", prompt=\"The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.\", max_visits=3]\n    implement         [label=\"Implement\", prompt=\"Read the plan file referenced in the goal and implement every step. Make all the code changes described in the plan. Use red/green TDD.\", model=\"gpt-55\", reasoning_effort=\"xhigh\"]\n    simplify_opus     [label=\"Simplify (Opus)\", prompt=\"@prompts/simplify.md\"]\n    simplify_gpt      [label=\"Simplify (GPT-55)\", prompt=\"@prompts/simplify.md\", model=\"gpt-55\"]\n    verify            [label=\"Verify\", shape=parallelogram, script=\"git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\\\"disabled\\\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1\", goal_gate=true, retry_target=\"fixup\"]\n    fixup             [label=\"Fixup\", prompt=\"The verify step failed. Read the build output from context and fix all format, clippy, Rust test, docs, TypeScript typecheck/test, and build failures.\", max_visits=3]\n\n    start -> toolchain\n    toolchain -> preflight_compile [condition=\"outcome=succeeded\"]\n    toolchain -> exit\n    preflight_compile -> preflight_lint [condition=\"outcome=succeeded\"]\n    preflight_compile -> exit\n    preflight_lint -> implement [condition=\"outcome=succeeded\"]\n    preflight_lint -> fix_lints\n    fix_lints -> preflight_lint\n    implement -> simplify_opus -> simplify_gpt -> verify\n    verify -> exit  [condition=\"outcome=succeeded\"]\n    verify -> fixup\n    fixup -> verify\n}\n",
+    "workflow_slug": "implement-plan",
+    "source_directory": "/Users/bhelmkamp/p/fabro-sh/fabro",
+    "provenance": {
+      "server": {
+        "version": "0.246.0-nightly.0"
+      },
+      "client": {
+        "user_agent": "fabro-cli/0.246.0-nightly.0",
+        "name": "fabro-cli",
+        "version": "0.246.0-nightly.0"
+      },
+      "subject": {
+        "kind": "user",
+        "identity": {
+          "issuer": "https://github.com",
+          "subject": "19"
+        },
+        "login": "brynary",
+        "auth_method": "github",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19?v=4"
+      }
+    },
+    "manifest_blob": "a9c26068bbd11770f63cc244b880f07cb10fb353c02bd4f16d27ca70c160ee1f",
+    "definition_blob": "303626c83b308220ef99468ae5d93ca4e254084c746b7c13fb24072fe5b0bfb2",
+    "git": {
+      "origin_url": "https://github.com/fabro-sh/fabro",
+      "branch": "main",
+      "sha": "faf82c9e28d9c256fe467fee4d86947835b818ba",
+      "dirty": "dirty",
+      "push_outcome": {
+        "type": "failed",
+        "remote": "origin",
+        "branch": "main",
+        "message": "Engine error: git push failed: To github.com:fabro-sh/fabro.git\n ! [rejected]            main -> main (fetch first)\nerror: failed to push some refs to 'github.com:fabro-sh/fabro.git'\nhint: Updates were rejected because the remote contains work that you do not\nhint: have locally. This is usually caused by another repository pushing to\nhint: the same ref. If you want to integrate the remote changes, use\nhint: 'git pull' before pushing again.\nhint: See the 'Note about fast-forwards' in 'git push --help' for details.\n"
+      }
+    }
+  },
+  "web_url": "http://127.0.0.1:32276/runs/01KSPDE8E9ATTVY1VBCS3YRBHT",
+  "start": null,
+  "status": {
+    "kind": "starting"
+  },
+  "status_updated_at": "2026-05-28T04:28:18.809425Z",
+  "last_event_at": "2026-05-28T04:28:33.273654Z",
+  "pending_control": null,
+  "checkpoints": [],
+  "conclusion": null,
+  "sandbox": {
+    "kind": "ready",
+    "plan": {
+      "provider": "daytona"
+    },
+    "instance": {
+      "provider": "daytona",
+      "snapshot": "fabro-fdb28dec-1233-892c-b9d7-9f88f8353e7a",
+      "runtime": {
+        "id": "fabro-01KSPDE8E9ATTVY1VBCS3YRBHT",
+        "working_directory": "/home/daytona/workspace/fabro",
+        "repo_cloned": true,
+        "clone_origin_url": "https://github.com/fabro-sh/fabro",
+        "clone_branch": "main",
+        "workspace_root": "/home/daytona/workspace",
+        "repos_root": "/home/daytona/repos",
+        "primary_repo_path": "/home/daytona/repos/fabro-sh/fabro",
+        "primary_repo_link": "/home/daytona/workspace/fabro"
+      }
+    }
+  },
+  "pull_request": null,
+  "superseded_by": null,
+  "pending_interviews": {},
+  "stages": {}
+}
