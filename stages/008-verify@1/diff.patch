@@ -1,0 +1,4955 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 7365db53d..2ef51ead4 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1889,6 +1889,7 @@ dependencies = [
+  "tempfile",
+  "thiserror 2.0.18",
+  "tokio",
++ "tokio-tungstenite 0.26.2",
+  "tokio-util",
+  "toml 0.8.23",
+  "toml_edit",
+@@ -2407,6 +2408,7 @@ dependencies = [
+  "thiserror 2.0.18",
+  "tokio",
+  "tokio-stream",
++ "tokio-tungstenite 0.26.2",
+  "tokio-util",
+  "toml 0.8.23",
+  "toml_edit",
+diff --git a/lib/crates/fabro-api/build.rs b/lib/crates/fabro-api/build.rs
+index 88d465128..3ef344399 100644
+--- a/lib/crates/fabro-api/build.rs
++++ b/lib/crates/fabro-api/build.rs
+@@ -617,6 +617,7 @@ fn main() {
+         ("SandboxTimestamps", "fabro_types::SandboxTimestamps", &[]),
+         ("AskFabro", "fabro_types::AskFabro", &[]),
+         ("Automation", "fabro_automation::Automation", &[]),
++        ("AutomationRef", "fabro_types::AutomationRef", &[]),
+         ("AutomationTarget", "fabro_automation::AutomationTarget", &[
+         ]),
+         (
+diff --git a/lib/crates/fabro-api/src/lib.rs b/lib/crates/fabro-api/src/lib.rs
+index 3837275f0..28903a67d 100644
+--- a/lib/crates/fabro-api/src/lib.rs
++++ b/lib/crates/fabro-api/src/lib.rs
+@@ -39,32 +39,33 @@ pub mod types {
+     pub use fabro_types::{
+         ActivatedSkill, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
+         AgentToolCategory, AgentToolSource, AgentToolSummary, AgentToolsAvailableProps, AskFabro,
+-        AuthMethod, BilledTokenCounts, CommandTermination, Conclusion, CreateVariableRequest,
+-        DiffStats, DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail, FailureCategory,
+-        FailureDetail, FailureSignature, GitContext, IdpIdentity, IntegrationConnectionKind,
+-        IntegrationConnectionState, IntegrationConnectionStatus, IntegrationProvider,
+-        IntegrationStatus, InterviewOption, InterviewQuestionRecord, McpServerProjection,
+-        McpServerStatus, PairId, PairMessageId, PairMessageRecord, PairMessageRequest, PairRecord,
+-        PairStartRequest, PairStatus, PairTarget, PairTranscriptEntry, PairTranscriptResponse,
+-        PendingInterviewRecord, PermissionLevel, PreRunPushOutcome, Principal, PullRequest,
+-        PullRequestDetails, PullRequestDetailsStatus, PullRequestDetailsUnavailableReason,
+-        PullRequestLink, PullRequestMeta, PullRequestResponse, QuestionType, RepositoryRef, Run,
+-        RunApproval, RunApprovalState, RunClientProvenance, RunEvent, RunEventDetailContentKind,
+-        RunEventDetailResponse, RunFailure, RunPairStatusResponse, RunProjection, RunProvenance,
+-        RunRunnableSource, RunSandbox, RunSandboxFailure, RunSandboxInstance, RunSandboxKind,
+-        RunSandboxPlan, RunSandboxRuntime, RunServerProvenance, RunSize, SandboxDetails,
+-        SandboxInfo, SandboxListMeta, SandboxListResponse, SandboxNetwork, SandboxNetworkPolicy,
+-        SandboxNetworkPolicyMode, SandboxProviderKind, SandboxProviderLookupError,
+-        SandboxResources, SandboxService, SandboxServiceListResponse, SandboxState,
+-        SandboxTimestamps, SecretMetadata, SecretType, ServerSettings, SessionDetail, SessionId,
+-        SessionMessage, SessionRecord, SessionStatus, SessionSummary, SessionTurn,
+-        SkillsProjection, StageCompletion, StageContextWindow, StageContextWindowBreakdownItem,
+-        StageContextWindowCategory, StageContextWindowCountMethod, StageContextWindowProjection,
+-        StageContextWindowStaleness, StageContextWindowUnavailableReason,
+-        StageContextWindowWarning, StageHandler, StageModelUsage, StageOutcome, StageProjection,
+-        StageState, SubAgentProjection, SubAgentStatus, SystemActorKind, SystemIntegrationStatus,
+-        SystemIntegrationsResponse, TodoListProjection, TurnId, UpdateVariableRequest,
+-        UserPrincipal, Variable, VariableListResponse, WorkflowSettings,
++        AuthMethod, AutomationRef, BilledTokenCounts, CommandTermination, Conclusion,
++        CreateVariableRequest, DiffStats, DiffSummary, DirtyStatus, EventEnvelope, ExecOutputTail,
++        FailureCategory, FailureDetail, FailureSignature, GitContext, IdpIdentity,
++        IntegrationConnectionKind, IntegrationConnectionState, IntegrationConnectionStatus,
++        IntegrationProvider, IntegrationStatus, InterviewOption, InterviewQuestionRecord,
++        McpServerProjection, McpServerStatus, PairId, PairMessageId, PairMessageRecord,
++        PairMessageRequest, PairRecord, PairStartRequest, PairStatus, PairTarget,
++        PairTranscriptEntry, PairTranscriptResponse, PendingInterviewRecord, PermissionLevel,
++        PreRunPushOutcome, Principal, PullRequest, PullRequestDetails, PullRequestDetailsStatus,
++        PullRequestDetailsUnavailableReason, PullRequestLink, PullRequestMeta, PullRequestResponse,
++        QuestionType, RepositoryRef, Run, RunApproval, RunApprovalState, RunClientProvenance,
++        RunEvent, RunEventDetailContentKind, RunEventDetailResponse, RunFailure,
++        RunPairStatusResponse, RunProjection, RunProvenance, RunRunnableSource, RunSandbox,
++        RunSandboxFailure, RunSandboxInstance, RunSandboxKind, RunSandboxPlan, RunSandboxRuntime,
++        RunServerProvenance, RunSize, SandboxDetails, SandboxInfo, SandboxListMeta,
++        SandboxListResponse, SandboxNetwork, SandboxNetworkPolicy, SandboxNetworkPolicyMode,
++        SandboxProviderKind, SandboxProviderLookupError, SandboxResources, SandboxService,
++        SandboxServiceListResponse, SandboxState, SandboxTimestamps, SecretMetadata, SecretType,
++        ServerSettings, SessionDetail, SessionId, SessionMessage, SessionRecord, SessionStatus,
++        SessionSummary, SessionTurn, SkillsProjection, StageCompletion, StageContextWindow,
++        StageContextWindowBreakdownItem, StageContextWindowCategory, StageContextWindowCountMethod,
++        StageContextWindowProjection, StageContextWindowStaleness,
++        StageContextWindowUnavailableReason, StageContextWindowWarning, StageHandler,
++        StageModelUsage, StageOutcome, StageProjection, StageState, SubAgentProjection,
++        SubAgentStatus, SystemActorKind, SystemIntegrationStatus, SystemIntegrationsResponse,
++        TodoListProjection, TurnId, UpdateVariableRequest, UserPrincipal, Variable,
++        VariableListResponse, WorkflowSettings,
+     };
+ 
+     pub use crate::generated::types::*;
+diff --git a/lib/crates/fabro-api/tests/run_summary_round_trip.rs b/lib/crates/fabro-api/tests/run_summary_round_trip.rs
+index 0c5a70fb5..798448941 100644
+--- a/lib/crates/fabro-api/tests/run_summary_round_trip.rs
++++ b/lib/crates/fabro-api/tests/run_summary_round_trip.rs
+@@ -3,9 +3,9 @@ use std::collections::HashMap;
+ 
+ use chrono::{TimeZone, Utc};
+ use fabro_api::types::{
+-    RepositoryRef as ApiRepositoryRef, Run as ApiRun, RunApproval as ApiRunApproval,
+-    RunApprovalState as ApiRunApprovalState, RunRunnableSource as ApiRunRunnableSource,
+-    RunSize as ApiRunSize,
++    AutomationRef as ApiAutomationRef, RepositoryRef as ApiRepositoryRef, Run as ApiRun,
++    RunApproval as ApiRunApproval, RunApprovalState as ApiRunApprovalState,
++    RunRunnableSource as ApiRunRunnableSource, RunSize as ApiRunSize,
+ };
+ use fabro_types::status::{RunStatus, SuccessReason};
+ use fabro_types::{
+@@ -24,6 +24,7 @@ fn run_summary_reuses_domain_types() {
+     assert_same_type::<ApiRunApprovalState, RunApprovalState>();
+     assert_same_type::<ApiRunRunnableSource, RunRunnableSource>();
+     assert_same_type::<ApiRunSize, RunSize>();
++    assert_same_type::<ApiAutomationRef, AutomationRef>();
+ }
+ 
+ #[test]
+diff --git a/lib/crates/fabro-cli/Cargo.toml b/lib/crates/fabro-cli/Cargo.toml
+index a4d15b5b5..d0b8b7373 100644
+--- a/lib/crates/fabro-cli/Cargo.toml
++++ b/lib/crates/fabro-cli/Cargo.toml
+@@ -61,6 +61,7 @@ anyhow.workspace = true
+ miette.workspace = true
+ dotenvy.workspace = true
+ tokio.workspace = true
++tokio-tungstenite.workspace = true
+ tracing.workspace = true
+ tracing-subscriber.workspace = true
+ tracing-appender.workspace = true
+@@ -128,3 +129,4 @@ fabro-test = { workspace = true }
+ fabro-macros = { path = "../fabro-macros" }
+ hkdf.workspace = true
+ reqwest = { workspace = true, features = ["cookies"] }
++tokio = { workspace = true, features = ["test-util", "macros"] }
+diff --git a/lib/crates/fabro-cli/src/commands/run/runner.rs b/lib/crates/fabro-cli/src/commands/run/runner.rs
+index fb3b31d43..ac1a2bbd0 100644
+--- a/lib/crates/fabro-cli/src/commands/run/runner.rs
++++ b/lib/crates/fabro-cli/src/commands/run/runner.rs
+@@ -1,10 +1,4 @@
+-#![expect(
+-    clippy::disallowed_types,
+-    reason = "sync CLI `run` subprocess wrapper: reads server subprocess stdout line-by-line via \
+-              std::io::BufReader; not on a Tokio path"
+-)]
+-
+-use std::io::{BufRead as StdBufRead, BufReader as StdBufReader};
++use std::collections::{HashSet, VecDeque};
+ use std::path::{Path, PathBuf};
+ use std::sync::Arc;
+ use std::time::Duration;
+@@ -12,10 +6,14 @@ use std::time::Duration;
+ use anyhow::{Context, Result, anyhow};
+ use async_trait::async_trait;
+ use fabro_api::types::RunManifest;
++use fabro_client::ServerTarget;
+ use fabro_config::user::active_settings_path;
+ use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
+ use fabro_interview::{
+-    AnswerSubmission, ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage,
++    AnswerSubmission, ControlInterviewer, WORKER_CONTROL_INVALID_CURSOR_REASON,
++    WORKER_CONTROL_PONG_TIMEOUT_REASON, WORKER_CONTROL_WS_LIVENESS_TIMEOUT,
++    WORKER_CONTROL_WS_PING_INTERVAL, WorkerControlDeliveryFrame, WorkerControlEnvelope,
++    WorkerControlMessage,
+ };
+ use fabro_model::Catalog;
+ use fabro_server::run_tool_manifest;
+@@ -34,11 +32,23 @@ use fabro_workflow::operations::{self, StartServices};
+ use fabro_workflow::run_control::RunControlState;
+ use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
+ use fabro_workflow::services::FabroRunToolServices;
++use futures::{SinkExt, StreamExt};
+ use jsonwebtoken::dangerous::insecure_decode;
++#[cfg(test)]
++use tokio::io::DuplexStream;
++use tokio::net::TcpStream;
++#[cfg(unix)]
++use tokio::net::UnixStream;
+ #[cfg(unix)]
+ use tokio::signal::unix::{SignalKind, signal};
+-use tokio::sync::{Mutex, RwLock as AsyncRwLock, mpsc};
+-use tokio::time::sleep;
++use tokio::sync::{Mutex, RwLock as AsyncRwLock, oneshot};
++use tokio::task::JoinHandle;
++use tokio::time::{self, Instant, MissedTickBehavior};
++use tokio_tungstenite::tungstenite::client::IntoClientRequest;
++use tokio_tungstenite::tungstenite::http::{HeaderValue, Request as WebSocketRequest, header};
++use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
++use tokio_tungstenite::tungstenite::protocol::{self, Message as WebSocketMessage};
++use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite};
+ use tokio_util::sync::CancellationToken;
+ 
+ use crate::args::RunWorkerMode;
+@@ -75,7 +85,7 @@ pub(crate) async fn execute(
+     let _ = fabro_proc::title_init();
+     set_worker_title(&run_id, initial_worker_title_phase(mode));
+ 
+-    let target = server.parse::<fabro_client::ServerTarget>()?;
++    let target = server.parse::<ServerTarget>()?;
+     let client = server_client::connect_server_target_with_bearer(&target, worker_token).await?;
+     let run_store = HttpRunStore::connect(run_id, client.clone_for_reuse()).await?;
+     let run_state = run_store
+@@ -110,13 +120,24 @@ pub(crate) async fn execute(
+     let cancel_token = CancellationToken::new();
+     let emitter = Arc::new(Emitter::new(run_id));
+     let steering_hub = Arc::new(fabro_workflow::SteeringHub::new(Arc::clone(&emitter)));
+-    spawn_worker_control_stream(
+-        Arc::clone(&interviewer),
+-        cancel_token.clone(),
+-        Arc::clone(&steering_hub),
+-    )?;
+     let run_control = RunControlState::new();
+     install_signal_handlers(Arc::clone(&run_control), cancel_token.clone())?;
++    let mut control_manager = if run_state.status.is_terminal() {
++        None
++    } else {
++        Some(spawn_worker_control_manager(
++            target.clone(),
++            run_id,
++            worker_token.to_owned(),
++            Arc::clone(&interviewer),
++            cancel_token.clone(),
++            Arc::clone(&steering_hub),
++            Arc::clone(&run_control),
++        ))
++    };
++    if let Some(control_manager) = &mut control_manager {
++        control_manager.wait_for_first_connection().await?;
++    }
+     let vault = load_worker_vault(storage_dir.as_deref())?;
+     let github_app = {
+         let vault_guard = match &vault {
+@@ -158,13 +179,26 @@ pub(crate) async fn execute(
+         fabro_run_tools,
+     };
+ 
+-    match mode {
+-        RunWorkerMode::Start => {
+-            operations::start(&run_dir, services).await?;
++    let execution = async {
++        match mode {
++            RunWorkerMode::Start => operations::start(&run_dir, services).await,
++            RunWorkerMode::Resume => operations::resume(&run_dir, services).await,
+         }
+-        RunWorkerMode::Resume => {
+-            operations::resume(&run_dir, services).await?;
++    };
++
++    if let Some(mut control_manager) = control_manager {
++        tokio::select! {
++            result = execution => {
++                control_manager.finish();
++                result?;
++            }
++            fatal = control_manager.fatal_control_loss() => {
++                control_manager.finish();
++                return Err(fatal);
++            }
+         }
++    } else {
++        execution.await?;
+     }
+ 
+     Ok(())
+@@ -254,96 +288,510 @@ fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLoc
+     Ok(Some(Arc::new(AsyncRwLock::new(vault))))
+ }
+ 
+-#[derive(Debug, PartialEq, Eq)]
+-enum WorkerControlStreamEvent {
+-    Line(String),
+-    Eof,
+-}
++const WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
++const WORKER_CONTROL_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(5);
++const WORKER_CONTROL_APPLIED_ID_DEDUPE_CAPACITY: usize = 2048;
+ 
+-#[expect(
+-    clippy::disallowed_methods,
+-    reason = "Worker control reads blocking stdin on a dedicated OS thread and forwards lines into Tokio."
+-)]
+-fn spawn_worker_control_stream(
+-    interviewer: Arc<ControlInterviewer>,
+-    cancel_token: CancellationToken,
+-    steering_hub: Arc<fabro_workflow::SteeringHub>,
+-) -> Result<()> {
+-    let (event_tx, event_rx) = mpsc::unbounded_channel();
+-    tokio::spawn(handle_worker_control_stream_events(
+-        interviewer,
+-        cancel_token,
+-        steering_hub,
+-        event_rx,
+-    ));
+-    std::thread::Builder::new()
+-        .name("fabro-worker-control".to_string())
+-        .spawn(move || {
+-            read_worker_control_stream_blocking(StdBufReader::new(std::io::stdin()), &event_tx);
+-        })
+-        .context("failed to spawn worker control reader thread")?;
+-    Ok(())
++#[derive(Default)]
++struct AppliedWorkerControlDeliveryIds {
++    last:   Option<String>,
++    order:  VecDeque<String>,
++    recent: HashSet<String>,
+ }
+ 
+-fn read_worker_control_stream_blocking<R>(
+-    mut reader: R,
+-    event_tx: &mpsc::UnboundedSender<WorkerControlStreamEvent>,
+-) where
+-    R: StdBufRead,
+-{
+-    let mut line = String::new();
+-    loop {
+-        line.clear();
+-        match reader.read_line(&mut line) {
+-            Ok(0) | Err(_) => {
+-                let _ = event_tx.send(WorkerControlStreamEvent::Eof);
+-                break;
+-            }
+-            Ok(_) => {
+-                let line = line.trim_end_matches(['\r', '\n']).to_string();
+-                if event_tx.send(WorkerControlStreamEvent::Line(line)).is_err() {
+-                    break;
+-                }
++impl AppliedWorkerControlDeliveryIds {
++    fn last_applied_id(&self) -> Option<&str> {
++        self.last.as_deref()
++    }
++
++    fn contains(&self, id: &str) -> bool {
++        self.recent.contains(id)
++    }
++
++    fn record(&mut self, id: String) {
++        if !self.recent.insert(id.clone()) {
++            self.last = Some(id);
++            return;
++        }
++        self.order.push_back(id.clone());
++        self.last = Some(id);
++        while self.order.len() > WORKER_CONTROL_APPLIED_ID_DEDUPE_CAPACITY {
++            if let Some(evicted) = self.order.pop_front() {
++                self.recent.remove(&evicted);
+             }
+         }
+     }
+ }
+ 
+-async fn handle_worker_control_stream_events(
++struct WorkerControlManagerHandle {
++    first_connection: Option<oneshot::Receiver<Result<()>>>,
++    fatal:            Option<oneshot::Receiver<anyhow::Error>>,
++    done:             CancellationToken,
++    task:             JoinHandle<()>,
++}
++
++impl WorkerControlManagerHandle {
++    async fn wait_for_first_connection(&mut self) -> Result<()> {
++        let receiver = self
++            .first_connection
++            .take()
++            .context("worker control first-connection receiver missing")?;
++        receiver
++            .await
++            .context("worker control manager stopped before first connection")?
++    }
++
++    async fn fatal_control_loss(&mut self) -> anyhow::Error {
++        let Some(receiver) = self.fatal.take() else {
++            return anyhow!("worker control fatal receiver missing");
++        };
++        receiver
++            .await
++            .unwrap_or_else(|_| anyhow!("worker control manager stopped before workflow completed"))
++    }
++
++    fn finish(&self) {
++        self.done.cancel();
++        self.task.abort();
++    }
++}
++
++#[derive(Debug)]
++struct WorkerControlStreamConnectRequest {
++    request:          WebSocketRequest<()>,
++    unix_socket_path: Option<PathBuf>,
++}
++
++impl WorkerControlStreamConnectRequest {
++    fn request_for_tungstenite(&self) -> WebSocketRequest<()> {
++        self.request.clone()
++    }
++
++    #[cfg(test)]
++    fn uri(&self) -> String {
++        self.request.uri().to_string()
++    }
++
++    #[cfg(test)]
++    fn authorization(&self) -> Option<&str> {
++        self.request
++            .headers()
++            .get(header::AUTHORIZATION)
++            .and_then(|value| value.to_str().ok())
++    }
++}
++
++enum WorkerControlSocket {
++    Tcp(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
++    #[cfg(unix)]
++    Unix(Box<WebSocketStream<UnixStream>>),
++    #[cfg(test)]
++    Test(Box<WebSocketStream<DuplexStream>>),
++}
++
++impl WorkerControlSocket {
++    async fn send(&mut self, message: WebSocketMessage) -> Result<(), tungstenite::Error> {
++        match self {
++            Self::Tcp(socket) => socket.send(message).await,
++            #[cfg(unix)]
++            Self::Unix(socket) => socket.send(message).await,
++            #[cfg(test)]
++            Self::Test(socket) => socket.send(message).await,
++        }
++    }
++
++    async fn next(&mut self) -> Option<Result<WebSocketMessage, tungstenite::Error>> {
++        match self {
++            Self::Tcp(socket) => socket.next().await,
++            #[cfg(unix)]
++            Self::Unix(socket) => socket.next().await,
++            #[cfg(test)]
++            Self::Test(socket) => socket.next().await,
++        }
++    }
++}
++
++#[derive(Debug)]
++enum WorkerControlConnectError {
++    InvalidCursor,
++    Other(anyhow::Error),
++}
++
++fn spawn_worker_control_manager(
++    target: ServerTarget,
++    run_id: RunId,
++    worker_token: String,
++    interviewer: Arc<ControlInterviewer>,
++    cancel_token: CancellationToken,
++    steering_hub: Arc<fabro_workflow::SteeringHub>,
++    run_control: Arc<RunControlState>,
++) -> WorkerControlManagerHandle {
++    let (first_tx, first_rx) = oneshot::channel();
++    let (fatal_tx, fatal_rx) = oneshot::channel();
++    let done = CancellationToken::new();
++    let task_done = done.clone();
++    let task = tokio::spawn(async move {
++        run_worker_control_manager(
++            target,
++            run_id,
++            worker_token,
++            interviewer,
++            cancel_token,
++            steering_hub,
++            run_control,
++            task_done,
++            first_tx,
++            fatal_tx,
++        )
++        .await;
++    });
++    WorkerControlManagerHandle {
++        first_connection: Some(first_rx),
++        fatal: Some(fatal_rx),
++        done,
++        task,
++    }
++}
++
++#[allow(
++    clippy::too_many_arguments,
++    reason = "Worker control manager owns the worker-side control dependencies."
++)]
++async fn run_worker_control_manager(
++    target: ServerTarget,
++    run_id: RunId,
++    worker_token: String,
+     interviewer: Arc<ControlInterviewer>,
+     cancel_token: CancellationToken,
+     steering_hub: Arc<fabro_workflow::SteeringHub>,
+-    mut event_rx: mpsc::UnboundedReceiver<WorkerControlStreamEvent>,
++    run_control: Arc<RunControlState>,
++    done: CancellationToken,
++    first_tx: oneshot::Sender<Result<()>>,
++    fatal_tx: oneshot::Sender<anyhow::Error>,
+ ) {
+-    while let Some(event) = event_rx.recv().await {
+-        match event {
+-            WorkerControlStreamEvent::Line(line) => {
+-                apply_worker_control_line(&interviewer, &cancel_token, &steering_hub, &line).await;
++    let mut first_tx = Some(first_tx);
++    let mut fatal_tx = Some(fatal_tx);
++    let mut backoff = WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF;
++    let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
++
++    while !done.is_cancelled() {
++        let request = match build_worker_control_stream_request(
++            &target,
++            &run_id,
++            &worker_token,
++            applied_ids.last_applied_id(),
++        ) {
++            Ok(request) => request,
++            Err(err) => {
++                report_fatal_control_loss(
++                    &interviewer,
++                    &cancel_token,
++                    &mut first_tx,
++                    &mut fatal_tx,
++                    format!("failed to build worker control stream request: {err:#}"),
++                )
++                .await;
++                return;
++            }
++        };
++
++        match connect_worker_control_stream(request).await {
++            Ok(mut socket) => {
++                if let Some(first_tx) = first_tx.take() {
++                    let _ = first_tx.send(Ok(()));
++                }
++                backoff = WORKER_CONTROL_RECONNECT_INITIAL_BACKOFF;
++                match handle_worker_control_socket(
++                    &mut socket,
++                    &interviewer,
++                    &cancel_token,
++                    &steering_hub,
++                    &run_control,
++                    &mut applied_ids,
++                    &done,
++                )
++                .await
++                {
++                    Ok(()) => {}
++                    Err(WorkerControlConnectError::InvalidCursor) => {
++                        report_fatal_control_loss(
++                            &interviewer,
++                            &cancel_token,
++                            &mut first_tx,
++                            &mut fatal_tx,
++                            "worker control stream replay cursor is invalid".to_string(),
++                        )
++                        .await;
++                        return;
++                    }
++                    Err(WorkerControlConnectError::Other(err)) => {
++                        tracing::debug!(error = %err, "Worker control stream disconnected");
++                    }
++                }
+             }
+-            WorkerControlStreamEvent::Eof => {
+-                interviewer.interrupt_all().await;
++            Err(WorkerControlConnectError::InvalidCursor) => {
++                report_fatal_control_loss(
++                    &interviewer,
++                    &cancel_token,
++                    &mut first_tx,
++                    &mut fatal_tx,
++                    "worker control stream replay cursor is invalid".to_string(),
++                )
++                .await;
+                 return;
+             }
++            Err(WorkerControlConnectError::Other(err)) => {
++                tracing::debug!(error = %err, "Worker control stream connection failed");
++            }
+         }
++
++        sleep_or_done(&done, backoff).await;
++        backoff = next_worker_control_reconnect_backoff(backoff);
+     }
++}
+ 
++async fn report_fatal_control_loss(
++    interviewer: &ControlInterviewer,
++    cancel_token: &CancellationToken,
++    first_tx: &mut Option<oneshot::Sender<Result<()>>>,
++    fatal_tx: &mut Option<oneshot::Sender<anyhow::Error>>,
++    detail: String,
++) {
++    let message = format!("worker control channel lost: {detail}");
+     interviewer.interrupt_all().await;
++    if let Some(first_tx) = first_tx.take() {
++        let _ = first_tx.send(Err(anyhow!(message.clone())));
++    }
++    if let Some(fatal_tx) = fatal_tx.take() {
++        let _ = fatal_tx.send(anyhow!(message));
++    }
++    cancel_token.cancel();
++}
++
++async fn sleep_or_done(done: &CancellationToken, delay: Duration) {
++    tokio::select! {
++        () = done.cancelled() => {}
++        () = time::sleep(delay) => {}
++    }
++}
++
++fn next_worker_control_reconnect_backoff(current: Duration) -> Duration {
++    current
++        .saturating_mul(2)
++        .min(WORKER_CONTROL_RECONNECT_MAX_BACKOFF)
++}
++
++fn build_worker_control_stream_request(
++    target: &ServerTarget,
++    run_id: &RunId,
++    worker_token: &str,
++    after: Option<&str>,
++) -> Result<WorkerControlStreamConnectRequest> {
++    let (url, unix_socket_path) = match target {
++        ServerTarget::HttpUrl(_) => {
++            let base = target
++                .as_http_url()
++                .context("HTTP server target missing URL")?;
++            let websocket_base = if let Some(rest) = base.strip_prefix("http://") {
++                format!("ws://{rest}")
++            } else if let Some(rest) = base.strip_prefix("https://") {
++                format!("wss://{rest}")
++            } else {
++                anyhow::bail!("unsupported server URL scheme");
++            };
++            (
++                worker_control_stream_url(&websocket_base, run_id, after),
++                None,
++            )
++        }
++        ServerTarget::UnixSocket(path) => {
++            let url = worker_control_stream_url("ws://fabro", run_id, after);
++            (url, Some(path.as_path().to_path_buf()))
++        }
++    };
++    let mut request = url
++        .as_str()
++        .into_client_request()
++        .context("failed to build worker control stream request")?;
++    request.headers_mut().insert(
++        header::AUTHORIZATION,
++        HeaderValue::from_str(&format!("Bearer {worker_token}"))
++            .context("failed to build worker control stream authorization header")?,
++    );
++    Ok(WorkerControlStreamConnectRequest {
++        request,
++        unix_socket_path,
++    })
+ }
+ 
+-async fn apply_worker_control_line(
++fn worker_control_stream_url(base: &str, run_id: &RunId, after: Option<&str>) -> String {
++    let mut url = format!("{base}/api/v1/runs/{run_id}/worker/control-stream");
++    if let Some(after) = after {
++        url.push_str("?after=");
++        url.push_str(after);
++    }
++    url
++}
++
++async fn connect_worker_control_stream(
++    request: WorkerControlStreamConnectRequest,
++) -> Result<WorkerControlSocket, WorkerControlConnectError> {
++    if let Some(path) = request.unix_socket_path.as_ref() {
++        #[cfg(unix)]
++        {
++            let ws_request = request.request_for_tungstenite();
++            let stream = UnixStream::connect(path)
++                .await
++                .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
++            let (socket, _) = tokio_tungstenite::client_async(ws_request, stream)
++                .await
++                .map_err(classify_tungstenite_error)?;
++            Ok(WorkerControlSocket::Unix(Box::new(socket)))
++        }
++        #[cfg(not(unix))]
++        {
++            let _ = path;
++            Err(WorkerControlConnectError::Other(anyhow!(
++                "Unix-socket worker control stream is not supported on this platform"
++            )))
++        }
++    } else {
++        let (socket, _) = connect_async(request.request)
++            .await
++            .map_err(classify_tungstenite_error)?;
++        Ok(WorkerControlSocket::Tcp(Box::new(socket)))
++    }
++}
++
++fn classify_tungstenite_error(error: tungstenite::Error) -> WorkerControlConnectError {
++    if let tungstenite::Error::Http(response) = &error {
++        if response.status().as_u16() == 410 {
++            return WorkerControlConnectError::InvalidCursor;
++        }
++    }
++    WorkerControlConnectError::Other(anyhow::Error::new(error))
++}
++
++async fn handle_worker_control_socket(
++    socket: &mut WorkerControlSocket,
+     interviewer: &ControlInterviewer,
+     cancel_token: &CancellationToken,
+     steering_hub: &fabro_workflow::SteeringHub,
+-    line: &str,
+-) {
+-    if line.trim().is_empty() {
+-        return;
++    run_control: &RunControlState,
++    applied_ids: &mut AppliedWorkerControlDeliveryIds,
++    done: &CancellationToken,
++) -> Result<(), WorkerControlConnectError> {
++    let mut ping_interval = time::interval(WORKER_CONTROL_WS_PING_INTERVAL);
++    ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
++    let mut last_liveness = Instant::now();
++    let liveness_timeout = time::sleep_until(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
++    tokio::pin!(liveness_timeout);
++
++    loop {
++        liveness_timeout
++            .as_mut()
++            .reset(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
++
++        tokio::select! {
++            () = done.cancelled() => return Ok(()),
++            _ = ping_interval.tick() => {
++                socket
++                    .send(WebSocketMessage::Ping(Vec::new().into()))
++                    .await
++                    .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
++            }
++            () = &mut liveness_timeout => {
++                let _ = socket
++                    .send(WebSocketMessage::Close(Some(protocol::CloseFrame {
++                        code: CloseCode::Away,
++                        reason: WORKER_CONTROL_PONG_TIMEOUT_REASON.into(),
++                    })))
++                    .await;
++                return Err(WorkerControlConnectError::Other(anyhow!(
++                    "worker control WebSocket liveness timed out"
++                )));
++            }
++            message = socket.next() => {
++                let Some(message) = message else {
++                    return Ok(());
++                };
++                match message {
++                    Ok(WebSocketMessage::Text(text)) => {
++                        last_liveness = Instant::now();
++                        let frame = serde_json::from_str::<WorkerControlDeliveryFrame>(text.as_str())
++                            .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
++                        apply_worker_control_delivery_frame(
++                            interviewer,
++                            cancel_token,
++                            steering_hub,
++                            run_control,
++                            applied_ids,
++                            frame,
++                        )
++                        .await;
++                    }
++                    Ok(WebSocketMessage::Ping(payload)) => {
++                        last_liveness = Instant::now();
++                        socket
++                            .send(WebSocketMessage::Pong(payload))
++                            .await
++                            .map_err(|err| WorkerControlConnectError::Other(anyhow::Error::new(err)))?;
++                    }
++                    Ok(WebSocketMessage::Pong(_) | WebSocketMessage::Binary(_)) => {
++                        last_liveness = Instant::now();
++                    }
++                    Ok(WebSocketMessage::Close(frame)) => {
++                        if frame.as_ref().is_some_and(|frame| {
++                            frame.reason.as_str() == WORKER_CONTROL_INVALID_CURSOR_REASON
++                        }) {
++                            return Err(WorkerControlConnectError::InvalidCursor);
++                        }
++                        return Ok(());
++                    }
++                    Ok(WebSocketMessage::Frame(_)) => {}
++                    Err(err) => {
++                        return Err(WorkerControlConnectError::Other(anyhow::Error::new(err)));
++                    }
++                }
++            }
++        }
+     }
++}
+ 
+-    let Ok(message) = serde_json::from_str::<WorkerControlEnvelope>(line) else {
+-        return;
+-    };
++async fn apply_worker_control_delivery_frame(
++    interviewer: &ControlInterviewer,
++    cancel_token: &CancellationToken,
++    steering_hub: &fabro_workflow::SteeringHub,
++    run_control: &RunControlState,
++    applied_ids: &mut AppliedWorkerControlDeliveryIds,
++    frame: WorkerControlDeliveryFrame,
++) -> bool {
++    // Duplicate ids cannot reach us under normal operation: the server replays
++    // strictly after the last applied id. Guard against a server-side bug or
++    // reconnect race by ignoring recently-applied delivery ids.
++    if applied_ids.contains(&frame.id) {
++        return false;
++    }
++    let frame_id = frame.id;
++    apply_worker_control_message(
++        interviewer,
++        cancel_token,
++        steering_hub,
++        run_control,
++        frame.envelope,
++    )
++    .await;
++    applied_ids.record(frame_id);
++    true
++}
+ 
++async fn apply_worker_control_message(
++    interviewer: &ControlInterviewer,
++    cancel_token: &CancellationToken,
++    steering_hub: &fabro_workflow::SteeringHub,
++    run_control: &RunControlState,
++    message: WorkerControlEnvelope,
++) {
+     match message.message {
+         WorkerControlMessage::InterviewAnswer { qid, answer, actor } => {
+             let _ = interviewer
+@@ -354,6 +802,12 @@ async fn apply_worker_control_line(
+             cancel_token.cancel();
+             interviewer.interrupt_all().await;
+         }
++        WorkerControlMessage::RunPause => {
++            run_control.request_pause();
++        }
++        WorkerControlMessage::RunUnpause => {
++            run_control.request_unpause();
++        }
+         WorkerControlMessage::Steer { text, actor } => {
+             steering_hub.deliver_steer(text, Some(actor));
+         }
+@@ -485,7 +939,7 @@ impl HttpRunStore {
+                 Err(err) => last_error = Some(err),
+             }
+             if let Some(delay) = RUN_STORE_RETRY_DELAYS.get(attempt) {
+-                sleep(*delay).await;
++                time::sleep(*delay).await;
+             }
+         }
+         Err(last_error
+@@ -757,10 +1211,14 @@ fn install_signal_handlers(
+ )]
+ mod tests {
+     use std::sync::Arc;
++    use std::time::Duration;
+ 
+     use chrono::Utc;
++    use fabro_client::ServerTarget;
+     use fabro_config::Storage;
+-    use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question};
++    use fabro_interview::{
++        AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
++    };
+     use fabro_types::run_event::{
+         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
+         RunFailedProps, RunStatusTransitionProps,
+@@ -771,12 +1229,17 @@ mod tests {
+     };
+     use fabro_vault::{SecretType, Vault};
+     use fabro_workflow::event::RunEventSink;
++    use fabro_workflow::run_control::RunControlState;
++    use tokio::time;
++    use tokio_tungstenite::tungstenite::protocol::{Message as TestWebSocketMessage, Role};
+     use tokio_util::sync::CancellationToken;
+ 
+     use super::{
+-        WorkerControlStreamEvent, WorkerTitlePhase, apply_worker_control_line,
+-        handle_worker_control_stream_events, initial_worker_title_phase, load_worker_vault,
+-        read_worker_control_stream_blocking, stamp_system_worker, worker_title,
++        AppliedWorkerControlDeliveryIds, WorkerControlConnectError, WorkerControlSocket,
++        WorkerTitlePhase, apply_worker_control_delivery_frame, apply_worker_control_message,
++        build_worker_control_stream_request, connect_worker_control_stream,
++        handle_worker_control_socket, initial_worker_title_phase, load_worker_vault,
++        next_worker_control_reconnect_backoff, stamp_system_worker, worker_title,
+         worker_title_phase_for_event,
+     };
+     use crate::args::RunWorkerMode;
+@@ -1018,20 +1481,28 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn worker_control_line_routes_answer_by_question_id() {
++    async fn worker_control_routes_answer_by_question_id() {
+         let interviewer = Arc::new(ControlInterviewer::new());
+         let cancel_token = CancellationToken::new();
++        let run_control = RunControlState::new();
+         let mut question = Question::new("Approve?", QuestionType::YesNo);
+         question.id = "q-1".to_string();
+         let ask_interviewer = Arc::clone(&interviewer);
+         let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
+ 
+         let hub = test_steering_hub();
+-        apply_worker_control_line(
++        apply_worker_control_message(
+             &interviewer,
+             &cancel_token,
+             &hub,
+-            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#,
++            &run_control,
++            WorkerControlEnvelope::interview_answer(
++                "q-1",
++                fabro_interview::AnswerSubmission::system(
++                    fabro_interview::Answer::yes(),
++                    fabro_types::SystemActorKind::Engine,
++                ),
++            ),
+         )
+         .await;
+ 
+@@ -1041,9 +1512,10 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn worker_control_line_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
++    async fn worker_control_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
+         let interviewer = Arc::new(ControlInterviewer::new());
+         let cancel_token = CancellationToken::new();
++        let run_control = RunControlState::new();
+         let mut question = Question::new("Approve?", QuestionType::YesNo);
+         question.id = "q-1".to_string();
+         let ask_interviewer = Arc::clone(&interviewer);
+@@ -1051,11 +1523,12 @@ mod tests {
+         tokio::task::yield_now().await;
+ 
+         let hub = test_steering_hub();
+-        apply_worker_control_line(
++        apply_worker_control_message(
+             &interviewer,
+             &cancel_token,
+             &hub,
+-            r#"{"v":1,"type":"run.cancel"}"#,
++            &run_control,
++            WorkerControlEnvelope::cancel_run(),
+         )
+         .await;
+ 
+@@ -1065,57 +1538,206 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn blocking_worker_control_stream_emits_lines_and_eof() {
+-        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
++    async fn worker_control_pause_and_unpause_route_to_run_control() {
++        let interviewer = Arc::new(ControlInterviewer::new());
++        let cancel_token = CancellationToken::new();
++        let run_control = RunControlState::new();
++        let hub = test_steering_hub();
+ 
+-        read_worker_control_stream_blocking(
+-            std::io::Cursor::new(
+-                b"{\"v\":1,\"type\":\"run.cancel\"}\n{\"v\":1,\"type\":\"interview.answer\",\"qid\":\"q-1\",\"answer\":{\"kind\":\"yes\"},\"actor\":{\"kind\":\"system\",\"system_kind\":\"engine\"}}\n",
+-            ),
+-            &event_tx,
++        apply_worker_control_message(
++            &interviewer,
++            &cancel_token,
++            &hub,
++            &run_control,
++            WorkerControlEnvelope::pause_run(),
++        )
++        .await;
++        assert!(run_control.pause_requested());
++
++        apply_worker_control_message(
++            &interviewer,
++            &cancel_token,
++            &hub,
++            &run_control,
++            WorkerControlEnvelope::unpause_run(),
++        )
++        .await;
++        assert!(!run_control.pause_requested());
++    }
++
++    #[tokio::test]
++    async fn duplicate_delivery_ids_are_not_applied_twice() {
++        let interviewer = Arc::new(ControlInterviewer::new());
++        let cancel_token = CancellationToken::new();
++        let run_control = RunControlState::new();
++        let hub = test_steering_hub();
++        let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
++        let frame = fabro_interview::WorkerControlDeliveryFrame {
++            id:       "local:1".to_string(),
++            envelope: WorkerControlEnvelope::pause_run(),
++        };
++
++        assert!(
++            apply_worker_control_delivery_frame(
++                &interviewer,
++                &cancel_token,
++                &hub,
++                &run_control,
++                &mut applied_ids,
++                frame.clone(),
++            )
++            .await
++        );
++        assert!(
++            !apply_worker_control_delivery_frame(
++                &interviewer,
++                &cancel_token,
++                &hub,
++                &run_control,
++                &mut applied_ids,
++                frame,
++            )
++            .await
++        );
++
++        assert_eq!(applied_ids.last_applied_id(), Some("local:1"));
++    }
++
++    #[test]
++    fn worker_control_request_construction_for_http_targets() {
++        let run_id = fixtures::RUN_1;
++        let request = build_worker_control_stream_request(
++            &ServerTarget::http_url("http://example.com:3000").unwrap(),
++            &run_id,
++            "worker-token",
++            None,
++        )
++        .unwrap();
++        assert_eq!(
++            request.uri(),
++            format!("ws://example.com:3000/api/v1/runs/{run_id}/worker/control-stream")
++        );
++        assert_eq!(request.authorization(), Some("Bearer worker-token"));
++
++        let reconnect = build_worker_control_stream_request(
++            &ServerTarget::http_url("https://example.com").unwrap(),
++            &run_id,
++            "worker-token",
++            Some("local:42"),
++        )
++        .unwrap();
++        assert_eq!(
++            reconnect.uri(),
++            format!("wss://example.com/api/v1/runs/{run_id}/worker/control-stream?after=local:42")
+         );
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn worker_control_request_construction_for_unix_socket_targets() {
++        let run_id = fixtures::RUN_1;
++        let request = build_worker_control_stream_request(
++            &ServerTarget::unix_socket_path("/tmp/fabro.sock").unwrap(),
++            &run_id,
++            "worker-token",
++            Some("local:42"),
++        )
++        .unwrap();
+ 
+         assert_eq!(
+-            event_rx.try_recv(),
+-            Ok(WorkerControlStreamEvent::Line(
+-                r#"{"v":1,"type":"run.cancel"}"#.to_string()
+-            ))
++            request.uri(),
++            format!("ws://fabro/api/v1/runs/{run_id}/worker/control-stream?after=local:42")
+         );
+         assert_eq!(
+-            event_rx.try_recv(),
+-            Ok(WorkerControlStreamEvent::Line(
+-                r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"},"actor":{"kind":"system","system_kind":"engine"}}"#
+-                    .to_string()
+-            ))
++            request.unix_socket_path.as_deref(),
++            Some(std::path::Path::new("/tmp/fabro.sock"))
+         );
+-        assert_eq!(event_rx.try_recv(), Ok(WorkerControlStreamEvent::Eof));
+     }
+ 
+-    #[tokio::test]
+-    async fn worker_control_event_loop_eof_interrupts_pending_interviews() {
++    #[test]
++    fn worker_control_reconnect_backoff_is_bounded() {
++        assert_eq!(
++            next_worker_control_reconnect_backoff(Duration::from_millis(100)),
++            Duration::from_millis(200)
++        );
++        assert_eq!(
++            next_worker_control_reconnect_backoff(Duration::from_secs(4)),
++            Duration::from_secs(5)
++        );
++        assert_eq!(
++            next_worker_control_reconnect_backoff(Duration::from_secs(5)),
++            Duration::from_secs(5)
++        );
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn worker_control_socket_times_out_without_liveness() {
++        let (worker_io, _server_io) = tokio::io::duplex(1024);
++        let worker_ws =
++            tokio_tungstenite::WebSocketStream::from_raw_socket(worker_io, Role::Client, None)
++                .await;
++        let mut socket = WorkerControlSocket::Test(Box::new(worker_ws));
+         let interviewer = Arc::new(ControlInterviewer::new());
+         let cancel_token = CancellationToken::new();
+-        let mut question = Question::new("Approve?", QuestionType::YesNo);
+-        question.id = "q-1".to_string();
+-        let ask_interviewer = Arc::clone(&interviewer);
+-        let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
+-        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
++        let hub = test_steering_hub();
++        let run_control = RunControlState::new();
++        let mut applied_ids = AppliedWorkerControlDeliveryIds::default();
++        let done = CancellationToken::new();
++
++        let task = tokio::spawn(async move {
++            handle_worker_control_socket(
++                &mut socket,
++                &interviewer,
++                &cancel_token,
++                &hub,
++                &run_control,
++                &mut applied_ids,
++                &done,
++            )
++            .await
++        });
+ 
+-        event_tx.send(WorkerControlStreamEvent::Eof).unwrap();
+-        drop(event_tx);
++        tokio::task::yield_now().await;
++        time::advance(Duration::from_secs(46)).await;
++        let result = task.await.unwrap();
++        assert!(matches!(result, Err(WorkerControlConnectError::Other(_))));
++    }
+ 
+-        let hub = test_steering_hub();
+-        handle_worker_control_stream_events(
+-            Arc::clone(&interviewer),
+-            cancel_token.clone(),
+-            hub,
+-            event_rx,
++    #[cfg(unix)]
++    #[tokio::test]
++    async fn worker_control_unix_socket_handshake_completes() {
++        let temp = tempfile::tempdir().unwrap();
++        let socket_path = temp.path().join("fabro.sock");
++        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
++        let server = tokio::spawn(async move {
++            let (stream, _) = listener.accept().await.unwrap();
++            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
++            while let Some(message) = futures::StreamExt::next(&mut socket).await {
++                match message.unwrap() {
++                    TestWebSocketMessage::Close(_) => break,
++                    TestWebSocketMessage::Ping(payload) => {
++                        futures::SinkExt::send(&mut socket, TestWebSocketMessage::Pong(payload))
++                            .await
++                            .unwrap();
++                    }
++                    _ => {}
++                }
++            }
++        });
++        let request = build_worker_control_stream_request(
++            &ServerTarget::unix_socket_path(&socket_path).unwrap(),
++            &fixtures::RUN_1,
++            "worker-token",
++            None,
+         )
+-        .await;
++        .unwrap();
+ 
+-        let answer = answer_task.await.unwrap().answer;
+-        assert_eq!(answer.value, AnswerValue::Interrupted);
+-        assert!(!cancel_token.is_cancelled());
++        let mut socket = connect_worker_control_stream(request).await.unwrap();
++        socket
++            .send(TestWebSocketMessage::Close(None))
++            .await
++            .unwrap();
++        server.await.unwrap();
+     }
+ 
+     #[tokio::test]
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/runner.rs b/lib/crates/fabro-cli/tests/it/cmd/runner.rs
+index d7d87fb93..d5b307d35 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/runner.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/runner.rs
+@@ -794,6 +794,66 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
+     )));
+ }
+ 
++#[test]
++fn detached_run_cancel_reaches_worker_over_control_websocket() {
++    let context = auth_context();
++    let run_id = unique_run_id();
++    let workflow_path = context.temp_dir.join("cancel-over-control-websocket.fabro");
++    let _gate = write_gated_workflow(
++        &workflow_path,
++        "cancel_over_control_websocket",
++        "Wait for cancellation",
++    );
++
++    let output = context
++        .command()
++        .args([
++            "run",
++            "--detach",
++            "--run-id",
++            run_id.as_str(),
++            "--environment",
++            "local",
++            workflow_path.to_str().unwrap(),
++        ])
++        .timeout(SHARED_DAEMON_TIMEOUT)
++        .output()
++        .expect("detached run should execute");
++    assert!(
++        output.status.success(),
++        "detached run failed:\nstdout:\n{}\nstderr:\n{}",
++        String::from_utf8_lossy(&output.stdout),
++        String::from_utf8_lossy(&output.stderr)
++    );
++
++    let run_dir = context.find_run_dir(&run_id);
++    wait_for_event_names(&run_dir, &["run.running"]);
++    tokio::runtime::Runtime::new()
++        .expect("test runtime should build")
++        .block_on(async {
++            let (client, base_url) =
++                server_endpoint(&context.storage_dir).expect("server endpoint should exist");
++            let response = client
++                .post(format!("{base_url}/api/v1/runs/{run_id}/cancel"))
++                .send()
++                .await
++                .expect("cancel request should succeed");
++            assert_reqwest_status(
++                response,
++                fabro_http::StatusCode::OK,
++                format!("POST /api/v1/runs/{run_id}/cancel"),
++            )
++            .await;
++        });
++
++    wait_for_status(&run_dir, &["failed"]);
++    let events = stored_worker_events(&run_dir);
++    assert!(events.iter().any(|event| matches!(
++        &event.body,
++        EventBody::RunFailed(props) if props.failure.reason == FailureReason::Cancelled
++    )));
++}
++
+ #[cfg(unix)]
+ #[test]
+ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
+diff --git a/lib/crates/fabro-interview/src/control_protocol.rs b/lib/crates/fabro-interview/src/control_protocol.rs
+index cdc820216..f76b61121 100644
+--- a/lib/crates/fabro-interview/src/control_protocol.rs
++++ b/lib/crates/fabro-interview/src/control_protocol.rs
+@@ -1,3 +1,5 @@
++use std::time::Duration;
++
+ use fabro_types::{PairId, PairMessageId, PairTarget, Principal, RunId};
+ use serde::{Deserialize, Serialize};
+ 
+@@ -5,6 +7,25 @@ use crate::{Answer, AnswerSubmission, AnswerValue};
+ 
+ pub const WORKER_CONTROL_PROTOCOL_VERSION: u8 = 1;
+ 
++/// Interval between worker-control WebSocket ping frames.
++///
++/// Server and worker both initiate pings at this cadence; either side that
++/// fails to observe inbound traffic for [`WORKER_CONTROL_WS_LIVENESS_TIMEOUT`]
++/// closes the WebSocket.
++pub const WORKER_CONTROL_WS_PING_INTERVAL: Duration = Duration::from_secs(15);
++
++/// Maximum quiet time allowed on a worker-control WebSocket before either side
++/// declares the connection dead.
++pub const WORKER_CONTROL_WS_LIVENESS_TIMEOUT: Duration = Duration::from_secs(45);
++
++/// WebSocket close-frame reason used when the server can no longer prove
++/// replay correctness for the requested cursor. Workers must treat this as
++/// fatal control-channel loss.
++pub const WORKER_CONTROL_INVALID_CURSOR_REASON: &str = "invalid_cursor";
++
++/// WebSocket close-frame reason used when the ping/pong watchdog fires.
++pub const WORKER_CONTROL_PONG_TIMEOUT_REASON: &str = "pong_timeout";
++
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ pub struct WorkerControlEnvelope {
+     pub v:       u8,
+@@ -33,6 +54,22 @@ impl WorkerControlEnvelope {
+         }
+     }
+ 
++    #[must_use]
++    pub fn pause_run() -> Self {
++        Self {
++            v:       WORKER_CONTROL_PROTOCOL_VERSION,
++            message: WorkerControlMessage::RunPause,
++        }
++    }
++
++    #[must_use]
++    pub fn unpause_run() -> Self {
++        Self {
++            v:       WORKER_CONTROL_PROTOCOL_VERSION,
++            message: WorkerControlMessage::RunUnpause,
++        }
++    }
++
+     #[must_use]
+     pub fn steer(text: impl Into<String>, actor: Principal) -> Self {
+         Self {
+@@ -121,6 +158,10 @@ pub enum WorkerControlMessage {
+     },
+     #[serde(rename = "run.cancel")]
+     RunCancel,
++    #[serde(rename = "run.pause")]
++    RunPause,
++    #[serde(rename = "run.unpause")]
++    RunUnpause,
+     #[serde(rename = "run.steer")]
+     Steer { text: String, actor: Principal },
+     #[serde(rename = "run.interrupt")]
+@@ -147,6 +188,12 @@ pub enum WorkerControlMessage {
+     PairEnd { pair_id: PairId, actor: Principal },
+ }
+ 
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct WorkerControlDeliveryFrame {
++    pub id:       String,
++    pub envelope: WorkerControlEnvelope,
++}
++
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(tag = "kind", rename_all = "snake_case")]
+ pub enum WorkerControlAnswer {
+@@ -229,6 +276,26 @@ mod tests {
+         assert_eq!(parsed, envelope);
+     }
+ 
++    #[test]
++    fn pause_run_round_trips_through_json() {
++        let envelope = WorkerControlEnvelope::pause_run();
++        let json = serde_json::to_string(&envelope).unwrap();
++        assert_eq!(json, r#"{"v":1,"type":"run.pause"}"#);
++
++        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
++        assert_eq!(parsed, envelope);
++    }
++
++    #[test]
++    fn unpause_run_round_trips_through_json() {
++        let envelope = WorkerControlEnvelope::unpause_run();
++        let json = serde_json::to_string(&envelope).unwrap();
++        assert_eq!(json, r#"{"v":1,"type":"run.unpause"}"#);
++
++        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
++        assert_eq!(parsed, envelope);
++    }
++
+     #[test]
+     fn steer_append_round_trips_through_json() {
+         let envelope = WorkerControlEnvelope::steer("try again", Principal::System {
+@@ -326,4 +393,20 @@ mod tests {
+             serde_json::from_str(&serde_json::to_string(&end).unwrap()).unwrap();
+         assert_eq!(parsed, end);
+     }
++
++    #[test]
++    fn delivery_frame_round_trips_through_json() {
++        let frame = WorkerControlDeliveryFrame {
++            id:       "local:42".to_string(),
++            envelope: WorkerControlEnvelope::cancel_run(),
++        };
++        let json = serde_json::to_string(&frame).unwrap();
++        assert_eq!(
++            json,
++            r#"{"id":"local:42","envelope":{"v":1,"type":"run.cancel"}}"#
++        );
++
++        let parsed: WorkerControlDeliveryFrame = serde_json::from_str(&json).unwrap();
++        assert_eq!(parsed, frame);
++    }
+ }
+diff --git a/lib/crates/fabro-interview/src/lib.rs b/lib/crates/fabro-interview/src/lib.rs
+index 4c050c4f7..6d8c414a1 100644
+--- a/lib/crates/fabro-interview/src/lib.rs
++++ b/lib/crates/fabro-interview/src/lib.rs
+@@ -222,8 +222,10 @@ pub use callback::CallbackInterviewer;
+ pub use console::ConsoleInterviewer;
+ pub use control::{ControlInterviewer, SubmitError};
+ pub use control_protocol::{
+-    WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
+-    WorkerControlMessage,
++    WORKER_CONTROL_INVALID_CURSOR_REASON, WORKER_CONTROL_PONG_TIMEOUT_REASON,
++    WORKER_CONTROL_PROTOCOL_VERSION, WORKER_CONTROL_WS_LIVENESS_TIMEOUT,
++    WORKER_CONTROL_WS_PING_INTERVAL, WorkerControlAnswer, WorkerControlDeliveryFrame,
++    WorkerControlEnvelope, WorkerControlMessage,
+ };
+ pub use queue::QueueInterviewer;
+ pub use recording::RecordingInterviewer;
+diff --git a/lib/crates/fabro-server/Cargo.toml b/lib/crates/fabro-server/Cargo.toml
+index c36eee94a..dfde73f66 100644
+--- a/lib/crates/fabro-server/Cargo.toml
++++ b/lib/crates/fabro-server/Cargo.toml
+@@ -69,6 +69,7 @@ serde.workspace = true
+ serde_json.workspace = true
+ serde_yaml = "0.9"
+ anyhow.workspace = true
++async-trait.workspace = true
+ clap.workspace = true
+ toml.workspace = true
+ toml_edit.workspace = true
+@@ -109,8 +110,8 @@ http-body-util = "0.1"
+ httpmock = "0.8"
+ serde_yaml = "0.9"
+ tracing-subscriber.workspace = true
+-async-trait.workspace = true
+ tokio-util.workspace = true
++tokio-tungstenite.workspace = true
+ fabro-macros = { path = "../fabro-macros" }
+ fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }
+ fabro-test = { workspace = true }
+diff --git a/lib/crates/fabro-server/src/automation_materializer.rs b/lib/crates/fabro-server/src/automation_materializer.rs
+new file mode 100644
+index 000000000..74c9c2677
+--- /dev/null
++++ b/lib/crates/fabro-server/src/automation_materializer.rs
+@@ -0,0 +1,797 @@
++use std::path::{Path, PathBuf};
++use std::time::Duration;
++
++use anyhow::Context as _;
++use async_trait::async_trait;
++use base64::Engine as _;
++use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
++use fabro_api::types::RunManifest;
++use fabro_automation::{AutomationId, AutomationTarget};
++use fabro_manifest::ManifestBuildInput;
++use fabro_types::{DirtyStatus, GitContext, PreRunPushOutcome, RunId};
++use fabro_util::error::collect_chain;
++use tokio::process::Command;
++use tokio::{fs, task, time};
++
++const GIT_CLONE_TIMEOUT: Duration = Duration::from_mins(2);
++const GIT_FETCH_TIMEOUT: Duration = Duration::from_mins(1);
++const GIT_CHECKOUT_TIMEOUT: Duration = Duration::from_secs(30);
++const GIT_REV_PARSE_TIMEOUT: Duration = Duration::from_secs(10);
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub(crate) struct AutomationRunMaterializeInput {
++    pub automation_id:      AutomationId,
++    pub target:             AutomationTarget,
++    pub run_id:             RunId,
++    pub user_settings_path: PathBuf,
++    pub temp_root:          PathBuf,
++}
++
++#[derive(Debug, Clone)]
++pub(crate) struct AutomationRunMaterialized {
++    pub manifest:                 RunManifest,
++    pub submitted_manifest_bytes: Vec<u8>,
++}
++
++#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
++pub(crate) enum AutomationRunMaterializeError {
++    #[error("invalid automation target: {0}")]
++    InvalidTarget(String),
++    #[error("failed to clone automation repository: {0}")]
++    CloneFailed(String),
++    #[error("failed to resolve automation workflow: {0}")]
++    WorkflowNotFound(String),
++    #[error("failed to build run manifest: {0}")]
++    Manifest(String),
++}
++
++#[async_trait]
++pub(crate) trait AutomationRunMaterializer: Send + Sync {
++    async fn materialize(
++        &self,
++        input: AutomationRunMaterializeInput,
++    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError>;
++}
++
++#[derive(Clone)]
++pub(crate) struct ProductionAutomationRunMaterializer {
++    github_credentials:  Option<fabro_github::GitHubCredentials>,
++    github_api_base_url: String,
++    http_client:         Option<fabro_http::HttpClient>,
++}
++
++impl ProductionAutomationRunMaterializer {
++    pub(crate) fn new(
++        github_credentials: Option<fabro_github::GitHubCredentials>,
++        github_api_base_url: String,
++        http_client: Option<fabro_http::HttpClient>,
++    ) -> Self {
++        Self {
++            github_credentials,
++            github_api_base_url,
++            http_client,
++        }
++    }
++}
++
++#[async_trait]
++impl AutomationRunMaterializer for ProductionAutomationRunMaterializer {
++    async fn materialize(
++        &self,
++        input: AutomationRunMaterializeInput,
++    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError> {
++        let repo = parse_github_repository_slug(&input.target.repository)?;
++        fs::create_dir_all(&input.temp_root).await.map_err(|err| {
++            AutomationRunMaterializeError::CloneFailed(format!(
++                "failed to create temp root {}: {err}",
++                input.temp_root.display()
++            ))
++        })?;
++        let temp_dir = tempfile::Builder::new()
++            .prefix(&format!(
++                "automation-{}-{}-",
++                input.automation_id.as_str(),
++                input.run_id
++            ))
++            .tempdir_in(&input.temp_root)
++            .map_err(|err| {
++                AutomationRunMaterializeError::CloneFailed(format!(
++                    "failed to create per-run temp directory under {}: {err}",
++                    input.temp_root.display()
++                ))
++            })?;
++        let checkout_dir = temp_dir.path().join("repo");
++        let clone_url = github_clone_url(&repo);
++        let auth = resolve_git_auth_config(
++            self.github_credentials.as_ref(),
++            &repo,
++            &self.github_api_base_url,
++            self.http_client.clone(),
++        )
++        .await
++        .map_err(|err| {
++            AutomationRunMaterializeError::CloneFailed(render_error_chain(err.as_ref()))
++        })?;
++
++        run_git_plan(build_clone_plan(&clone_url, &checkout_dir, auth.as_ref())).await?;
++        run_git_plan(build_fetch_ref_plan(
++            &clone_url,
++            &checkout_dir,
++            &input.target.ref_selector,
++            auth.as_ref(),
++        ))
++        .await?;
++        run_git_plan(build_checkout_ref_plan(&checkout_dir)).await?;
++        let checked_out_sha = run_git_plan(build_rev_parse_head_plan(&checkout_dir))
++            .await
++            .map(|stdout| String::from_utf8_lossy(&stdout).trim().to_string())?;
++
++        let manifest_input = ManifestFromCheckoutInput {
++            input,
++            checkout_dir,
++            repo,
++            checked_out_sha: Some(checked_out_sha),
++        };
++        task::spawn_blocking(move || build_manifest_from_checkout(manifest_input))
++            .await
++            .map_err(|err| {
++                AutomationRunMaterializeError::Manifest(format!(
++                    "manifest build task failed: {err}"
++                ))
++            })?
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub(crate) struct GithubRepository {
++    owner: String,
++    name:  String,
++}
++
++fn parse_github_repository_slug(
++    value: &str,
++) -> Result<GithubRepository, AutomationRunMaterializeError> {
++    let Some((owner, repo)) = value.split_once('/') else {
++        return Err(AutomationRunMaterializeError::InvalidTarget(format!(
++            "repository must be a GitHub owner/repo slug: {value}"
++        )));
++    };
++    if repo.contains('/') || !valid_github_owner(owner) || !valid_github_repo(repo) {
++        return Err(AutomationRunMaterializeError::InvalidTarget(format!(
++            "repository must be a GitHub owner/repo slug: {value}"
++        )));
++    }
++    Ok(GithubRepository {
++        owner: owner.to_string(),
++        name:  repo.to_string(),
++    })
++}
++
++fn valid_github_owner(value: &str) -> bool {
++    if value.is_empty() || value.len() > 39 {
++        return false;
++    }
++    let bytes = value.as_bytes();
++    let first = bytes[0];
++    let last = bytes[bytes.len() - 1];
++    (first.is_ascii_alphanumeric() && last.is_ascii_alphanumeric())
++        && bytes
++            .iter()
++            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
++}
++
++fn valid_github_repo(value: &str) -> bool {
++    !value.is_empty()
++        && value.len() <= 100
++        && value != "."
++        && value != ".."
++        && !value.starts_with('.')
++        && value
++            .bytes()
++            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
++}
++
++fn github_clone_url(repo: &GithubRepository) -> String {
++    format!("https://github.com/{}/{}.git", repo.owner, repo.name)
++}
++
++fn github_metadata_url(repo: &GithubRepository) -> String {
++    format!("https://github.com/{}/{}", repo.owner, repo.name)
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct GitAuthConfig {
++    extraheader:      Option<String>,
++    sensitive_values: Vec<String>,
++}
++
++impl GitAuthConfig {
++    fn new(username: Option<String>, password: Option<String>) -> Self {
++        let Some(password) = password.filter(|value| !value.is_empty()) else {
++            return Self {
++                extraheader:      None,
++                sensitive_values: Vec::new(),
++            };
++        };
++        let username = username
++            .filter(|value| !value.is_empty())
++            .unwrap_or_else(|| "x-access-token".to_string());
++        let encoded_credentials = BASE64_STANDARD.encode(format!("{username}:{password}"));
++        let extraheader = basic_auth_header_from_encoded(&encoded_credentials);
++        Self {
++            sensitive_values: vec![password, encoded_credentials, extraheader.clone()],
++            extraheader:      Some(extraheader),
++        }
++    }
++
++    fn git_env(&self, clone_url: &str) -> Vec<(String, String)> {
++        let Some(extraheader) = self.extraheader.as_ref() else {
++            return Vec::new();
++        };
++        vec![
++            ("GIT_CONFIG_COUNT".to_string(), "1".to_string()),
++            (
++                "GIT_CONFIG_KEY_0".to_string(),
++                format!("http.{clone_url}.extraheader"),
++            ),
++            ("GIT_CONFIG_VALUE_0".to_string(), extraheader.clone()),
++        ]
++    }
++
++    fn sensitive_values(&self) -> &[String] {
++        &self.sensitive_values
++    }
++}
++
++async fn resolve_git_auth_config(
++    credentials: Option<&fabro_github::GitHubCredentials>,
++    repo: &GithubRepository,
++    github_api_base_url: &str,
++    http_client: Option<fabro_http::HttpClient>,
++) -> anyhow::Result<Option<GitAuthConfig>> {
++    let Some(credentials) = credentials else {
++        return Ok(None);
++    };
++    let context = match http_client {
++        Some(client) => {
++            fabro_github::GitHubContext::with_http_client(credentials, github_api_base_url, client)
++        }
++        None => fabro_github::GitHubContext::new(credentials, github_api_base_url),
++    };
++    let (username, password) =
++        fabro_github::resolve_clone_credentials(&context, &repo.owner, &repo.name).await?;
++    Ok(Some(GitAuthConfig::new(username, password)))
++}
++
++fn basic_auth_header(username: &str, password: &str) -> String {
++    basic_auth_header_from_encoded(&BASE64_STANDARD.encode(format!("{username}:{password}")))
++}
++
++fn basic_auth_header_from_encoded(encoded_credentials: &str) -> String {
++    format!("AUTHORIZATION: basic {encoded_credentials}")
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub(crate) struct GitCommandPlan {
++    program:          String,
++    args:             Vec<String>,
++    env:              Vec<(String, String)>,
++    current_dir:      Option<PathBuf>,
++    timeout:          Duration,
++    sensitive_values: Vec<String>,
++}
++
++impl GitCommandPlan {
++    fn new(args: impl IntoIterator<Item = impl Into<String>>, timeout: Duration) -> Self {
++        Self {
++            program: "git".to_string(),
++            args: args.into_iter().map(Into::into).collect(),
++            env: vec![("GIT_TERMINAL_PROMPT".to_string(), "0".to_string())],
++            current_dir: None,
++            timeout,
++            sensitive_values: Vec::new(),
++        }
++    }
++
++    fn current_dir(mut self, current_dir: impl Into<PathBuf>) -> Self {
++        self.current_dir = Some(current_dir.into());
++        self
++    }
++
++    fn with_auth(mut self, clone_url: &str, auth: Option<&GitAuthConfig>) -> Self {
++        if let Some(auth) = auth {
++            self.env.extend(auth.git_env(clone_url));
++            self.sensitive_values
++                .extend(auth.sensitive_values().iter().cloned());
++        }
++        self
++    }
++
++    fn env_value(&self, name: &str) -> Option<&str> {
++        self.env
++            .iter()
++            .find(|(key, _)| key == name)
++            .map(|(_, value)| value.as_str())
++    }
++}
++
++fn build_clone_plan(
++    clone_url: &str,
++    checkout_dir: &Path,
++    auth: Option<&GitAuthConfig>,
++) -> GitCommandPlan {
++    GitCommandPlan::new(
++        [
++            "clone".to_string(),
++            "--depth".to_string(),
++            "1".to_string(),
++            "--no-checkout".to_string(),
++            clone_url.to_string(),
++            checkout_dir.display().to_string(),
++        ],
++        GIT_CLONE_TIMEOUT,
++    )
++    .with_auth(clone_url, auth)
++}
++
++fn build_fetch_ref_plan(
++    clone_url: &str,
++    checkout_dir: &Path,
++    ref_selector: &str,
++    auth: Option<&GitAuthConfig>,
++) -> GitCommandPlan {
++    GitCommandPlan::new(
++        [
++            "fetch".to_string(),
++            "--depth".to_string(),
++            "1".to_string(),
++            "origin".to_string(),
++            "--".to_string(),
++            ref_selector.to_string(),
++        ],
++        GIT_FETCH_TIMEOUT,
++    )
++    .current_dir(checkout_dir)
++    .with_auth(clone_url, auth)
++}
++
++fn build_checkout_ref_plan(checkout_dir: &Path) -> GitCommandPlan {
++    GitCommandPlan::new(
++        ["checkout", "--force", "--detach", "FETCH_HEAD"],
++        GIT_CHECKOUT_TIMEOUT,
++    )
++    .current_dir(checkout_dir)
++}
++
++fn build_rev_parse_head_plan(checkout_dir: &Path) -> GitCommandPlan {
++    GitCommandPlan::new(["rev-parse", "HEAD"], GIT_REV_PARSE_TIMEOUT).current_dir(checkout_dir)
++}
++
++async fn run_git_plan(plan: GitCommandPlan) -> Result<Vec<u8>, AutomationRunMaterializeError> {
++    let mut command = Command::new(&plan.program);
++    command.args(&plan.args);
++    command.envs(plan.env.iter().map(|(key, value)| (key, value)));
++    if let Some(current_dir) = plan.current_dir.as_ref() {
++        command.current_dir(current_dir);
++    }
++    command.kill_on_drop(true);
++
++    let output = time::timeout(plan.timeout, command.output())
++        .await
++        .map_err(|_| {
++            AutomationRunMaterializeError::CloneFailed(format!(
++                "{} timed out after {}s",
++                safe_command_label(&plan),
++                plan.timeout.as_secs()
++            ))
++        })?
++        .map_err(|err| {
++            AutomationRunMaterializeError::CloneFailed(format!(
++                "failed to run {}: {err}",
++                safe_command_label(&plan)
++            ))
++        })?;
++
++    if output.status.success() {
++        return Ok(output.stdout);
++    }
++
++    let stdout = String::from_utf8_lossy(&output.stdout);
++    let stderr = String::from_utf8_lossy(&output.stderr);
++    let mut message = format!(
++        "{} exited with status {}",
++        safe_command_label(&plan),
++        output.status
++    );
++    if !stderr.trim().is_empty() {
++        message.push_str(": ");
++        message.push_str(stderr.trim());
++    } else if !stdout.trim().is_empty() {
++        message.push_str(": ");
++        message.push_str(stdout.trim());
++    }
++    Err(AutomationRunMaterializeError::CloneFailed(
++        redact_git_output(&message, &plan.sensitive_values),
++    ))
++}
++
++fn safe_command_label(plan: &GitCommandPlan) -> String {
++    if plan.args.is_empty() {
++        plan.program.clone()
++    } else {
++        format!("{} {}", plan.program, plan.args.join(" "))
++    }
++}
++
++fn redact_git_output(text: &str, sensitive_values: &[String]) -> String {
++    let mut redacted = fabro_redact::redact_string(text);
++    for value in sensitive_values
++        .iter()
++        .map(String::as_str)
++        .filter(|value| !value.is_empty())
++    {
++        redacted = redacted.replace(value, "REDACTED");
++    }
++    redacted
++}
++
++fn render_error_chain(error: &(dyn std::error::Error + 'static)) -> String {
++    collect_chain(error).join(": ")
++}
++
++#[derive(Debug)]
++pub(crate) struct ManifestFromCheckoutInput {
++    input:           AutomationRunMaterializeInput,
++    checkout_dir:    PathBuf,
++    repo:            GithubRepository,
++    checked_out_sha: Option<String>,
++}
++
++fn build_manifest_from_checkout(
++    args: ManifestFromCheckoutInput,
++) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError> {
++    let ManifestFromCheckoutInput {
++        input,
++        checkout_dir,
++        repo,
++        checked_out_sha,
++    } = args;
++    let built = fabro_manifest::build_run_manifest(ManifestBuildInput {
++        workflow: input.target.workflow.as_str().into(),
++        cwd: checkout_dir,
++        run_id: Some(input.run_id),
++        user_settings_path: Some(input.user_settings_path),
++        ..ManifestBuildInput::default()
++    })
++    .map_err(|err| manifest_build_error(&err))?;
++
++    let mut manifest = built.manifest;
++    manifest.git = Some(GitContext {
++        origin_url:   github_metadata_url(&repo),
++        branch:       input.target.ref_selector,
++        sha:          checked_out_sha,
++        dirty:        DirtyStatus::Clean,
++        push_outcome: PreRunPushOutcome::NotAttempted,
++    });
++    let submitted_manifest_bytes = serde_json::to_vec(&manifest)
++        .with_context(|| {
++            format!(
++                "failed to serialize materialized manifest for automation {}",
++                input.automation_id.as_str()
++            )
++        })
++        .map_err(|err| AutomationRunMaterializeError::Manifest(err.to_string()))?;
++    Ok(AutomationRunMaterialized {
++        manifest,
++        submitted_manifest_bytes,
++    })
++}
++
++fn manifest_build_error(error: &anyhow::Error) -> AutomationRunMaterializeError {
++    if error.chain().any(|source| {
++        source
++            .downcast_ref::<fabro_config::Error>()
++            .is_some_and(|err| matches!(err, fabro_config::Error::WorkflowNotFound(_)))
++    }) {
++        AutomationRunMaterializeError::WorkflowNotFound(render_error_chain(error.as_ref()))
++    } else {
++        AutomationRunMaterializeError::Manifest(render_error_chain(error.as_ref()))
++    }
++}
++
++#[cfg(any(test, feature = "test-support"))]
++#[derive(Clone)]
++pub struct TestAutomationRunMaterializer {
++    inner: std::sync::Arc<std::sync::Mutex<TestAutomationRunMaterializerState>>,
++}
++
++#[cfg(any(test, feature = "test-support"))]
++struct TestAutomationRunMaterializerState {
++    captured_inputs: Vec<AutomationRunMaterializeInput>,
++    response:        Result<AutomationRunMaterialized, AutomationRunMaterializeError>,
++}
++
++#[cfg(any(test, feature = "test-support"))]
++impl TestAutomationRunMaterializer {
++    pub fn succeed(manifest: RunManifest, submitted_manifest_bytes: Vec<u8>) -> Self {
++        Self::new(Ok(AutomationRunMaterialized {
++            manifest,
++            submitted_manifest_bytes,
++        }))
++    }
++
++    pub fn fail_invalid_target(message: impl Into<String>) -> Self {
++        Self::new(Err(AutomationRunMaterializeError::InvalidTarget(
++            message.into(),
++        )))
++    }
++
++    fn new(response: Result<AutomationRunMaterialized, AutomationRunMaterializeError>) -> Self {
++        Self {
++            inner: std::sync::Arc::new(std::sync::Mutex::new(TestAutomationRunMaterializerState {
++                captured_inputs: Vec::new(),
++                response,
++            })),
++        }
++    }
++
++    pub(crate) fn captured_inputs(&self) -> Vec<AutomationRunMaterializeInput> {
++        self.inner
++            .lock()
++            .expect("test automation materializer lock poisoned")
++            .captured_inputs
++            .clone()
++    }
++
++    pub(crate) fn into_materializer(self) -> std::sync::Arc<dyn AutomationRunMaterializer> {
++        std::sync::Arc::new(self)
++    }
++}
++
++#[cfg(any(test, feature = "test-support"))]
++#[async_trait]
++impl AutomationRunMaterializer for TestAutomationRunMaterializer {
++    async fn materialize(
++        &self,
++        input: AutomationRunMaterializeInput,
++    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError> {
++        let mut guard = self
++            .inner
++            .lock()
++            .expect("test automation materializer lock poisoned");
++        guard.captured_inputs.push(input);
++        guard.response.clone()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    #![expect(
++        clippy::disallowed_methods,
++        reason = "Materializer unit tests write small temporary workflow fixtures synchronously."
++    )]
++
++    use std::fs;
++    use std::path::Path;
++
++    use fabro_automation::{AutomationId, AutomationTarget};
++    use fabro_types::{DirtyStatus, PreRunPushOutcome, RunId};
++    use tempfile::TempDir;
++
++    use super::*;
++
++    fn target(repository: &str, ref_selector: &str, workflow: &str) -> AutomationTarget {
++        AutomationTarget {
++            repository:   repository.to_string(),
++            ref_selector: ref_selector.to_string(),
++            workflow:     workflow.to_string(),
++        }
++    }
++
++    #[test]
++    fn target_repository_urls_are_github_metadata_urls_without_credentials() {
++        let repo = parse_github_repository_slug("fabro-sh/fabro").expect("slug should parse");
++
++        assert_eq!(repo.owner, "fabro-sh");
++        assert_eq!(repo.name, "fabro");
++        assert_eq!(
++            github_clone_url(&repo),
++            "https://github.com/fabro-sh/fabro.git"
++        );
++        assert_eq!(
++            github_metadata_url(&repo),
++            "https://github.com/fabro-sh/fabro"
++        );
++        assert!(!github_clone_url(&repo).contains('@'));
++    }
++
++    #[test]
++    fn target_repository_validation_rejects_non_github_owner_repo_shapes() {
++        for value in [
++            "fabro-sh",
++            "https://github.com/fabro-sh/fabro",
++            "fabro-sh/fabro/extra",
++            "-owner/repo",
++            "owner/.git",
++        ] {
++            let error = parse_github_repository_slug(value).expect_err("invalid slug should fail");
++            assert!(
++                error.to_string().contains("invalid automation target"),
++                "unexpected error for {value}: {error}"
++            );
++        }
++    }
++
++    #[test]
++    fn ref_checkout_command_plans_use_argv_prompt_disable_and_timeouts() {
++        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
++        let clone_url = github_clone_url(&repo);
++        let temp = TempDir::new().unwrap();
++        let checkout_dir = temp.path().join("repo");
++
++        let clone = build_clone_plan(&clone_url, &checkout_dir, None);
++        assert_eq!(clone.program, "git");
++        assert_eq!(clone.args, vec![
++            "clone",
++            "--depth",
++            "1",
++            "--no-checkout",
++            "https://github.com/fabro-sh/fabro.git",
++            checkout_dir.to_str().unwrap(),
++        ]);
++        assert_eq!(clone.timeout, Duration::from_mins(2));
++        assert_eq!(clone.env_value("GIT_TERMINAL_PROMPT"), Some("0"));
++
++        let fetch = build_fetch_ref_plan(&clone_url, &checkout_dir, "feature/materialize", None);
++        assert_eq!(fetch.args, vec![
++            "fetch",
++            "--depth",
++            "1",
++            "origin",
++            "--",
++            "feature/materialize",
++        ]);
++        assert_eq!(fetch.current_dir.as_deref(), Some(checkout_dir.as_path()));
++        assert_eq!(fetch.timeout, Duration::from_mins(1));
++        assert_eq!(fetch.env_value("GIT_TERMINAL_PROMPT"), Some("0"));
++
++        let checkout = build_checkout_ref_plan(&checkout_dir);
++        assert_eq!(checkout.args, vec![
++            "checkout",
++            "--force",
++            "--detach",
++            "FETCH_HEAD"
++        ]);
++        assert_eq!(
++            checkout.current_dir.as_deref(),
++            Some(checkout_dir.as_path())
++        );
++        assert_eq!(checkout.timeout, Duration::from_secs(30));
++        assert_eq!(checkout.env_value("GIT_TERMINAL_PROMPT"), Some("0"));
++    }
++
++    #[test]
++    fn credential_redaction_removes_tokens_and_basic_auth_headers() {
++        let secret = "ghu_materializer_secret";
++        let basic = basic_auth_header("x-access-token", secret);
++        let message = format!(
++            "fatal: could not read Username for https://github.com/fabro-sh/fabro.git; token={secret}; header={basic}"
++        );
++
++        let redacted = redact_git_output(&message, &[secret.to_string(), basic.clone()]);
++
++        assert!(!redacted.contains(secret), "token leaked: {redacted}");
++        assert!(
++            !redacted.contains(&basic),
++            "basic header leaked: {redacted}"
++        );
++        let encoded_secret = BASE64_STANDARD.encode(format!("x-access-token:{secret}"));
++        assert!(
++            !redacted.contains(&encoded_secret),
++            "encoded credential leaked: {redacted}"
++        );
++        assert!(
++            redacted.contains("REDACTED"),
++            "expected redaction marker: {redacted}"
++        );
++    }
++
++    #[test]
++    fn credential_config_env_keeps_clone_url_uncredentialed() {
++        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
++        let clone_url = github_clone_url(&repo);
++        let auth = GitAuthConfig::new(
++            Some("x-access-token".to_string()),
++            Some("ghu_secret".to_string()),
++        );
++        let plan = build_clone_plan(&clone_url, Path::new("/tmp/fabro-checkout"), Some(&auth));
++
++        assert!(
++            plan.args
++                .iter()
++                .any(|arg| arg == "https://github.com/fabro-sh/fabro.git")
++        );
++        assert!(plan.args.iter().all(|arg| !arg.contains("ghu_secret")));
++        assert_eq!(plan.env_value("GIT_CONFIG_COUNT"), Some("1"));
++        assert_eq!(
++            plan.env_value("GIT_CONFIG_KEY_0"),
++            Some("http.https://github.com/fabro-sh/fabro.git.extraheader")
++        );
++        assert!(
++            plan.env_value("GIT_CONFIG_VALUE_0")
++                .is_some_and(|value| value.starts_with("AUTHORIZATION: basic "))
++        );
++    }
++
++    #[test]
++    fn workflow_path_resolution_builds_manifest_from_checkout_directory() {
++        let temp = TempDir::new().unwrap();
++        let checkout = temp.path().join("checkout");
++        let workflow_dir = checkout.join(".fabro/workflows/demo");
++        fs::create_dir_all(&workflow_dir).unwrap();
++        fs::write(checkout.join(".fabro/project.toml"), "_version = 1\n").unwrap();
++        fs::write(
++            workflow_dir.join("workflow.fabro"),
++            r#"digraph Demo { graph [goal="Ship automation"] start [shape=Mdiamond] exit [shape=Msquare] start -> exit }"#,
++        )
++        .unwrap();
++        fs::write(
++            workflow_dir.join("workflow.toml"),
++            "_version = 1\n[workflow]\ngraph = \"workflow.fabro\"\n",
++        )
++        .unwrap();
++        let user_settings_path = temp.path().join("settings.toml");
++        fs::write(&user_settings_path, "_version = 1\n").unwrap();
++        let run_id = RunId::new();
++        let repo = parse_github_repository_slug("fabro-sh/fabro").unwrap();
++        let sha = "0123456789abcdef0123456789abcdef01234567".to_string();
++
++        let materialized = build_manifest_from_checkout(ManifestFromCheckoutInput {
++            input: AutomationRunMaterializeInput {
++                automation_id: AutomationId::new("nightly").unwrap(),
++                target: target("fabro-sh/fabro", "main", "demo"),
++                run_id,
++                user_settings_path: user_settings_path.clone(),
++                temp_root: temp.path().to_path_buf(),
++            },
++            checkout_dir: checkout.clone(),
++            repo,
++            checked_out_sha: Some(sha.clone()),
++        })
++        .expect("manifest should build from checkout");
++
++        assert_eq!(
++            materialized.manifest.run_id.as_deref(),
++            Some(run_id.to_string().as_str())
++        );
++        assert_eq!(materialized.manifest.cwd, checkout.display().to_string());
++        assert_eq!(
++            materialized.manifest.target.path,
++            ".fabro/workflows/demo/workflow.fabro"
++        );
++        assert!(
++            materialized
++                .manifest
++                .configs
++                .iter()
++                .any(|config| config.path.as_deref() == Some(user_settings_path.to_str().unwrap()))
++        );
++        let git = materialized
++            .manifest
++            .git
++            .as_ref()
++            .expect("git context should be set");
++        assert_eq!(git.origin_url, "https://github.com/fabro-sh/fabro");
++        assert_eq!(git.branch, "main");
++        assert_eq!(git.sha.as_deref(), Some(sha.as_str()));
++        assert_eq!(git.dirty, DirtyStatus::Clean);
++        assert_eq!(git.push_outcome, PreRunPushOutcome::NotAttempted);
++        let submitted_manifest: serde_json::Value =
++            serde_json::from_slice(&materialized.submitted_manifest_bytes)
++                .expect("submitted bytes should be a manifest");
++        assert_eq!(
++            submitted_manifest,
++            serde_json::to_value(&materialized.manifest).unwrap()
++        );
++    }
++}
+diff --git a/lib/crates/fabro-server/src/lib.rs b/lib/crates/fabro-server/src/lib.rs
+index 443300c09..76805781c 100644
+--- a/lib/crates/fabro-server/src/lib.rs
++++ b/lib/crates/fabro-server/src/lib.rs
+@@ -9,6 +9,11 @@
+ )]
+ 
+ pub mod auth;
++#[allow(
++    dead_code,
++    reason = "Automation scheduler wiring will call the materializer; issue #398 adds the shared core first."
++)]
++mod automation_materializer;
+ mod canonical_host;
+ mod canonical_origin;
+ pub mod csp;
+@@ -43,6 +48,7 @@ pub mod static_files;
+ #[cfg(any(test, feature = "test-support"))]
+ pub mod test_support;
+ pub mod web_auth;
++mod worker_control;
+ mod worker_token;
+ 
+ pub use error::{ApiError, Error, Result};
+diff --git a/lib/crates/fabro-server/src/principal_middleware.rs b/lib/crates/fabro-server/src/principal_middleware.rs
+index acc9eb250..1b037a6ab 100644
+--- a/lib/crates/fabro-server/src/principal_middleware.rs
++++ b/lib/crates/fabro-server/src/principal_middleware.rs
+@@ -58,6 +58,7 @@ pub(crate) struct RequestAuth(pub(crate) AuthContextSlot);
+ pub(crate) struct RequiredUser(pub(crate) UserPrincipal);
+ pub(crate) struct RequiredRunManagementActor(pub(crate) Principal);
+ pub(crate) struct RequireRunScoped(pub(crate) RunId);
++pub(crate) struct RequireWorkerRunScoped(pub(crate) RunId);
+ pub(crate) struct RequireRunManagementTarget(pub(crate) RunId, pub(crate) Principal);
+ pub(crate) struct RequireRunBlob(pub(crate) RunId, pub(crate) RunBlobId);
+ pub(crate) struct RequireRunStageScoped(pub(crate) RunId, pub(crate) String);
+@@ -245,6 +246,23 @@ impl FromRequestParts<Arc<AppState>> for RequireRunScoped {
+     }
+ }
+ 
++impl FromRequestParts<Arc<AppState>> for RequireWorkerRunScoped {
++    type Rejection = Response;
++
++    async fn from_request_parts(
++        parts: &mut Parts,
++        state: &Arc<AppState>,
++    ) -> Result<Self, Self::Rejection> {
++        let Path(id): Path<String> = Path::from_request_parts(parts, state)
++            .await
++            .map_err(IntoResponse::into_response)?;
++        let run_id = parse_run_id_path(&id)?;
++        require_worker_for_run(&auth_slot_from_parts(parts), &run_id)
++            .map_err(IntoResponse::into_response)?;
++        Ok(Self(run_id))
++    }
++}
++
+ impl FromRequestParts<Arc<AppState>> for RequireRunManagementTarget {
+     type Rejection = Response;
+ 
+@@ -418,6 +436,15 @@ fn require_worker_or_user_for_run(
+     }
+ }
+ 
++fn require_worker_for_run(slot: &AuthContextSlot, route_run_id: &RunId) -> Result<(), ApiError> {
++    let context = slot.0.lock().expect("auth context lock poisoned");
++    match &context.principal {
++        Principal::Worker { run_id } if run_id == route_run_id => Ok(()),
++        Principal::Worker { .. } | Principal::User(_) => Err(ApiError::forbidden()),
++        _ => Err(auth_rejection(context.auth_status, context.auth_error_code)),
++    }
++}
++
+ fn require_run_management_target(
+     slot: &AuthContextSlot,
+     route_run_id: &RunId,
+diff --git a/lib/crates/fabro-server/src/serve.rs b/lib/crates/fabro-server/src/serve.rs
+index f4a3c5089..3042cbae1 100644
+--- a/lib/crates/fabro-server/src/serve.rs
++++ b/lib/crates/fabro-server/src/serve.rs
+@@ -776,6 +776,10 @@ where
+         http_client: None,
+         sandbox_provider_registry: None,
+         shutdown: shutdown.clone(),
++        #[cfg(test)]
++        worker_control_bus: None,
++        #[cfg(any(test, feature = "test-support"))]
++        automation_materializer_override: None,
+     })?;
+     let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
+     if reconciled > 0 {
+diff --git a/lib/crates/fabro-server/src/server.rs b/lib/crates/fabro-server/src/server.rs
+index 529a374dd..88260152c 100644
+--- a/lib/crates/fabro-server/src/server.rs
++++ b/lib/crates/fabro-server/src/server.rs
+@@ -124,7 +124,7 @@ use sha2::{Digest, Sha256};
+ use tempfile::NamedTempFile;
+ use tokio::fs;
+ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+-use tokio::process::{ChildStderr, ChildStdin, Command};
++use tokio::process::{ChildStderr, Command};
+ use tokio::sync::broadcast::error::RecvError;
+ use tokio::sync::{
+     Mutex as AsyncMutex, Notify, OwnedMutexGuard, RwLock as AsyncRwLock, Semaphore, broadcast,
+@@ -140,6 +140,10 @@ use tracing::{Instrument, debug, error, info, warn};
+ use ulid::Ulid;
+ 
+ use crate::auth::{self, GithubEndpoints, auth_translation_middleware, demo_routing_middleware};
++use crate::automation_materializer::{
++    AutomationRunMaterializeError, AutomationRunMaterializeInput, AutomationRunMaterialized,
++    AutomationRunMaterializer, ProductionAutomationRunMaterializer,
++};
+ use crate::canonical_origin::resolve_canonical_origin;
+ use crate::error::ApiError;
+ use crate::github_webhooks::{
+@@ -148,14 +152,15 @@ use crate::github_webhooks::{
+ use crate::jwt_auth::{self, AuthMode};
+ use crate::principal_middleware::{
+     AuthContextSlot, RequestAuth, RequestAuthContext, RequireRunBlob, RequireRunManagementTarget,
+-    RequireRunScoped, RequireRunStageScoped, RequireStageArtifact, RequiredUser,
+-    principal_middleware,
++    RequireRunScoped, RequireRunStageScoped, RequireStageArtifact, RequireWorkerRunScoped,
++    RequiredUser, principal_middleware,
+ };
+ use crate::request_id::{self, RequestId};
+ use crate::run_files::{FilesInFlight, new_files_in_flight};
+ use crate::server_secrets::{LlmClientResult, ServerSecrets};
+ use crate::spawn_env::{apply_render_graph_env, apply_worker_env};
+ use crate::startup::load_startup_vault;
++use crate::worker_control::{LocalWorkerControlBus, WorkerControlBus, WorkerControlBusError};
+ use crate::worker_token::{WorkerScopeSet, WorkerTokenKeys, issue_worker_token_with_scopes};
+ use crate::{
+     canonical_host, demo, diagnostics, run_manifest, security_headers, static_files, web_auth,
+@@ -267,7 +272,6 @@ enum ExecutionResult {
+ 
+ const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
+ const TERMINAL_DELETE_WORKER_GRACE: Duration = Duration::from_millis(50);
+-const WORKER_CONTROL_QUEUE_CAPACITY: usize = 8;
+ const WORKER_CONTROL_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
+ /// Per-model billing totals.
+ #[derive(Default)]
+@@ -289,8 +293,9 @@ pub(crate) type RegistryFactoryOverride =
+ 
+ #[derive(Clone)]
+ enum RunAnswerTransport {
+-    Subprocess {
+-        control_tx: mpsc::Sender<WorkerControlEnvelope>,
++    Worker {
++        run_id: RunId,
++        bus:    Arc<dyn WorkerControlBus>,
+     },
+     InProcess {
+         interviewer:  Arc<ControlInterviewer>,
+@@ -312,18 +317,46 @@ enum PairTransportError {
+ }
+ 
+ impl RunAnswerTransport {
++    async fn publish_worker_control(
++        run_id: RunId,
++        bus: &Arc<dyn WorkerControlBus>,
++        message: WorkerControlEnvelope,
++    ) -> Result<(), WorkerControlBusError> {
++        timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, bus.publish(run_id, message))
++            .await
++            .map_err(|_| WorkerControlBusError::PublishTimeout)?
++            .map(|_| ())
++    }
++
++    fn answer_error_from_bus(error: &WorkerControlBusError) -> AnswerTransportError {
++        match error {
++            WorkerControlBusError::PublishTimeout => AnswerTransportError::Timeout,
++            WorkerControlBusError::Closed
++            | WorkerControlBusError::Unavailable
++            | WorkerControlBusError::InvalidCursor { .. } => AnswerTransportError::Closed,
++        }
++    }
++
++    fn pair_error_from_bus(error: &WorkerControlBusError) -> PairTransportError {
++        match error {
++            WorkerControlBusError::PublishTimeout => PairTransportError::Timeout,
++            WorkerControlBusError::Closed
++            | WorkerControlBusError::Unavailable
++            | WorkerControlBusError::InvalidCursor { .. } => PairTransportError::Closed,
++        }
++    }
++
+     async fn submit(
+         &self,
+         qid: &str,
+         submission: AnswerSubmission,
+     ) -> Result<(), AnswerTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker { run_id, bus } => {
+                 let message = WorkerControlEnvelope::interview_answer(qid.to_string(), submission);
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*run_id, bus, message)
+                     .await
+-                    .map_err(|_| AnswerTransportError::Timeout)?
+-                    .map_err(|_| AnswerTransportError::Closed)
++                    .map_err(|err| Self::answer_error_from_bus(&err))
+             }
+             Self::InProcess { interviewer, .. } => interviewer
+                 .submit(qid, submission)
+@@ -334,12 +367,11 @@ impl RunAnswerTransport {
+ 
+     async fn cancel_run(&self) -> Result<(), AnswerTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker { run_id, bus } => {
+                 let message = WorkerControlEnvelope::cancel_run();
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*run_id, bus, message)
+                     .await
+-                    .map_err(|_| AnswerTransportError::Timeout)?
+-                    .map_err(|_| AnswerTransportError::Closed)
++                    .map_err(|err| Self::answer_error_from_bus(&err))
+             }
+             Self::InProcess { interviewer, .. } => {
+                 interviewer.cancel_all().await;
+@@ -352,12 +384,11 @@ impl RunAnswerTransport {
+     /// in-process steering hub.
+     async fn steer(&self, text: String, actor: Principal) -> Result<(), AnswerTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker { run_id, bus } => {
+                 let message = WorkerControlEnvelope::steer(text, actor);
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*run_id, bus, message)
+                     .await
+-                    .map_err(|_| AnswerTransportError::Timeout)?
+-                    .map_err(|_| AnswerTransportError::Closed)
++                    .map_err(|err| Self::answer_error_from_bus(&err))
+             }
+             Self::InProcess { steering_hub, .. } => {
+                 steering_hub.deliver_steer(text, Some(actor));
+@@ -368,12 +399,11 @@ impl RunAnswerTransport {
+ 
+     async fn interrupt(&self, actor: Principal) -> Result<(), AnswerTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker { run_id, bus } => {
+                 let message = WorkerControlEnvelope::interrupt(actor);
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*run_id, bus, message)
+                     .await
+-                    .map_err(|_| AnswerTransportError::Timeout)?
+-                    .map_err(|_| AnswerTransportError::Closed)
++                    .map_err(|err| Self::answer_error_from_bus(&err))
+             }
+             Self::InProcess { steering_hub, .. } => {
+                 steering_hub.interrupt(Some(&actor));
+@@ -388,12 +418,11 @@ impl RunAnswerTransport {
+         actor: Principal,
+     ) -> Result<(), AnswerTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker { run_id, bus } => {
+                 let message = WorkerControlEnvelope::interrupt_then_steer(text, actor);
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*run_id, bus, message)
+                     .await
+-                    .map_err(|_| AnswerTransportError::Timeout)?
+-                    .map_err(|_| AnswerTransportError::Closed)
++                    .map_err(|err| Self::answer_error_from_bus(&err))
+             }
+             Self::InProcess { steering_hub, .. } => {
+                 steering_hub.interrupt_then_steer(&text, Some(&actor));
+@@ -410,12 +439,14 @@ impl RunAnswerTransport {
+         actor: Principal,
+     ) -> Result<(), PairTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker {
++                run_id: worker_run_id,
++                bus,
++            } => {
+                 let message = WorkerControlEnvelope::start_pair(run_id, pair_id, target, actor);
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*worker_run_id, bus, message)
+                     .await
+-                    .map_err(|_| PairTransportError::Timeout)?
+-                    .map_err(|_| PairTransportError::Closed)
++                    .map_err(|err| Self::pair_error_from_bus(&err))
+             }
+             Self::InProcess { steering_hub, .. } => steering_hub
+                 .start_pair(run_id, pair_id, target, Some(actor))
+@@ -433,7 +464,7 @@ impl RunAnswerTransport {
+         actor: Principal,
+     ) -> Result<(), PairTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker { run_id, bus } => {
+                 let message = WorkerControlEnvelope::pair_message(
+                     pair_id,
+                     message_id,
+@@ -441,10 +472,9 @@ impl RunAnswerTransport {
+                     client_message_id.clone(),
+                     actor,
+                 );
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*run_id, bus, message)
+                     .await
+-                    .map_err(|_| PairTransportError::Timeout)?
+-                    .map_err(|_| PairTransportError::Closed)
++                    .map_err(|err| Self::pair_error_from_bus(&err))
+             }
+             Self::InProcess { steering_hub, .. } => steering_hub
+                 .send_pair_message(pair_id, message_id, text, client_message_id, Some(actor))
+@@ -455,12 +485,11 @@ impl RunAnswerTransport {
+ 
+     async fn end_pair(&self, pair_id: PairId, actor: Principal) -> Result<(), PairTransportError> {
+         match self {
+-            Self::Subprocess { control_tx } => {
++            Self::Worker { run_id, bus } => {
+                 let message = WorkerControlEnvelope::end_pair(pair_id, actor);
+-                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
++                Self::publish_worker_control(*run_id, bus, message)
+                     .await
+-                    .map_err(|_| PairTransportError::Timeout)?
+-                    .map_err(|_| PairTransportError::Closed)
++                    .map_err(|err| Self::pair_error_from_bus(&err))
+             }
+             Self::InProcess { steering_hub, .. } => steering_hub
+                 .end_pair(pair_id, Some(actor))
+@@ -468,6 +497,30 @@ impl RunAnswerTransport {
+                 .map_err(PairTransportError::Control),
+         }
+     }
++
++    async fn pause_run(&self) -> Result<(), AnswerTransportError> {
++        match self {
++            Self::Worker { run_id, bus } => {
++                let message = WorkerControlEnvelope::pause_run();
++                Self::publish_worker_control(*run_id, bus, message)
++                    .await
++                    .map_err(|err| Self::answer_error_from_bus(&err))
++            }
++            Self::InProcess { .. } => Err(AnswerTransportError::Closed),
++        }
++    }
++
++    async fn unpause_run(&self) -> Result<(), AnswerTransportError> {
++        match self {
++            Self::Worker { run_id, bus } => {
++                let message = WorkerControlEnvelope::unpause_run();
++                Self::publish_worker_control(*run_id, bus, message)
++                    .await
++                    .map_err(|err| Self::answer_error_from_bus(&err))
++            }
++            Self::InProcess { .. } => Err(AnswerTransportError::Closed),
++        }
++    }
+ }
+ 
+ #[derive(Debug, Clone)]
+@@ -1008,10 +1061,13 @@ pub struct AppState {
+     session_runtimes: SessionRuntimeManager,
+     artifact_store: ArtifactStore,
+     automation_store: Arc<AutomationStore>,
++    #[cfg(any(test, feature = "test-support"))]
++    automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
+     worker_tokens: WorkerTokenKeys,
+     started_at: Instant,
+     resource_sampler: resource_sampler::ResourceSampler,
+     max_concurrent_runs: usize,
++    pub(crate) worker_control_bus: Arc<dyn WorkerControlBus>,
+     scheduler_notify: Notify,
+     global_event_tx: broadcast::Sender<EventEnvelope>,
+     /// Per-run coalescing registry for `GET /runs/{id}/files`. Concurrent
+@@ -1048,6 +1104,33 @@ impl AppState {
+     pub(crate) fn automation_store(&self) -> &AutomationStore {
+         &self.automation_store
+     }
++
++    #[allow(
++        dead_code,
++        reason = "Automation scheduler wiring will call this after issue #398's materialization core."
++    )]
++    pub(crate) async fn materialize_automation_run(
++        &self,
++        input: AutomationRunMaterializeInput,
++    ) -> Result<AutomationRunMaterialized, AutomationRunMaterializeError> {
++        #[cfg(any(test, feature = "test-support"))]
++        if let Some(materializer) = self.automation_materializer_override.as_ref() {
++            return materializer.materialize(input).await;
++        }
++
++        let settings = self.server_settings();
++        let credentials = self
++            .github_credentials(&settings.server.integrations.github)
++            .ok()
++            .flatten();
++        ProductionAutomationRunMaterializer::new(
++            credentials,
++            self.github_api_base_url.clone(),
++            self.http_client.clone(),
++        )
++        .materialize(input)
++        .await
++    }
+ }
+ 
+ pub(crate) struct AskFabroReadiness {
+@@ -1129,21 +1212,25 @@ async fn lock_pull_request_create(
+ }
+ 
+ pub(crate) struct AppStateConfig {
+-    pub(crate) resolved_settings:         ResolvedAppStateSettings,
++    pub(crate) resolved_settings: ResolvedAppStateSettings,
+     pub(crate) registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+-    pub(crate) max_concurrent_runs:       usize,
+-    pub(crate) store:                     Arc<Database>,
+-    pub(crate) artifact_store:            ArtifactStore,
+-    pub(crate) vault_path:                PathBuf,
+-    pub(crate) variables_path:            PathBuf,
+-    pub(crate) preloaded_vault:           Option<Vault>,
+-    pub(crate) server_secrets:            ServerSecrets,
+-    pub(crate) env_lookup:                EnvLookup,
+-    pub(crate) github_api_base_url:       Option<String>,
+-    pub(crate) active_config_path:        PathBuf,
+-    pub(crate) http_client:               Option<fabro_http::HttpClient>,
++    pub(crate) max_concurrent_runs: usize,
++    pub(crate) store: Arc<Database>,
++    pub(crate) artifact_store: ArtifactStore,
++    pub(crate) vault_path: PathBuf,
++    pub(crate) variables_path: PathBuf,
++    pub(crate) preloaded_vault: Option<Vault>,
++    pub(crate) server_secrets: ServerSecrets,
++    pub(crate) env_lookup: EnvLookup,
++    pub(crate) github_api_base_url: Option<String>,
++    pub(crate) active_config_path: PathBuf,
++    pub(crate) http_client: Option<fabro_http::HttpClient>,
+     pub(crate) sandbox_provider_registry: Option<SandboxProviderRegistry>,
+-    pub(crate) shutdown:                  CancellationToken,
++    pub(crate) shutdown: CancellationToken,
++    #[cfg(test)]
++    pub(crate) worker_control_bus: Option<Arc<dyn WorkerControlBus>>,
++    #[cfg(any(test, feature = "test-support"))]
++    pub(crate) automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
+ }
+ 
+ #[derive(Clone)]
+@@ -2177,6 +2264,10 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+         http_client,
+         sandbox_provider_registry,
+         shutdown,
++        #[cfg(test)]
++        worker_control_bus,
++        #[cfg(any(test, feature = "test-support"))]
++        automation_materializer_override,
+     } = config;
+ 
+     let automation_dir = automation_dir_for_active_config(&active_config_path);
+@@ -2260,6 +2351,16 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+     };
+     let worker_tokens = worker_token_keys_from_server_secrets(&server_secrets)?;
+     let github_api_base_url = github_api_base_url.unwrap_or_else(fabro_github::github_api_base_url);
++    let worker_control_bus: Arc<dyn WorkerControlBus> = {
++        #[cfg(test)]
++        {
++            worker_control_bus.unwrap_or_else(|| Arc::new(LocalWorkerControlBus::new()))
++        }
++        #[cfg(not(test))]
++        {
++            Arc::new(LocalWorkerControlBus::new())
++        }
++    };
+     Ok(Arc::new(AppState {
+         runs: Mutex::new(HashMap::new()),
+         aggregate_billing: Mutex::new(BillingAccumulator::default()),
+@@ -2267,10 +2368,13 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
+         session_runtimes: SessionRuntimeManager::new(),
+         artifact_store,
+         automation_store,
++        #[cfg(any(test, feature = "test-support"))]
++        automation_materializer_override,
+         worker_tokens,
+         started_at: Instant::now(),
+         resource_sampler: resource_sampler::ResourceSampler::new(),
+         max_concurrent_runs,
++        worker_control_bus,
+         scheduler_notify: Notify::new(),
+         global_event_tx,
+         files_in_flight: new_files_in_flight(),
+@@ -2719,6 +2823,13 @@ fn clear_live_run_state(run: &mut ManagedRun) {
+     run.worker_pgid = None;
+ }
+ 
++fn cleanup_worker_control_bus_for_run(state: &AppState, run_id: RunId) {
++    let bus = Arc::clone(&state.worker_control_bus);
++    tokio::spawn(async move {
++        bus.cleanup_run(run_id).await;
++    });
++}
++
+ fn reconcile_live_interview_state_for_event(run: &mut ManagedRun, event: &RunEvent) {
+     match &event.body {
+         EventBody::InterviewCompleted(props) => {
+@@ -2966,6 +3077,7 @@ async fn finish_cancelled_run_before_execution(state: &Arc<AppState>, run_id: Ru
+         clear_live_run_state(managed_run);
+     }
+     drop(runs);
++    cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
+     state.scheduler_notify.notify_one();
+ }
+ 
+@@ -3101,6 +3213,7 @@ fn fail_managed_run(state: &Arc<AppState>, run_id: RunId, reason: FailureReason,
+         managed_run.error = Some(message);
+         clear_live_run_state(managed_run);
+     }
++    cleanup_worker_control_bus_for_run(state.as_ref(), run_id);
+ }
+ 
+ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent) {
+@@ -3176,6 +3289,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
+             managed_run.active_api_targets.clear();
+             managed_run.active_steerable_stages.clear();
+             managed_run.active_non_steerable_stages.clear();
++            cleanup_worker_control_bus_for_run(state, run_id);
+         }
+         EventBody::RunFailed(props) => {
+             managed_run.status = RunStatus::Failed {
+@@ -3188,6 +3302,7 @@ fn update_live_run_from_event(state: &AppState, run_id: RunId, event: &RunEvent)
+             managed_run.active_api_targets.clear();
+             managed_run.active_steerable_stages.clear();
+             managed_run.active_non_steerable_stages.clear();
++            cleanup_worker_control_bus_for_run(state, run_id);
+         }
+         // Track active agent sessions by steerability. Activated/deactivated
+         // are leased by session id so stale deactivations cannot clear a newer
+@@ -3272,20 +3387,6 @@ async fn drain_worker_stderr(run_id: RunId, stderr: ChildStderr) -> anyhow::Resu
+     Ok(())
+ }
+ 
+-async fn pump_worker_control_jsonl(
+-    mut stdin: ChildStdin,
+-    mut control_rx: mpsc::Receiver<WorkerControlEnvelope>,
+-) -> anyhow::Result<()> {
+-    while let Some(message) = control_rx.recv().await {
+-        let mut line = serde_json::to_vec(&message)?;
+-        line.push(b'\n');
+-        stdin.write_all(&line).await?;
+-        stdin.flush().await?;
+-    }
+-
+-    Ok(())
+-}
+-
+ async fn append_worker_exit_failure(
+     run_store: &fabro_store::RunDatabase,
+     run_id: RunId,
+@@ -3369,7 +3470,7 @@ fn worker_command(
+         .arg(run_id.to_string())
+         .arg("--mode")
+         .arg(worker_mode_arg(mode))
+-        .stdin(Stdio::piped())
++        .stdin(Stdio::null())
+         .stdout(worker_stdout)
+         .stderr(Stdio::piped());
+ 
+@@ -4048,25 +4149,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
+         }
+     }
+ 
+-    let Some(stdin) = child.stdin.take() else {
+-        let message = "Worker stdin pipe was unavailable".to_string();
+-        tracing::error!(run_id = %run_id, "{message}");
+-        let _ = child.start_kill();
+-        let failure_event = workflow_event::Event::workflow_run_failed_from_error(
+-            &WorkflowError::engine(message.clone()),
+-            fabro_types::RunTiming::default(),
+-            FailureReason::LaunchFailed,
+-            None,
+-            None,
+-            None,
+-            None,
+-        );
+-        let _ = workflow_event::append_event(&run_store, &run_id, &failure_event).await;
+-        fail_managed_run(&state, run_id, FailureReason::LaunchFailed, message);
+-        state.scheduler_notify.notify_one();
+-        return;
+-    };
+-
+     let Some(stderr) = child.stderr.take() else {
+         let message = "Worker stderr pipe was unavailable".to_string();
+         tracing::error!(run_id = %run_id, "{message}");
+@@ -4086,15 +4168,16 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
+         return;
+     };
+ 
+-    let (control_tx, control_rx) = mpsc::channel(WORKER_CONTROL_QUEUE_CAPACITY);
+     {
+         let mut runs = state.runs.lock().expect("runs lock poisoned");
+         if let Some(managed_run) = runs.get_mut(&run_id) {
+-            managed_run.answer_transport = Some(RunAnswerTransport::Subprocess { control_tx });
++            managed_run.answer_transport = Some(RunAnswerTransport::Worker {
++                run_id,
++                bus: Arc::clone(&state.worker_control_bus),
++            });
+         }
+     }
+ 
+-    let control_task = tokio::spawn(pump_worker_control_jsonl(stdin, control_rx));
+     let stderr_task = tokio::spawn(drain_worker_stderr(run_id, stderr));
+ 
+     let wait_status = match child.wait().await {
+@@ -4119,9 +4202,6 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
+         }
+     };
+ 
+-    control_task.abort();
+-    let _ = control_task.await;
+-
+     match stderr_task.await {
+         Ok(Ok(())) => {}
+         Ok(Err(err)) => {
+diff --git a/lib/crates/fabro-server/src/server/handler/lifecycle.rs b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+index 0c2697133..d8a2589ac 100644
+--- a/lib/crates/fabro-server/src/server/handler/lifecycle.rs
++++ b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+@@ -387,10 +387,6 @@ async fn cancel_run(
+                 | RunStatus::Running
+                 | RunStatus::Blocked { .. }
+                 | RunStatus::Paused { .. } => {
+-                    let use_cancel_signal = !matches!(
+-                        managed_run.answer_transport,
+-                        Some(RunAnswerTransport::InProcess { .. })
+-                    );
+                     let persist_cancelled_status = matches!(
+                         managed_run.status,
+                         RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable
+@@ -404,9 +400,7 @@ async fn cancel_run(
+                         persist_cancelled_status,
+                         managed_run.answer_transport.clone(),
+                         managed_run.cancel_token.clone(),
+-                        use_cancel_signal
+-                            .then(|| managed_run.cancel_tx.take())
+-                            .flatten(),
++                        managed_run.cancel_tx.take(),
+                         managed_run.worker_pid,
+                     ))
+                 }
+@@ -436,22 +430,29 @@ async fn cancel_run(
+     if let Some(token) = &cancel_token {
+         token.cancel();
+     }
+-    let sent_cancel_signal = if let Some(cancel_tx) = cancel_tx {
++    let sent_in_process_cancel = if let Some(cancel_tx) = cancel_tx {
+         let _ = cancel_tx.send(());
+         true
+     } else {
+         false
+     };
+-    if let Some(answer_transport) = answer_transport {
+-        if !(sent_cancel_signal && matches!(answer_transport, RunAnswerTransport::InProcess { .. }))
++    let delivered_control = if let Some(answer_transport) = answer_transport {
++        if sent_in_process_cancel
++            && matches!(answer_transport, RunAnswerTransport::InProcess { .. })
+         {
+-            let _ = answer_transport.cancel_run().await;
++            true
++        } else {
++            answer_transport.cancel_run().await.is_ok()
++        }
++    } else {
++        false
++    };
++    if !delivered_control {
++        if let Some(worker_pid) = worker_pid {
++            #[cfg(unix)]
++            fabro_proc::sigterm(worker_pid);
++            schedule_worker_kill(Arc::clone(&state), id, worker_pid);
+         }
+-    }
+-    if let Some(worker_pid) = worker_pid {
+-        #[cfg(unix)]
+-        fabro_proc::sigterm(worker_pid);
+-        schedule_worker_kill(Arc::clone(&state), id, worker_pid);
+     }
+ 
+     if persist_cancelled_status {
+@@ -504,9 +505,9 @@ async fn unmanaged_cancel_response(
+ /// How `pause_run` should enact the transition, chosen from the current run
+ /// status.
+ enum PauseMode {
+-    /// Worker is running; ask it to pause via SIGUSR1. Status flips to
+-    /// `Paused` once the worker acknowledges.
+-    Signal { worker_pid: u32 },
++    /// Worker is running; ask it to pause via the worker control bus. Status
++    /// flips to `Paused` once the worker acknowledges.
++    Transport { transport: RunAnswerTransport },
+     /// Worker is blocked on a human gate; flip to `Paused` directly by
+     /// appending `RunPaused` ourselves.
+     AppendEvent,
+@@ -514,8 +515,9 @@ enum PauseMode {
+ 
+ /// How `unpause_run` should enact the transition.
+ enum UnpauseMode {
+-    /// No outstanding block; ask the worker to resume via SIGUSR2.
+-    Signal { worker_pid: u32 },
++    /// No outstanding block; ask the worker to resume via the worker control
++    /// bus.
++    Transport { transport: RunAnswerTransport },
+     /// Was paused while blocked; append `RunUnpaused` and let the reducer
+     /// restore the underlying blocked state from `Paused { prior_block }`.
+     AppendEvent,
+@@ -544,11 +546,11 @@ async fn pause_run(
+         let runs = state.runs.lock().expect("runs lock poisoned");
+         match runs.get(&id) {
+             Some(managed_run) if managed_run.status == RunStatus::Running => {
+-                let Some(worker_pid) = managed_run.worker_pid else {
++                let Some(transport) = managed_run.answer_transport.clone() else {
+                     return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
+                         .into_response();
+                 };
+-                PauseMode::Signal { worker_pid }
++                PauseMode::Transport { transport }
+             }
+             Some(managed_run) if matches!(managed_run.status, RunStatus::Blocked { .. }) => {
+                 PauseMode::AppendEvent
+@@ -578,11 +580,14 @@ async fn pause_run(
+         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+     }
+     match mode {
+-        PauseMode::Signal { worker_pid } => {
+-            #[cfg(unix)]
+-            fabro_proc::sigusr1(worker_pid);
+-            #[cfg(not(unix))]
+-            let _ = worker_pid;
++        PauseMode::Transport { transport } => {
++            if transport.pause_run().await.is_err() {
++                return ApiError::new(
++                    StatusCode::SERVICE_UNAVAILABLE,
++                    "Failed to deliver pause request to the active run.",
++                )
++                .into_response();
++            }
+         }
+         PauseMode::AppendEvent => {
+             if let Some(response) = synchronous_transition(state.as_ref(), id, |events| {
+@@ -625,11 +630,11 @@ async fn unpause_run(
+                     prior_block: Some(_),
+                 } => UnpauseMode::AppendEvent,
+                 RunStatus::Paused { prior_block: None } => {
+-                    let Some(worker_pid) = managed_run.worker_pid else {
++                    let Some(transport) = managed_run.answer_transport.clone() else {
+                         return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.")
+                             .into_response();
+                     };
+-                    UnpauseMode::Signal { worker_pid }
++                    UnpauseMode::Transport { transport }
+                 }
+                 _ => {
+                     return ApiError::new(StatusCode::CONFLICT, "Run is not paused.")
+@@ -658,11 +663,14 @@ async fn unpause_run(
+         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+     }
+     match mode {
+-        UnpauseMode::Signal { worker_pid } => {
+-            #[cfg(unix)]
+-            fabro_proc::sigusr2(worker_pid);
+-            #[cfg(not(unix))]
+-            let _ = worker_pid;
++        UnpauseMode::Transport { transport } => {
++            if transport.unpause_run().await.is_err() {
++                return ApiError::new(
++                    StatusCode::SERVICE_UNAVAILABLE,
++                    "Failed to deliver unpause request to the active run.",
++                )
++                .into_response();
++            }
+         }
+         UnpauseMode::AppendEvent => {
+             if let Some(response) = synchronous_transition(state.as_ref(), id, |events| {
+diff --git a/lib/crates/fabro-server/src/server/handler/mod.rs b/lib/crates/fabro-server/src/server/handler/mod.rs
+index 0804cccb3..33c6aa8eb 100644
+--- a/lib/crates/fabro-server/src/server/handler/mod.rs
++++ b/lib/crates/fabro-server/src/server/handler/mod.rs
+@@ -15,7 +15,7 @@ mod lifecycle;
+ mod models;
+ mod pair;
+ mod pull_requests;
+-mod runs;
++pub(in crate::server) mod runs;
+ mod sandbox;
+ mod sandboxes;
+ mod secrets;
+@@ -23,6 +23,7 @@ mod sessions;
+ mod steer;
+ pub(in crate::server) mod system;
+ mod variables;
++mod worker_control;
+ 
+ pub(super) use system::{health, openapi_spec};
+ 
+@@ -167,6 +168,7 @@ pub(super) fn real_routes() -> Router<Arc<AppState>> {
+         .merge(models::routes())
+         .merge(secrets::routes())
+         .merge(variables::routes())
++        .merge(worker_control::routes())
+         .merge(sessions::routes())
+         .merge(system::routes())
+         .merge(completions::routes())
+diff --git a/lib/crates/fabro-server/src/server/handler/runs.rs b/lib/crates/fabro-server/src/server/handler/runs.rs
+index c4928d261..3e83bddbb 100644
+--- a/lib/crates/fabro-server/src/server/handler/runs.rs
++++ b/lib/crates/fabro-server/src/server/handler/runs.rs
+@@ -21,9 +21,10 @@ use fabro_interview::AnswerSubmission;
+ use fabro_llm::client::Client as LlmClient;
+ use fabro_types::settings::ResolveEnvError;
+ use fabro_types::{
+-    Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance, StageContextWindow,
+-    StageContextWindowStaleness, StageContextWindowUnavailableReason, StageHandler,
+-    StageModelUsage, StageProjection, SystemActorKind, WorkflowSettings, parse_blob_ref,
++    AutomationRef, Principal, RunClientProvenance, RunId, RunProvenance, RunServerProvenance,
++    StageContextWindow, StageContextWindowStaleness, StageContextWindowUnavailableReason,
++    StageHandler, StageModelUsage, StageProjection, SystemActorKind, WorkflowSettings,
++    parse_blob_ref,
+ };
+ use fabro_util::version::FABRO_VERSION;
+ use fabro_workflow::command_log::{command_log_path, read_json_string_blob, read_log_slice};
+@@ -598,12 +599,50 @@ async fn create_run(
+         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+     };
+     let explicit_title_supplied = req.title.is_some();
++    Box::pin(create_run_from_manifest(
++        state,
++        CreateRunFromManifestRequest {
++            manifest: req,
++            submitted_manifest_bytes: body.to_vec(),
++            explicit_run_id: None,
++            explicit_title_supplied,
++            actor,
++            headers,
++            automation: None,
++        },
++    ))
++    .await
++}
++
++pub(crate) struct CreateRunFromManifestRequest {
++    pub(crate) manifest:                 RunManifest,
++    pub(crate) submitted_manifest_bytes: Vec<u8>,
++    pub(crate) explicit_run_id:          Option<RunId>,
++    pub(crate) explicit_title_supplied:  bool,
++    pub(crate) actor:                    Principal,
++    pub(crate) headers:                  HeaderMap,
++    pub(crate) automation:               Option<AutomationRef>,
++}
++
++pub(crate) async fn create_run_from_manifest(
++    state: Arc<AppState>,
++    request: CreateRunFromManifestRequest,
++) -> Response {
++    let CreateRunFromManifestRequest {
++        manifest,
++        submitted_manifest_bytes,
++        explicit_run_id,
++        explicit_title_supplied,
++        actor,
++        headers,
++        automation,
++    } = request;
+     let manifest_run_defaults = state.manifest_run_defaults();
+     let manifest_environment_defaults = state.manifest_environment_defaults();
+     let mut prepared = match run_manifest::prepare_manifest_with_environment_defaults(
+         manifest_run_defaults.as_ref(),
+         manifest_environment_defaults.as_ref(),
+-        &req,
++        &manifest,
+     ) {
+         Ok(prepared) => prepared,
+         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+@@ -612,7 +651,9 @@ async fn create_run(
+         return ApiError::bad_request(format!("Run config variable interpolation failed: {err}"))
+             .into_response();
+     }
+-    let run_id = prepared.run_id.unwrap_or_else(RunId::new);
++    let run_id = explicit_run_id
++        .or(prepared.run_id)
++        .unwrap_or_else(RunId::new);
+     let provider = run_manifest::effective_sandbox_provider(&prepared.settings.run);
+     if let Some(error) =
+         run_manifest::sandbox_provider_policy_error(&state.server_settings(), provider)
+@@ -653,7 +694,8 @@ async fn create_run(
+     );
+     create_input.run_id = Some(run_id);
+     create_input.provenance = Some(run_provenance(&headers, &actor));
+-    create_input.submitted_manifest_bytes = Some(body.to_vec());
++    create_input.submitted_manifest_bytes = Some(submitted_manifest_bytes);
++    create_input.automation = automation;
+ 
+     let storage_root = match resolve_interp_string(&state.server_settings().server.storage.root) {
+         Ok(path) => PathBuf::from(path),
+diff --git a/lib/crates/fabro-server/src/server/handler/worker_control.rs b/lib/crates/fabro-server/src/server/handler/worker_control.rs
+new file mode 100644
+index 000000000..d643a904e
+--- /dev/null
++++ b/lib/crates/fabro-server/src/server/handler/worker_control.rs
+@@ -0,0 +1,166 @@
++use std::sync::Arc;
++
++use axum::extract::ws::{
++    CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade, close_code,
++};
++use fabro_interview::{
++    WORKER_CONTROL_INVALID_CURSOR_REASON, WORKER_CONTROL_PONG_TIMEOUT_REASON,
++    WORKER_CONTROL_WS_LIVENESS_TIMEOUT, WORKER_CONTROL_WS_PING_INTERVAL,
++    WorkerControlDeliveryFrame,
++};
++use futures_util::{SinkExt, StreamExt};
++use tokio::time::{self, Instant, MissedTickBehavior};
++
++use super::super::{
++    ApiError, AppState, IntoResponse, Query, RequireWorkerRunScoped, Response, Router, State,
++    StatusCode, get,
++};
++use crate::worker_control::{WorkerControlBusError, WorkerControlCursor, WorkerControlReceiver};
++
++#[derive(Debug, serde::Deserialize)]
++struct WorkerControlStreamQuery {
++    after: Option<String>,
++}
++
++pub(super) fn routes() -> Router<Arc<AppState>> {
++    Router::new().route(
++        "/runs/{id}/worker/control-stream",
++        get(worker_control_stream),
++    )
++}
++
++async fn worker_control_stream(
++    RequireWorkerRunScoped(id): RequireWorkerRunScoped,
++    State(state): State<Arc<AppState>>,
++    Query(query): Query<WorkerControlStreamQuery>,
++    ws: WebSocketUpgrade,
++) -> Response {
++    let cached = match state.store.get_cached_run(&id).await {
++        Ok(Some(cached)) => cached,
++        Ok(None) => return ApiError::not_found("Run not found.").into_response(),
++        Err(err) => {
++            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
++                .into_response();
++        }
++    };
++    if cached.projection.archived_at.is_some() {
++        return ApiError::new(StatusCode::CONFLICT, "Run is archived.").into_response();
++    }
++    if cached.projection.status.is_terminal() {
++        return ApiError::new(
++            StatusCode::CONFLICT,
++            "Run is terminal and cannot accept worker control streams.",
++        )
++        .into_response();
++    }
++
++    let cursor = match WorkerControlCursor::from_after_query(query.after.as_deref()) {
++        Ok(cursor) => cursor,
++        Err(err @ WorkerControlBusError::InvalidCursor { .. }) => {
++            return ApiError::new(StatusCode::GONE, err.to_string()).into_response();
++        }
++        Err(err) => return worker_control_bus_error_response(&err),
++    };
++    let receiver = match state.worker_control_bus.subscribe(id, cursor).await {
++        Ok(receiver) => receiver,
++        Err(err @ WorkerControlBusError::InvalidCursor { .. }) => {
++            return ApiError::new(StatusCode::GONE, err.to_string()).into_response();
++        }
++        Err(err) => return worker_control_bus_error_response(&err),
++    };
++
++    ws.on_upgrade(move |socket| worker_control_websocket(socket, receiver))
++}
++
++fn worker_control_bus_error_response(err: &WorkerControlBusError) -> Response {
++    let status = match err {
++        WorkerControlBusError::Closed | WorkerControlBusError::Unavailable => {
++            StatusCode::SERVICE_UNAVAILABLE
++        }
++        WorkerControlBusError::PublishTimeout => StatusCode::SERVICE_UNAVAILABLE,
++        WorkerControlBusError::InvalidCursor { .. } => StatusCode::GONE,
++    };
++    ApiError::new(status, err.to_string()).into_response()
++}
++
++async fn worker_control_websocket(socket: WebSocket, mut receiver: WorkerControlReceiver) {
++    let (mut sender, mut receiver_ws) = socket.split();
++    let mut ping_interval = time::interval(WORKER_CONTROL_WS_PING_INTERVAL);
++    ping_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
++    let mut last_liveness = Instant::now();
++    let liveness_timeout = time::sleep_until(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
++    tokio::pin!(liveness_timeout);
++
++    loop {
++        liveness_timeout
++            .as_mut()
++            .reset(last_liveness + WORKER_CONTROL_WS_LIVENESS_TIMEOUT);
++
++        tokio::select! {
++            delivery = receiver.recv() => {
++                let Some(delivery) = delivery else {
++                    let _ = sender.send(WsMessage::Close(None)).await;
++                    return;
++                };
++                let delivery = match delivery {
++                    Ok(delivery) => delivery,
++                    Err(WorkerControlBusError::InvalidCursor { .. }) => {
++                        let _ = sender.send(invalid_cursor_close_message()).await;
++                        return;
++                    }
++                    Err(_) => {
++                        let _ = sender.send(WsMessage::Close(None)).await;
++                        return;
++                    }
++                };
++                let frame = WorkerControlDeliveryFrame {
++                    id: delivery.id.to_string(),
++                    envelope: delivery.envelope,
++                };
++                let Ok(text) = serde_json::to_string(&frame) else {
++                    let _ = sender.send(WsMessage::Close(None)).await;
++                    return;
++                };
++                if sender.send(WsMessage::Text(text.into())).await.is_err() {
++                    return;
++                }
++            }
++            message = receiver_ws.next() => {
++                let Some(message) = message else {
++                    return;
++                };
++                match message {
++                    Ok(WsMessage::Ping(payload)) => {
++                        last_liveness = Instant::now();
++                        if sender.send(WsMessage::Pong(payload)).await.is_err() {
++                            return;
++                        }
++                    }
++                    Ok(WsMessage::Pong(_) | WsMessage::Text(_) | WsMessage::Binary(_)) => {
++                        last_liveness = Instant::now();
++                    }
++                    Ok(WsMessage::Close(_)) | Err(_) => return,
++                }
++            }
++            _ = ping_interval.tick() => {
++                if sender.send(WsMessage::Ping(Vec::new().into())).await.is_err() {
++                    return;
++                }
++            }
++            () = &mut liveness_timeout => {
++                let _ = sender.send(WsMessage::Close(Some(CloseFrame {
++                    code: close_code::AWAY,
++                    reason: WORKER_CONTROL_PONG_TIMEOUT_REASON.into(),
++                }))).await;
++                return;
++            }
++        }
++    }
++}
++
++fn invalid_cursor_close_message() -> WsMessage {
++    WsMessage::Close(Some(CloseFrame {
++        code:   close_code::POLICY,
++        reason: WORKER_CONTROL_INVALID_CURSOR_REASON.into(),
++    }))
++}
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index df5d26152..866db6757 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -9,10 +9,12 @@ use std::sync::{Arc as StdArc, Mutex as StdMutex};
+ use axum::body::Body;
+ use axum::http::{Method, Request, header};
+ use chrono::{Duration as ChronoDuration, Utc};
++use fabro_automation::{AutomationId, AutomationTarget};
+ use fabro_config::ServerSettingsBuilder;
+ use fabro_config::bind::Bind;
+ use fabro_interview::{
+-    AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlMessage,
++    AnswerValue, ControlInterviewer, Interviewer, Question, WorkerControlDeliveryFrame,
++    WorkerControlEnvelope, WorkerControlMessage,
+ };
+ use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest, TokenCounts};
+ use fabro_model::catalog::LlmCatalogSettings;
+@@ -32,6 +34,8 @@ use httpmock::Method::{GET, POST};
+ use httpmock::MockServer;
+ use serde_json::json;
+ use tokio_stream::StreamExt as _;
++use tokio_tungstenite::tungstenite::client::IntoClientRequest;
++use tokio_tungstenite::tungstenite::protocol::Message as WebSocketMessage;
+ use tower::ServiceExt;
+ use tracing::field::{Field, Visit};
+ use tracing::{Event as TracingEvent, Subscriber, subscriber};
+@@ -40,9 +44,13 @@ use tracing_subscriber::prelude::*;
+ use tracing_subscriber::{Layer, Registry};
+ 
+ use super::*;
++use crate::automation_materializer::AutomationRunMaterializeInput;
+ use crate::github_webhooks::compute_signature;
+ use crate::jwt_auth::{AuthMode, ConfiguredAuth};
+ use crate::test_support::*;
++use crate::worker_control::{
++    LocalWorkerControlBus, WorkerControlBus, WorkerControlCursor, WorkerControlReceiver,
++};
+ 
+ const MINIMAL_DOT: &str = r#"digraph Test {
+     graph [goal="Test"]
+@@ -658,6 +666,292 @@ fn bearer_request(method: Method, path: &str, bearer: &str, body: Body) -> Reque
+         .unwrap()
+ }
+ 
++struct WorkerControlWsTestServer {
++    base_url: String,
++    task:     tokio::task::JoinHandle<()>,
++}
++
++impl WorkerControlWsTestServer {
++    async fn spawn(app: Router) -> Self {
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
++            .await
++            .expect("test WebSocket listener should bind");
++        let addr = listener
++            .local_addr()
++            .expect("test WebSocket listener should have a local address");
++        let task = tokio::spawn(async move {
++            let result = axum::serve(
++                listener,
++                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
++            )
++            .await;
++            if let Err(err) = result {
++                tracing::debug!(error = %err, "test WebSocket server stopped");
++            }
++        });
++        Self {
++            base_url: format!("ws://{addr}"),
++            task,
++        }
++    }
++
++    fn worker_control_url(&self, run_id: RunId, after: Option<&str>) -> String {
++        let mut url = format!(
++            "{}/api/v1/runs/{run_id}/worker/control-stream",
++            self.base_url
++        );
++        if let Some(after) = after {
++            url.push_str("?after=");
++            url.push_str(after);
++        }
++        url
++    }
++}
++
++impl Drop for WorkerControlWsTestServer {
++    fn drop(&mut self) {
++        self.task.abort();
++    }
++}
++
++fn worker_control_ws_request(
++    server: &WorkerControlWsTestServer,
++    run_id: RunId,
++    bearer: Option<&str>,
++    after: Option<&str>,
++) -> Request<()> {
++    let mut request = server
++        .worker_control_url(run_id, after)
++        .into_client_request()
++        .expect("test worker-control WebSocket request should build");
++    if let Some(bearer) = bearer {
++        request.headers_mut().insert(
++            header::AUTHORIZATION,
++            format!("Bearer {bearer}")
++                .parse()
++                .expect("test bearer header should parse"),
++        );
++    }
++    request
++}
++
++async fn connect_worker_control_ws(
++    server: &WorkerControlWsTestServer,
++    run_id: RunId,
++    bearer: &str,
++    after: Option<&str>,
++) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
++    let request = worker_control_ws_request(server, run_id, Some(bearer), after);
++    let (socket, _) = tokio_tungstenite::connect_async(request)
++        .await
++        .expect("worker-control WebSocket should connect");
++    socket
++}
++
++async fn assert_worker_control_ws_rejected(
++    server: &WorkerControlWsTestServer,
++    run_id: RunId,
++    bearer: Option<&str>,
++    after: Option<&str>,
++    expected: StatusCode,
++) {
++    let request = worker_control_ws_request(server, run_id, bearer, after);
++    let error = tokio_tungstenite::connect_async(request)
++        .await
++        .expect_err("worker-control WebSocket should be rejected");
++    match error {
++        tokio_tungstenite::tungstenite::Error::Http(response) => {
++            assert_eq!(response.status(), expected);
++        }
++        other => panic!("expected HTTP rejection {expected}, got {other:#}"),
++    }
++}
++
++async fn next_worker_control_frame(
++    socket: &mut tokio_tungstenite::WebSocketStream<
++        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
++    >,
++) -> WorkerControlDeliveryFrame {
++    let message = tokio::time::timeout(std::time::Duration::from_secs(2), async {
++        loop {
++            let message = futures_util::StreamExt::next(socket)
++                .await
++                .expect("worker-control WebSocket should remain open")
++                .expect("worker-control WebSocket frame should be ok");
++            match message {
++                WebSocketMessage::Text(text) => return text,
++                WebSocketMessage::Ping(payload) => {
++                    futures_util::SinkExt::send(socket, WebSocketMessage::Pong(payload))
++                        .await
++                        .expect("test worker-control pong should send");
++                }
++                WebSocketMessage::Pong(_)
++                | WebSocketMessage::Binary(_)
++                | WebSocketMessage::Frame(_) => {}
++                WebSocketMessage::Close(frame) => {
++                    panic!("worker-control WebSocket closed before text frame: {frame:?}");
++                }
++            }
++        }
++    })
++    .await
++    .expect("worker-control frame should arrive");
++    serde_json::from_str(message.as_str()).expect("worker-control delivery frame should parse")
++}
++
++#[tokio::test(flavor = "current_thread")]
++async fn worker_control_stream_rejects_missing_user_and_cross_run_auth() {
++    let (_state, app) = jwt_auth_app();
++    let user_bearer = issue_test_user_jwt();
++    let run_id = create_run_with_bearer(&app, &user_bearer).await;
++    let worker_bearer = issue_test_worker_token(&run_id);
++    let other_run_id = create_run_with_bearer(&app, &user_bearer).await;
++    let other_worker_bearer = issue_test_worker_token(&other_run_id);
++    let server = WorkerControlWsTestServer::spawn(app).await;
++
++    assert_worker_control_ws_rejected(&server, run_id, None, None, StatusCode::UNAUTHORIZED).await;
++    assert_worker_control_ws_rejected(
++        &server,
++        run_id,
++        Some(&user_bearer),
++        None,
++        StatusCode::FORBIDDEN,
++    )
++    .await;
++    assert_worker_control_ws_rejected(
++        &server,
++        run_id,
++        Some(&other_worker_bearer),
++        None,
++        StatusCode::FORBIDDEN,
++    )
++    .await;
++
++    let mut socket = connect_worker_control_ws(&server, run_id, &worker_bearer, None).await;
++    futures_util::SinkExt::send(&mut socket, WebSocketMessage::Close(None))
++        .await
++        .unwrap();
++}
++
++#[tokio::test(flavor = "current_thread")]
++async fn worker_control_stream_start_subscription_delivers_frames() {
++    let (state, app) = jwt_auth_app();
++    let user_bearer = issue_test_user_jwt();
++    let run_id = create_run_with_bearer(&app, &user_bearer).await;
++    let worker_bearer = issue_test_worker_token(&run_id);
++    let server = WorkerControlWsTestServer::spawn(app).await;
++    let mut socket = connect_worker_control_ws(&server, run_id, &worker_bearer, None).await;
++
++    let expected = WorkerControlEnvelope::cancel_run();
++    let id = state
++        .worker_control_bus
++        .publish(run_id, expected.clone())
++        .await
++        .unwrap();
++    let frame = next_worker_control_frame(&mut socket).await;
++
++    assert_eq!(frame.id, id.to_string());
++    assert_eq!(frame.envelope, expected);
++}
++
++#[tokio::test(flavor = "current_thread")]
++async fn worker_control_stream_after_subscription_delivers_only_later_frames() {
++    let (state, app) = jwt_auth_app();
++    let user_bearer = issue_test_user_jwt();
++    let run_id = create_run_with_bearer(&app, &user_bearer).await;
++    let worker_bearer = issue_test_worker_token(&run_id);
++    let first = state
++        .worker_control_bus
++        .publish(run_id, WorkerControlEnvelope::cancel_run())
++        .await
++        .unwrap();
++    let expected = WorkerControlEnvelope::pause_run();
++    let second = state
++        .worker_control_bus
++        .publish(run_id, expected.clone())
++        .await
++        .unwrap();
++    let server = WorkerControlWsTestServer::spawn(app).await;
++
++    let mut socket =
++        connect_worker_control_ws(&server, run_id, &worker_bearer, Some(first.as_str())).await;
++    let frame = next_worker_control_frame(&mut socket).await;
++
++    assert_eq!(frame.id, second.to_string());
++    assert_eq!(frame.envelope, expected);
++}
++
++#[tokio::test(flavor = "current_thread")]
++async fn worker_control_stream_invalid_cursor_is_http_gone_before_upgrade() {
++    let (_state, app) = jwt_auth_app();
++    let user_bearer = issue_test_user_jwt();
++    let run_id = create_run_with_bearer(&app, &user_bearer).await;
++    let worker_bearer = issue_test_worker_token(&run_id);
++    let server = WorkerControlWsTestServer::spawn(app).await;
++
++    assert_worker_control_ws_rejected(
++        &server,
++        run_id,
++        Some(&worker_bearer),
++        Some("local:999"),
++        StatusCode::GONE,
++    )
++    .await;
++}
++
++#[tokio::test(flavor = "current_thread")]
++async fn worker_control_stream_rejects_missing_terminal_and_archived_runs() {
++    let (state, app) = jwt_auth_app();
++    let user_bearer = issue_test_user_jwt();
++    let missing_run_id = RunId::new();
++    let missing_worker_bearer = issue_test_worker_token(&missing_run_id);
++    let terminal_run_id = RunId::new();
++    create_succeeded_run(&state, terminal_run_id).await;
++    let terminal_worker_bearer = issue_test_worker_token(&terminal_run_id);
++    let archived_run_id = RunId::new();
++    create_succeeded_run(&state, archived_run_id).await;
++    let archived_worker_bearer = issue_test_worker_token(&archived_run_id);
++    let archive_response = app
++        .clone()
++        .oneshot(
++            Request::builder()
++                .method("POST")
++                .uri(api(&format!("/runs/{archived_run_id}/archive")))
++                .header(header::AUTHORIZATION, format!("Bearer {user_bearer}"))
++                .body(Body::empty())
++                .unwrap(),
++        )
++        .await
++        .unwrap();
++    response_json!(archive_response, StatusCode::OK).await;
++    let server = WorkerControlWsTestServer::spawn(app).await;
++
++    assert_worker_control_ws_rejected(
++        &server,
++        missing_run_id,
++        Some(&missing_worker_bearer),
++        None,
++        StatusCode::NOT_FOUND,
++    )
++    .await;
++    assert_worker_control_ws_rejected(
++        &server,
++        terminal_run_id,
++        Some(&terminal_worker_bearer),
++        None,
++        StatusCode::CONFLICT,
++    )
++    .await;
++    assert_worker_control_ws_rejected(
++        &server,
++        archived_run_id,
++        Some(&archived_worker_bearer),
++        None,
++        StatusCode::CONFLICT,
++    )
++    .await;
++}
++
+ fn json_bearer_request(
+     method: Method,
+     path: &str,
+@@ -1649,6 +1943,8 @@ fn slack_app_state_with_secret_sources(
+         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+         sandbox_provider_registry: None,
+         shutdown: tokio_util::sync::CancellationToken::new(),
++        worker_control_bus: None,
++        automation_materializer_override: None,
+     })
+     .expect("slack test app state should build")
+ }
+@@ -1748,12 +2044,31 @@ fn slack_service_respects_disabled_server_config_even_with_vault_tokens() {
+         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+         sandbox_provider_registry: None,
+         shutdown: tokio_util::sync::CancellationToken::new(),
++        worker_control_bus: None,
++        automation_materializer_override: None,
+     })
+     .expect("slack disabled test app state should build");
+ 
+     assert!(state.slack_service.is_none());
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn worker_command_uses_null_stdin_and_token_env() {
++    let storage_dir = tempfile::tempdir().unwrap();
++    let state = worker_command_test_state(storage_dir.path(), &["dev-token"], Some(TEST_DEV_TOKEN));
++    let cmd = worker_command(
++        state.as_ref(),
++        RunId::new(),
++        RunExecutionMode::Start,
++        storage_dir.path(),
++        false,
++    )
++    .unwrap();
++
++    assert_worker_command_passes_token_only_by_env(&cmd);
++}
++
+ #[cfg(unix)]
+ #[test]
+ fn worker_command_default_token_omits_agent_run_tools_scope() {
+@@ -2052,6 +2367,8 @@ methods = ["dev-token"]
+         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+         sandbox_provider_registry: None,
+         shutdown: tokio_util::sync::CancellationToken::new(),
++        worker_control_bus: None,
++        automation_materializer_override: None,
+     }) else {
+         panic!("build_app_state should require SESSION_SECRET")
+     };
+@@ -2179,6 +2496,8 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
+         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+         sandbox_provider_registry: None,
+         shutdown: tokio_util::sync::CancellationToken::new(),
++        worker_control_bus: None,
++        automation_materializer_override: None,
+     })
+ }
+ 
+@@ -2358,23 +2677,47 @@ fn worker_token_claims(cmd: &Command, state: &AppState) -> crate::worker_token::
+     .claims
+ }
+ 
++async fn worker_transport_with_receiver(
++    run_id: RunId,
++) -> (RunAnswerTransport, WorkerControlReceiver) {
++    let bus = StdArc::new(LocalWorkerControlBus::new());
++    let receiver = bus
++        .subscribe(run_id, WorkerControlCursor::Start)
++        .await
++        .expect("test worker bus should subscribe");
++    // Ensure the subscription task is waiting before the test publishes.
++    tokio::task::yield_now().await;
++    let bus: StdArc<dyn WorkerControlBus> = bus;
++    let transport = RunAnswerTransport::Worker { run_id, bus };
++    (transport, receiver)
++}
++
++async fn recv_worker_control_envelope(
++    receiver: &mut WorkerControlReceiver,
++) -> WorkerControlEnvelope {
++    receiver
++        .recv()
++        .await
++        .expect("test worker control receiver should stay open")
++        .expect("test worker control delivery should succeed")
++        .envelope
++}
++
+ #[tokio::test]
+-async fn subprocess_answer_transport_cancel_run_enqueues_cancel_message() {
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let transport = RunAnswerTransport::Subprocess { control_tx };
++async fn worker_answer_transport_cancel_run_publishes_cancel_message() {
++    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
+ 
+     transport.cancel_run().await.unwrap();
+ 
+     assert_eq!(
+-        control_rx.recv().await,
+-        Some(WorkerControlEnvelope::cancel_run())
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::cancel_run()
+     );
+ }
+ 
+ #[tokio::test]
+-async fn subprocess_answer_transport_steer_enqueues_plain_steer_message() {
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let transport = RunAnswerTransport::Subprocess { control_tx };
++async fn worker_answer_transport_steer_publishes_plain_steer_message() {
++    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
+     let actor = Principal::System {
+         system_kind: SystemActorKind::Engine,
+     };
+@@ -2385,15 +2728,14 @@ async fn subprocess_answer_transport_steer_enqueues_plain_steer_message() {
+         .unwrap();
+ 
+     assert_eq!(
+-        control_rx.recv().await,
+-        Some(WorkerControlEnvelope::steer("try again", actor))
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::steer("try again", actor)
+     );
+ }
+ 
+ #[tokio::test]
+-async fn subprocess_answer_transport_interrupt_enqueues_interrupt_message() {
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let transport = RunAnswerTransport::Subprocess { control_tx };
++async fn worker_answer_transport_interrupt_publishes_interrupt_message() {
++    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
+     let actor = Principal::System {
+         system_kind: SystemActorKind::Engine,
+     };
+@@ -2401,15 +2743,14 @@ async fn subprocess_answer_transport_interrupt_enqueues_interrupt_message() {
+     transport.interrupt(actor.clone()).await.unwrap();
+ 
+     assert_eq!(
+-        control_rx.recv().await,
+-        Some(WorkerControlEnvelope::interrupt(actor))
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::interrupt(actor)
+     );
+ }
+ 
+ #[tokio::test]
+-async fn subprocess_answer_transport_interrupt_then_steer_enqueues_single_combined_message() {
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let transport = RunAnswerTransport::Subprocess { control_tx };
++async fn worker_answer_transport_interrupt_then_steer_publishes_single_combined_message() {
++    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
+     let actor = Principal::System {
+         system_kind: SystemActorKind::Engine,
+     };
+@@ -2420,19 +2761,15 @@ async fn subprocess_answer_transport_interrupt_then_steer_enqueues_single_combin
+         .unwrap();
+ 
+     assert_eq!(
+-        control_rx.recv().await,
+-        Some(WorkerControlEnvelope::interrupt_then_steer(
+-            "try again",
+-            actor
+-        ))
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::interrupt_then_steer("try again", actor)
+     );
+ }
+ 
+ #[tokio::test]
+-async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(3);
+-    let transport = RunAnswerTransport::Subprocess { control_tx };
++async fn worker_answer_transport_pair_commands_publish_control_messages() {
+     let run_id = fixtures::RUN_1;
++    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
+     let pair_id = "01HZX6M29F1CD5YYMHT1F5D7WQ".parse().unwrap();
+     let message_id = "01HZX6M4D7Y1QW0Q0P6V8Z4DR5".parse().unwrap();
+     let actor = Principal::System {
+@@ -2457,27 +2794,39 @@ async fn subprocess_answer_transport_pair_commands_enqueue_control_messages() {
+     transport.end_pair(pair_id, actor.clone()).await.unwrap();
+ 
+     assert_eq!(
+-        control_rx.recv().await,
+-        Some(WorkerControlEnvelope::start_pair(
+-            run_id,
+-            pair_id,
+-            target,
+-            actor.clone()
+-        ))
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::start_pair(run_id, pair_id, target, actor.clone())
+     );
+     assert_eq!(
+-        control_rx.recv().await,
+-        Some(WorkerControlEnvelope::pair_message(
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::pair_message(
+             pair_id,
+             message_id,
+             "inspect this",
+             Some("client-1".to_string()),
+             actor.clone()
+-        ))
++        )
+     );
+     assert_eq!(
+-        control_rx.recv().await,
+-        Some(WorkerControlEnvelope::end_pair(pair_id, actor))
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::end_pair(pair_id, actor)
++    );
++}
++
++#[tokio::test]
++async fn worker_answer_transport_pause_and_unpause_publish_control_messages() {
++    let (transport, mut control_rx) = worker_transport_with_receiver(fixtures::RUN_1).await;
++
++    transport.pause_run().await.unwrap();
++    transport.unpause_run().await.unwrap();
++
++    assert_eq!(
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::pause_run()
++    );
++    assert_eq!(
++        recv_worker_control_envelope(&mut control_rx).await,
++        WorkerControlEnvelope::unpause_run()
+     );
+ }
+ 
+@@ -2854,6 +3203,155 @@ async fn post_run_manifest(app: &Router, manifest: serde_json::Value) -> serde_j
+     response_json!(response, StatusCode::CREATED).await
+ }
+ 
++#[tokio::test]
++async fn post_runs_create_regression_keeps_api_behavior_without_automation_metadata() {
++    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let mut manifest = minimal_manifest_json(MINIMAL_DOT);
++    manifest["title"] = json!("API title");
++
++    let body = post_run_manifest(&app, manifest).await;
++    let run_id: RunId = body["id"].as_str().unwrap().parse().unwrap();
++
++    assert_eq!(body["title"], "API title");
++    assert!(body["automation"].is_null());
++    assert_eq!(body["lifecycle"]["status"]["kind"], "submitted");
++    let summary = state
++        .store
++        .get_cached_summary(&run_id, Utc::now())
++        .await
++        .unwrap()
++        .unwrap();
++    assert!(summary.automation.is_none());
++}
++
++#[tokio::test]
++async fn create_run_from_manifest_helper_persists_without_automation_metadata() {
++    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
++    let manifest: RunManifest = serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
++    let submitted_manifest_bytes = serde_json::to_vec(&manifest).unwrap();
++    let run_id = RunId::new();
++
++    let response = Box::pin(handler::runs::create_run_from_manifest(
++        Arc::clone(&state),
++        handler::runs::CreateRunFromManifestRequest {
++            manifest,
++            submitted_manifest_bytes,
++            explicit_run_id: Some(run_id),
++            explicit_title_supplied: false,
++            actor: Principal::System {
++                system_kind: SystemActorKind::Engine,
++            },
++            headers: HeaderMap::new(),
++            automation: None,
++        },
++    ))
++    .await;
++
++    let body = response_json!(response, StatusCode::CREATED).await;
++    assert_eq!(body["id"], run_id.to_string());
++    assert!(body["automation"].is_null());
++    let summary = state
++        .store
++        .get_cached_summary(&run_id, Utc::now())
++        .await
++        .unwrap()
++        .unwrap();
++    assert!(summary.automation.is_none());
++}
++
++#[tokio::test]
++async fn create_run_from_manifest_helper_persists_automation_metadata() {
++    let state = TestAppStateBuilder::new().env_lookup(|_| None).build();
++    let manifest: RunManifest = serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
++    let submitted_manifest_bytes = serde_json::to_vec(&manifest).unwrap();
++    let run_id = RunId::new();
++    let automation = fabro_types::AutomationRef {
++        id:         "nightly".to_string(),
++        name:       Some("Nightly".to_string()),
++        trigger_id: Some("schedule".to_string()),
++    };
++
++    let response = Box::pin(handler::runs::create_run_from_manifest(
++        Arc::clone(&state),
++        handler::runs::CreateRunFromManifestRequest {
++            manifest,
++            submitted_manifest_bytes,
++            explicit_run_id: Some(run_id),
++            explicit_title_supplied: false,
++            actor: Principal::System {
++                system_kind: SystemActorKind::Engine,
++            },
++            headers: HeaderMap::new(),
++            automation: Some(automation.clone()),
++        },
++    ))
++    .await;
++
++    let body = response_json!(response, StatusCode::CREATED).await;
++    assert_eq!(body["automation"]["id"], automation.id);
++    assert_eq!(
++        body["automation"]["name"],
++        automation.name.as_deref().unwrap()
++    );
++    assert_eq!(
++        body["automation"]["trigger_id"],
++        automation.trigger_id.as_deref().unwrap()
++    );
++    let summary = state
++        .store
++        .get_cached_summary(&run_id, Utc::now())
++        .await
++        .unwrap()
++        .unwrap();
++    assert_eq!(summary.automation, Some(automation));
++}
++
++#[tokio::test]
++async fn fake_automation_materializer_injection_captures_input_and_returns_manifest() {
++    let materialized_manifest: RunManifest =
++        serde_json::from_value(minimal_manifest_json(MINIMAL_DOT)).unwrap();
++    let fake = TestAutomationRunMaterializer::succeed(
++        materialized_manifest.clone(),
++        b"{\"fake\":true}".to_vec(),
++    );
++    let state = TestAppStateBuilder::new()
++        .automation_materializer(fake.clone())
++        .build();
++    let run_id = RunId::new();
++    let user_settings_path = PathBuf::from("/tmp/fabro/settings.toml");
++    let temp_root = PathBuf::from("/tmp/fabro/automation");
++    let target = AutomationTarget {
++        repository:   "fabro-sh/fabro".to_string(),
++        ref_selector: "main".to_string(),
++        workflow:     "demo".to_string(),
++    };
++
++    let output = state
++        .materialize_automation_run(AutomationRunMaterializeInput {
++            automation_id: AutomationId::new("nightly").unwrap(),
++            target: target.clone(),
++            run_id,
++            user_settings_path: user_settings_path.clone(),
++            temp_root: temp_root.clone(),
++        })
++        .await
++        .expect("fake materializer should succeed");
++
++    assert_eq!(
++        serde_json::to_value(&output.manifest).unwrap(),
++        serde_json::to_value(&materialized_manifest).unwrap()
++    );
++    assert_eq!(output.submitted_manifest_bytes, b"{\"fake\":true}".to_vec());
++    let captured = fake.captured_inputs();
++    assert_eq!(captured.len(), 1);
++    assert_eq!(captured[0].automation_id.as_str(), "nightly");
++    assert_eq!(captured[0].target, target);
++    assert_eq!(captured[0].run_id, run_id);
++    assert_eq!(captured[0].user_settings_path, user_settings_path);
++    assert_eq!(captured[0].temp_root, temp_root);
++}
++
+ async fn mock_openai_title_response<'a>(
+     server: &'a MockServer,
+     title: &str,
+@@ -5276,6 +5774,8 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
+         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+         sandbox_provider_registry: None,
+         shutdown: tokio_util::sync::CancellationToken::new(),
++        worker_control_bus: None,
++        automation_materializer_override: None,
+     };
+     let state = build_app_state(config).expect("test app state should build");
+     if let Some(token) = token {
+@@ -10678,12 +11178,8 @@ async fn steer_without_active_steerable_session_forwards_plain_steer_for_bufferi
+     let state = test_app_state();
+     let app = crate::test_support::build_test_router(Arc::clone(&state));
+     let run_id = fixtures::RUN_1;
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let _temp_dir = insert_running_control_run(
+-        &state,
+-        run_id,
+-        Some(RunAnswerTransport::Subprocess { control_tx }),
+-    );
++    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
++    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
+ 
+     let req = Request::builder()
+         .method("POST")
+@@ -10694,7 +11190,7 @@ async fn steer_without_active_steerable_session_forwards_plain_steer_for_bufferi
+ 
+     let response = app.oneshot(req).await.unwrap();
+     assert_status!(response, StatusCode::ACCEPTED).await;
+-    let envelope = control_rx.recv().await.unwrap();
++    let envelope = recv_worker_control_envelope(&mut control_rx).await;
+     assert!(matches!(
+         envelope.message,
+         WorkerControlMessage::Steer { ref text, .. } if text == "try again"
+@@ -10707,12 +11203,8 @@ async fn steer_with_active_non_steerable_session_returns_conflict() {
+     let app = crate::test_support::build_test_router(Arc::clone(&state));
+     let run_id = fixtures::RUN_1;
+     let stage_id = StageId::new("agent", 1);
+-    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+-    let _temp_dir = insert_running_control_run(
+-        &state,
+-        run_id,
+-        Some(RunAnswerTransport::Subprocess { control_tx }),
+-    );
++    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
++    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
+     {
+         let mut runs = state.runs.lock().expect("runs lock poisoned");
+         runs.get_mut(&run_id)
+@@ -10739,12 +11231,8 @@ async fn steer_interrupt_without_active_steerable_session_returns_conflict() {
+     let state = test_app_state();
+     let app = crate::test_support::build_test_router(Arc::clone(&state));
+     let run_id = fixtures::RUN_1;
+-    let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+-    let _temp_dir = insert_running_control_run(
+-        &state,
+-        run_id,
+-        Some(RunAnswerTransport::Subprocess { control_tx }),
+-    );
++    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
++    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
+ 
+     let req = Request::builder()
+         .method("POST")
+@@ -10765,12 +11253,8 @@ async fn interrupt_with_active_steerable_session_forwards_interrupt() {
+     let app = crate::test_support::build_test_router(Arc::clone(&state));
+     let run_id = fixtures::RUN_1;
+     let stage_id = StageId::new("agent", 1);
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let _temp_dir = insert_running_control_run(
+-        &state,
+-        run_id,
+-        Some(RunAnswerTransport::Subprocess { control_tx }),
+-    );
++    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
++    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
+     {
+         let mut runs = state.runs.lock().expect("runs lock poisoned");
+         runs.get_mut(&run_id)
+@@ -10787,7 +11271,7 @@ async fn interrupt_with_active_steerable_session_forwards_interrupt() {
+ 
+     let response = app.oneshot(req).await.unwrap();
+     assert_status!(response, StatusCode::ACCEPTED).await;
+-    let envelope = control_rx.recv().await.unwrap();
++    let envelope = recv_worker_control_envelope(&mut control_rx).await;
+     assert!(matches!(
+         envelope.message,
+         WorkerControlMessage::Interrupt {
+@@ -10802,12 +11286,8 @@ async fn steer_interrupt_with_active_steerable_session_forwards_combined_control
+     let app = crate::test_support::build_test_router(Arc::clone(&state));
+     let run_id = fixtures::RUN_1;
+     let stage_id = StageId::new("agent", 1);
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let _temp_dir = insert_running_control_run(
+-        &state,
+-        run_id,
+-        Some(RunAnswerTransport::Subprocess { control_tx }),
+-    );
++    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
++    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
+     {
+         let mut runs = state.runs.lock().expect("runs lock poisoned");
+         runs.get_mut(&run_id)
+@@ -10825,7 +11305,7 @@ async fn steer_interrupt_with_active_steerable_session_forwards_combined_control
+ 
+     let response = app.oneshot(req).await.unwrap();
+     assert_status!(response, StatusCode::ACCEPTED).await;
+-    let envelope = control_rx.recv().await.unwrap();
++    let envelope = recv_worker_control_envelope(&mut control_rx).await;
+     assert!(matches!(
+         envelope.message,
+         WorkerControlMessage::InterruptThenSteer { ref text, .. } if text == "try again"
+@@ -10991,12 +11471,8 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
+     let state = test_app_state();
+     let app = crate::test_support::build_test_router(Arc::clone(&state));
+     let run_id = fixtures::RUN_1;
+-    let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+-    let _temp_dir = insert_running_control_run(
+-        &state,
+-        run_id,
+-        Some(RunAnswerTransport::Subprocess { control_tx }),
+-    );
++    let (transport, mut control_rx) = worker_transport_with_receiver(run_id).await;
++    let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
+ 
+     let started = acp_event_for_stage(&run_id, &workflow_event::Event::AgentAcpStarted {
+         node_id:     "agent".to_string(),
+@@ -11029,7 +11505,7 @@ async fn steer_with_active_acp_session_forwards_to_worker() {
+ 
+     let response = app.oneshot(req).await.unwrap();
+     assert_status!(response, StatusCode::ACCEPTED).await;
+-    let envelope = control_rx.recv().await.unwrap();
++    let envelope = recv_worker_control_envelope(&mut control_rx).await;
+     assert!(matches!(
+         envelope.message,
+         WorkerControlMessage::Steer { ref text, .. } if text == "try again"
+@@ -11096,12 +11572,8 @@ async fn active_acp_steerable_marker_clears_on_terminal_paths() {
+         let state = test_app_state();
+         let app = crate::test_support::build_test_router(Arc::clone(&state));
+         let run_id = fixtures::RUN_1;
+-        let (control_tx, _control_rx) = tokio::sync::mpsc::channel(1);
+-        let _temp_dir = insert_running_control_run(
+-            &state,
+-            run_id,
+-            Some(RunAnswerTransport::Subprocess { control_tx }),
+-        );
++        let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
++        let _temp_dir = insert_running_control_run(&state, run_id, Some(transport));
+         let started = acp_event_for_stage(&run_id, &workflow_event::Event::AgentAcpStarted {
+             node_id:     "agent".to_string(),
+             visit:       1,
+@@ -13031,11 +13503,13 @@ async fn pause_run_sets_pending_control_on_board_response() {
+     let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+     let run_id = run_id_str.parse::<RunId>().unwrap();
+ 
++    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
+     {
+         let mut runs = state.runs.lock().expect("runs lock poisoned");
+         let managed_run = runs.get_mut(&run_id).expect("run should exist");
+         managed_run.status = RunStatus::Running;
+         managed_run.worker_pid = Some(u32::MAX);
++        managed_run.answer_transport = Some(transport);
+     }
+ 
+     let req = Request::builder()
+@@ -13151,11 +13625,13 @@ async fn unpause_run_sets_pending_control() {
+     let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+     let run_id = run_id_str.parse::<RunId>().unwrap();
+ 
++    let (transport, _control_rx) = worker_transport_with_receiver(run_id).await;
+     {
+         let mut runs = state.runs.lock().expect("runs lock poisoned");
+         let managed_run = runs.get_mut(&run_id).expect("run should exist");
+         managed_run.status = RunStatus::Paused { prior_block: None };
+         managed_run.worker_pid = Some(u32::MAX);
++        managed_run.answer_transport = Some(transport);
+     }
+ 
+     let req = Request::builder()
+diff --git a/lib/crates/fabro-server/src/test_support.rs b/lib/crates/fabro-server/src/test_support.rs
+index afd26f624..8e6bb3c20 100644
+--- a/lib/crates/fabro-server/src/test_support.rs
++++ b/lib/crates/fabro-server/src/test_support.rs
+@@ -29,6 +29,12 @@ use tokio_util::sync::CancellationToken;
+ use ulid::Ulid;
+ 
+ use crate::auth;
++<<<<<<< HEAD
++=======
++use crate::automation_materializer::AutomationRunMaterializer;
++pub use crate::automation_materializer::TestAutomationRunMaterializer;
++use crate::ip_allowlist::IpAllowlistConfig;
++>>>>>>> origin/main
+ use crate::jwt_auth::{AuthMode, ConfiguredAuth};
+ #[cfg(test)]
+ use crate::principal_middleware::{AuthContextSlot, RequestAuthContext};
+@@ -70,6 +76,7 @@ pub struct TestAppStateBuilder {
+     server_secret_env:         HashMap<String, String>,
+     env_lookup:                EnvLookup,
+     llm_catalog_settings:      LlmCatalogSettings,
++    automation_materializer:   Option<Arc<dyn AutomationRunMaterializer>>,
+ }
+ 
+ impl Default for TestAppStateBuilder {
+@@ -88,6 +95,7 @@ impl Default for TestAppStateBuilder {
+             server_secret_env:         HashMap::new(),
+             env_lookup:                default_env_lookup(),
+             llm_catalog_settings:      LlmCatalogSettings::default(),
++            automation_materializer:   None,
+         }
+     }
+ }
+@@ -144,6 +152,11 @@ impl TestAppStateBuilder {
+         self
+     }
+ 
++    pub fn automation_materializer(mut self, materializer: TestAutomationRunMaterializer) -> Self {
++        self.automation_materializer = Some(materializer.into_materializer());
++        self
++    }
++
+     pub fn provider_base_url(
+         mut self,
+         provider: impl Into<String>,
+@@ -239,6 +252,9 @@ impl TestAppStateBuilder {
+             ),
+             sandbox_provider_registry: self.sandbox_provider_registry,
+             shutdown: CancellationToken::new(),
++            #[cfg(test)]
++            worker_control_bus: None,
++            automation_materializer_override: self.automation_materializer,
+         })
+     }
+ }
+diff --git a/lib/crates/fabro-server/src/worker_control/bus.rs b/lib/crates/fabro-server/src/worker_control/bus.rs
+new file mode 100644
+index 000000000..b6fadedb5
+--- /dev/null
++++ b/lib/crates/fabro-server/src/worker_control/bus.rs
+@@ -0,0 +1,155 @@
++use std::fmt;
++
++use fabro_interview::WorkerControlEnvelope;
++use fabro_types::RunId;
++use futures_util::future::BoxFuture;
++use tokio::sync::mpsc;
++
++#[derive(Clone, PartialEq, Eq)]
++pub(crate) struct WorkerControlMessageId(String);
++
++impl WorkerControlMessageId {
++    #[must_use]
++    pub(crate) fn new(value: impl Into<String>) -> Self {
++        Self(value.into())
++    }
++
++    #[must_use]
++    pub(crate) fn as_str(&self) -> &str {
++        &self.0
++    }
++}
++
++impl fmt::Debug for WorkerControlMessageId {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.debug_tuple("WorkerControlMessageId")
++            .field(&self.0)
++            .finish()
++    }
++}
++
++impl fmt::Display for WorkerControlMessageId {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        f.write_str(&self.0)
++    }
++}
++
++impl From<String> for WorkerControlMessageId {
++    fn from(value: String) -> Self {
++        Self::new(value)
++    }
++}
++
++impl From<&str> for WorkerControlMessageId {
++    fn from(value: &str) -> Self {
++        Self::new(value)
++    }
++}
++
++/// Cursor for replaying a run's worker-control stream.
++///
++/// Future Redis Streams mapping:
++/// - `Start` maps to `XREAD ... STREAMS fabro:run:{run_id}:control 0-0`.
++/// - `After(id)` maps to `XREAD ... STREAMS fabro:run:{run_id}:control {id}`.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub(crate) enum WorkerControlCursor {
++    Start,
++    After(WorkerControlMessageId),
++}
++
++impl WorkerControlCursor {
++    pub(crate) fn from_after_query(after: Option<&str>) -> Result<Self, WorkerControlBusError> {
++        match after {
++            None => Ok(Self::Start),
++            Some(value) if value.trim().is_empty() => Err(WorkerControlBusError::InvalidCursor {
++                cursor: value.to_string(),
++                reason: "cursor id must not be empty".to_string(),
++            }),
++            Some(value) => Ok(Self::After(WorkerControlMessageId::from(value))),
++        }
++    }
++}
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub(crate) struct WorkerControlDelivery {
++    pub(crate) id:       WorkerControlMessageId,
++    pub(crate) envelope: WorkerControlEnvelope,
++}
++
++#[allow(
++    dead_code,
++    reason = "The local backend does not construct every cross-backend error variant."
++)]
++#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
++pub(crate) enum WorkerControlBusError {
++    #[error("worker control backend is closed")]
++    Closed,
++    #[error("worker control backend is unavailable")]
++    Unavailable,
++    #[error("worker control cursor `{cursor}` is invalid: {reason}")]
++    InvalidCursor { cursor: String, reason: String },
++    #[error("timed out publishing worker control message")]
++    PublishTimeout,
++}
++
++impl WorkerControlBusError {
++    #[must_use]
++    pub(crate) fn invalid_cursor(cursor: impl Into<String>, reason: impl Into<String>) -> Self {
++        Self::InvalidCursor {
++            cursor: cursor.into(),
++            reason: reason.into(),
++        }
++    }
++}
++
++pub(crate) type WorkerControlReceiver =
++    mpsc::Receiver<Result<WorkerControlDelivery, WorkerControlBusError>>;
++
++pub(crate) trait WorkerControlBus: Send + Sync {
++    fn publish(
++        &self,
++        run_id: RunId,
++        envelope: WorkerControlEnvelope,
++    ) -> BoxFuture<'_, Result<WorkerControlMessageId, WorkerControlBusError>>;
++
++    fn subscribe(
++        &self,
++        run_id: RunId,
++        cursor: WorkerControlCursor,
++    ) -> BoxFuture<'_, Result<WorkerControlReceiver, WorkerControlBusError>>;
++
++    fn cleanup_run(&self, run_id: RunId) -> BoxFuture<'_, ()>;
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn message_id_equality_and_debug_are_opaque() {
++        let first = WorkerControlMessageId::from("local:42");
++        let same = WorkerControlMessageId::from("local:42");
++        let different = WorkerControlMessageId::from("local:43");
++
++        assert_eq!(first, same);
++        assert_ne!(first, different);
++        assert_eq!(format!("{first}"), "local:42");
++        assert_eq!(format!("{first:?}"), "WorkerControlMessageId(\"local:42\")");
++    }
++
++    #[test]
++    fn absent_after_query_parses_as_start_cursor() {
++        assert_eq!(
++            WorkerControlCursor::from_after_query(None).unwrap(),
++            WorkerControlCursor::Start
++        );
++    }
++
++    #[test]
++    fn present_after_query_parses_as_after_cursor() {
++        assert_eq!(
++            WorkerControlCursor::from_after_query(Some("local:42")).unwrap(),
++            WorkerControlCursor::After(WorkerControlMessageId::from("local:42"))
++        );
++    }
++}
+diff --git a/lib/crates/fabro-server/src/worker_control/local.rs b/lib/crates/fabro-server/src/worker_control/local.rs
+new file mode 100644
+index 000000000..219ff18ec
+--- /dev/null
++++ b/lib/crates/fabro-server/src/worker_control/local.rs
+@@ -0,0 +1,458 @@
++use std::collections::{HashMap, VecDeque};
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{Arc, Mutex};
++
++use fabro_interview::WorkerControlEnvelope;
++use fabro_types::RunId;
++use futures_util::FutureExt;
++use futures_util::future::BoxFuture;
++use tokio::sync::{Notify, mpsc};
++
++use super::{
++    WorkerControlBus, WorkerControlBusError, WorkerControlCursor, WorkerControlDelivery,
++    WorkerControlMessageId, WorkerControlReceiver,
++};
++
++pub(crate) const LOCAL_WORKER_CONTROL_RETAINED_MESSAGES_PER_RUN: usize = 1024;
++const LOCAL_WORKER_CONTROL_SUBSCRIBER_BUFFER: usize = 64;
++
++#[derive(Default)]
++pub(crate) struct LocalWorkerControlBus {
++    streams:       Arc<Mutex<HashMap<RunId, LocalRunControlStream>>>,
++    next_sequence: Arc<AtomicU64>,
++}
++
++struct LocalRunControlStream {
++    messages:    VecDeque<LocalMessage>,
++    notify:      Arc<Notify>,
++    has_trimmed: bool,
++}
++
++#[derive(Clone)]
++struct LocalMessage {
++    sequence: u64,
++    delivery: WorkerControlDelivery,
++}
++
++impl LocalWorkerControlBus {
++    #[must_use]
++    pub(crate) fn new() -> Self {
++        Self {
++            streams:       Arc::new(Mutex::new(HashMap::new())),
++            next_sequence: Arc::new(AtomicU64::new(1)),
++        }
++    }
++
++    fn next_message_id(&self) -> (u64, WorkerControlMessageId) {
++        let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
++        (
++            sequence,
++            WorkerControlMessageId::new(format!("local:{sequence}")),
++        )
++    }
++
++    fn subscribe_inner(
++        &self,
++        run_id: RunId,
++        cursor: &WorkerControlCursor,
++    ) -> Result<WorkerControlReceiver, WorkerControlBusError> {
++        let (next_sequence, notify) = {
++            let mut streams = self
++                .streams
++                .lock()
++                .expect("worker control streams poisoned");
++            let stream = match cursor {
++                WorkerControlCursor::Start => streams
++                    .entry(run_id)
++                    .or_insert_with(LocalRunControlStream::new),
++                WorkerControlCursor::After(id) => streams.get_mut(&run_id).ok_or_else(|| {
++                    WorkerControlBusError::invalid_cursor(
++                        id.as_str(),
++                        "message id is not retained for this run",
++                    )
++                })?,
++            };
++            let next_sequence = stream.next_sequence_for_cursor(cursor)?;
++            (next_sequence, Arc::clone(&stream.notify))
++        };
++
++        let (tx, rx) = mpsc::channel(LOCAL_WORKER_CONTROL_SUBSCRIBER_BUFFER);
++        let streams = Arc::clone(&self.streams);
++        tokio::spawn(async move {
++            local_subscription_task(streams, run_id, notify, next_sequence, tx).await;
++        });
++        Ok(rx)
++    }
++
++    #[cfg(test)]
++    pub(crate) fn retained_len(&self, run_id: &RunId) -> usize {
++        let streams = self
++            .streams
++            .lock()
++            .expect("worker control streams poisoned");
++        streams
++            .get(run_id)
++            .map_or(0, |stream| stream.messages.len())
++    }
++}
++
++impl LocalRunControlStream {
++    fn new() -> Self {
++        Self {
++            messages:    VecDeque::new(),
++            notify:      Arc::new(Notify::new()),
++            has_trimmed: false,
++        }
++    }
++
++    fn next_sequence_for_cursor(
++        &self,
++        cursor: &WorkerControlCursor,
++    ) -> Result<Option<u64>, WorkerControlBusError> {
++        match cursor {
++            WorkerControlCursor::Start if self.has_trimmed => Err(
++                WorkerControlBusError::invalid_cursor("start", "retained local stream is trimmed"),
++            ),
++            WorkerControlCursor::Start => Ok(self.messages.front().map(|message| message.sequence)),
++            WorkerControlCursor::After(id) => {
++                let requested_sequence = parse_local_sequence(id)?;
++                let Some(position) = self
++                    .messages
++                    .iter()
++                    .position(|message| message.delivery.id == *id)
++                else {
++                    return Err(WorkerControlBusError::invalid_cursor(
++                        id.as_str(),
++                        "message id is not retained for this run",
++                    ));
++                };
++                Ok(self
++                    .messages
++                    .get(position + 1)
++                    .map(|message| message.sequence)
++                    .or(Some(requested_sequence.saturating_add(1))))
++            }
++        }
++    }
++
++    fn trim_retained(&mut self) {
++        while self.messages.len() > LOCAL_WORKER_CONTROL_RETAINED_MESSAGES_PER_RUN {
++            self.messages.pop_front();
++            self.has_trimmed = true;
++        }
++    }
++}
++
++fn parse_local_sequence(id: &WorkerControlMessageId) -> Result<u64, WorkerControlBusError> {
++    let Some(raw) = id.as_str().strip_prefix("local:") else {
++        return Err(WorkerControlBusError::invalid_cursor(
++            id.as_str(),
++            "local backend only understands local message ids",
++        ));
++    };
++    raw.parse::<u64>().map_err(|_| {
++        WorkerControlBusError::invalid_cursor(id.as_str(), "local message id sequence is invalid")
++    })
++}
++
++async fn local_subscription_task(
++    streams: Arc<Mutex<HashMap<RunId, LocalRunControlStream>>>,
++    run_id: RunId,
++    notify: Arc<Notify>,
++    mut next_sequence: Option<u64>,
++    tx: mpsc::Sender<Result<WorkerControlDelivery, WorkerControlBusError>>,
++) {
++    loop {
++        // Register interest *before* inspecting the stream so that a publish
++        // racing with this read does not cause a lost wakeup. `notify_waiters`
++        // does not leave a permit for future `notified()` calls.
++        let notified = notify.notified();
++        tokio::pin!(notified);
++        notified.as_mut().enable();
++
++        let collected = {
++            let streams_guard = streams.lock().expect("worker control streams poisoned");
++            match streams_guard.get(&run_id) {
++                None => None,
++                Some(stream) => {
++                    // A `Start` subscriber that joined before any publish lazily
++                    // adopts the first retained message as its cursor.
++                    if next_sequence.is_none() && stream.has_trimmed {
++                        Some(Err(WorkerControlBusError::invalid_cursor(
++                            "start",
++                            "retained local stream is trimmed",
++                        )))
++                    } else {
++                        if next_sequence.is_none() {
++                            next_sequence = stream.messages.front().map(|message| message.sequence);
++                        }
++                        match next_sequence {
++                            None => Some(Ok(Vec::new())),
++                            Some(next) => Some(collect_messages_from(&stream.messages, next)),
++                        }
++                    }
++                }
++            }
++        };
++
++        let messages = match collected {
++            None => return,
++            Some(Err(err)) => {
++                let _ = tx.send(Err(err)).await;
++                return;
++            }
++            Some(Ok(messages)) => messages,
++        };
++
++        if messages.is_empty() {
++            notified.await;
++            continue;
++        }
++
++        for message in messages {
++            next_sequence = Some(message.sequence.saturating_add(1));
++            if tx.send(Ok(message.delivery)).await.is_err() {
++                return;
++            }
++        }
++    }
++}
++
++/// Returns the retained messages with `sequence >= next`. Cheaper than scanning
++/// the whole deque: `partition_point` is O(log N) and we only clone the tail.
++fn collect_messages_from(
++    messages: &VecDeque<LocalMessage>,
++    next: u64,
++) -> Result<Vec<LocalMessage>, WorkerControlBusError> {
++    let Some(first_sequence) = messages.front().map(|message| message.sequence) else {
++        return Ok(Vec::new());
++    };
++    if next < first_sequence {
++        return Err(WorkerControlBusError::invalid_cursor(
++            format!("local:{next}"),
++            "subscriber fell behind retained local messages",
++        ));
++    }
++    let start = messages.partition_point(|message| message.sequence < next);
++    Ok(messages.iter().skip(start).cloned().collect())
++}
++
++impl WorkerControlBus for LocalWorkerControlBus {
++    fn publish(
++        &self,
++        run_id: RunId,
++        envelope: WorkerControlEnvelope,
++    ) -> BoxFuture<'_, Result<WorkerControlMessageId, WorkerControlBusError>> {
++        async move {
++            let (sequence, id) = self.next_message_id();
++            let delivery = WorkerControlDelivery {
++                id: id.clone(),
++                envelope,
++            };
++            let notify = {
++                let mut streams = self
++                    .streams
++                    .lock()
++                    .expect("worker control streams poisoned");
++                let stream = streams
++                    .entry(run_id)
++                    .or_insert_with(LocalRunControlStream::new);
++                stream
++                    .messages
++                    .push_back(LocalMessage { sequence, delivery });
++                stream.trim_retained();
++                Arc::clone(&stream.notify)
++            };
++            notify.notify_waiters();
++            Ok(id)
++        }
++        .boxed()
++    }
++
++    fn subscribe(
++        &self,
++        run_id: RunId,
++        cursor: WorkerControlCursor,
++    ) -> BoxFuture<'_, Result<WorkerControlReceiver, WorkerControlBusError>> {
++        async move { self.subscribe_inner(run_id, &cursor) }.boxed()
++    }
++
++    fn cleanup_run(&self, run_id: RunId) -> BoxFuture<'_, ()> {
++        async move {
++            let notify = {
++                let mut streams = self
++                    .streams
++                    .lock()
++                    .expect("worker control streams poisoned");
++                streams.remove(&run_id).map(|stream| stream.notify)
++            };
++            if let Some(notify) = notify {
++                notify.notify_waiters();
++            }
++        }
++        .boxed()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::time::Duration;
++
++    use fabro_interview::WorkerControlMessage;
++    use fabro_types::fixtures;
++
++    use super::*;
++
++    async fn recv_delivery(receiver: &mut WorkerControlReceiver) -> WorkerControlDelivery {
++        tokio::time::timeout(Duration::from_secs(1), receiver.recv())
++            .await
++            .expect("delivery should arrive")
++            .expect("subscription should remain open")
++            .expect("delivery should be ok")
++    }
++
++    #[tokio::test]
++    async fn messages_publish_in_order() {
++        let bus = LocalWorkerControlBus::new();
++        bus.publish(fixtures::RUN_1, WorkerControlEnvelope::cancel_run())
++            .await
++            .unwrap();
++        bus.publish(fixtures::RUN_1, WorkerControlEnvelope::pause_run())
++            .await
++            .unwrap();
++
++        let mut receiver = bus
++            .subscribe(fixtures::RUN_1, WorkerControlCursor::Start)
++            .await
++            .unwrap();
++
++        assert!(matches!(
++            recv_delivery(&mut receiver).await.envelope.message,
++            WorkerControlMessage::RunCancel
++        ));
++        assert!(matches!(
++            recv_delivery(&mut receiver).await.envelope.message,
++            WorkerControlMessage::RunPause
++        ));
++    }
++
++    #[tokio::test]
++    async fn active_subscriber_receives_message_published_after_subscription() {
++        let bus = LocalWorkerControlBus::new();
++        let mut receiver = bus
++            .subscribe(fixtures::RUN_1, WorkerControlCursor::Start)
++            .await
++            .unwrap();
++
++        bus.publish(fixtures::RUN_1, WorkerControlEnvelope::cancel_run())
++            .await
++            .unwrap();
++
++        assert!(matches!(
++            recv_delivery(&mut receiver).await.envelope.message,
++            WorkerControlMessage::RunCancel
++        ));
++    }
++
++    #[tokio::test]
++    async fn messages_published_before_subscription_replay_from_start() {
++        let bus = LocalWorkerControlBus::new();
++        bus.publish(fixtures::RUN_1, WorkerControlEnvelope::cancel_run())
++            .await
++            .unwrap();
++
++        let mut receiver = bus
++            .subscribe(fixtures::RUN_1, WorkerControlCursor::Start)
++            .await
++            .unwrap();
++
++        assert!(matches!(
++            recv_delivery(&mut receiver).await.envelope.message,
++            WorkerControlMessage::RunCancel
++        ));
++    }
++
++    #[tokio::test]
++    async fn after_cursor_receives_only_later_messages() {
++        let bus = LocalWorkerControlBus::new();
++        let first_id = bus
++            .publish(fixtures::RUN_1, WorkerControlEnvelope::cancel_run())
++            .await
++            .unwrap();
++        bus.publish(fixtures::RUN_1, WorkerControlEnvelope::pause_run())
++            .await
++            .unwrap();
++
++        let mut receiver = bus
++            .subscribe(
++                fixtures::RUN_1,
++                WorkerControlCursor::After(first_id.clone()),
++            )
++            .await
++            .unwrap();
++
++        assert!(matches!(
++            recv_delivery(&mut receiver).await.envelope.message,
++            WorkerControlMessage::RunPause
++        ));
++        assert!(receiver.try_recv().is_err());
++    }
++
++    #[tokio::test]
++    async fn trimming_bounds_retained_messages_and_invalidates_old_cursor() {
++        let bus = LocalWorkerControlBus::new();
++        let old_id = bus
++            .publish(fixtures::RUN_1, WorkerControlEnvelope::cancel_run())
++            .await
++            .unwrap();
++        for _ in 0..LOCAL_WORKER_CONTROL_RETAINED_MESSAGES_PER_RUN {
++            bus.publish(fixtures::RUN_1, WorkerControlEnvelope::pause_run())
++                .await
++                .unwrap();
++        }
++
++        assert_eq!(
++            bus.retained_len(&fixtures::RUN_1),
++            LOCAL_WORKER_CONTROL_RETAINED_MESSAGES_PER_RUN
++        );
++        let err = bus
++            .subscribe(fixtures::RUN_1, WorkerControlCursor::After(old_id))
++            .await
++            .unwrap_err();
++        assert!(matches!(err, WorkerControlBusError::InvalidCursor { .. }));
++
++        let err = bus
++            .subscribe(fixtures::RUN_1, WorkerControlCursor::Start)
++            .await
++            .unwrap_err();
++        assert!(matches!(err, WorkerControlBusError::InvalidCursor { .. }));
++    }
++
++    #[tokio::test]
++    async fn after_cursor_for_unknown_run_does_not_create_stream() {
++        let bus = LocalWorkerControlBus::new();
++        let err = bus
++            .subscribe(
++                fixtures::RUN_1,
++                WorkerControlCursor::After(WorkerControlMessageId::new("local:1")),
++            )
++            .await
++            .unwrap_err();
++
++        assert!(matches!(err, WorkerControlBusError::InvalidCursor { .. }));
++        assert_eq!(bus.retained_len(&fixtures::RUN_1), 0);
++    }
++
++    #[tokio::test]
++    async fn cleanup_removes_retained_messages() {
++        let bus = LocalWorkerControlBus::new();
++        bus.publish(fixtures::RUN_1, WorkerControlEnvelope::cancel_run())
++            .await
++            .unwrap();
++        assert_eq!(bus.retained_len(&fixtures::RUN_1), 1);
++
++        bus.cleanup_run(fixtures::RUN_1).await;
++
++        assert_eq!(bus.retained_len(&fixtures::RUN_1), 0);
++    }
++}
+diff --git a/lib/crates/fabro-server/src/worker_control/mod.rs b/lib/crates/fabro-server/src/worker_control/mod.rs
+new file mode 100644
+index 000000000..6b6f70896
+--- /dev/null
++++ b/lib/crates/fabro-server/src/worker_control/mod.rs
+@@ -0,0 +1,8 @@
++mod bus;
++mod local;
++
++pub(crate) use bus::{
++    WorkerControlBus, WorkerControlBusError, WorkerControlCursor, WorkerControlDelivery,
++    WorkerControlMessageId, WorkerControlReceiver,
++};
++pub(crate) use local::LocalWorkerControlBus;
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index 9d3f08d1c..23c90f3ff 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -26,6 +26,7 @@ use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
+ use fabro_vault::Vault;
+ use tokio::runtime::Handle;
+ use tokio::sync::RwLock as AsyncRwLock;
++use tokio::time;
+ use tokio_util::sync::CancellationToken;
+ 
+ use crate::artifact_upload::ArtifactSink;
+@@ -987,6 +988,24 @@ impl Drop for DetachedRunBootstrapGuard {
+ 
+ const POSTRUN_INTERRUPTED_MESSAGE: &str = "Run interrupted before post-run finalization completed.";
+ const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
++const DETACHED_COMPLETION_GUARD_TERMINAL_GRACE: Duration = Duration::from_millis(25);
++
++async fn run_store_reaches_terminal(run_store: &RunStoreHandle, timeout: Duration) -> bool {
++    let start = Instant::now();
++    loop {
++        if run_store
++            .state()
++            .await
++            .is_ok_and(|state| state.status.is_terminal())
++        {
++            return true;
++        }
++        if start.elapsed() >= timeout {
++            return false;
++        }
++        time::sleep(Duration::from_millis(10)).await;
++    }
++}
+ 
+ struct DetachedRunCompletionGuard {
+     event_sink:   RunEventSink,
+@@ -1044,6 +1063,11 @@ impl Drop for DetachedRunCompletionGuard {
+         let run_store = self.run_store.clone();
+         if let Ok(handle) = Handle::try_current() {
+             handle.spawn(async move {
++                if run_store_reaches_terminal(&run_store, DETACHED_COMPLETION_GUARD_TERMINAL_GRACE)
++                    .await
++                {
++                    return;
++                }
+                 emit_workflow_run_failed(
+                     run_id,
+                     &run_store,

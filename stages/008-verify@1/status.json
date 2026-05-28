@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "Script failed with exit code: 1\n\n## output\nFrom https://github.com/fabro-sh/fabro\n * branch                main       -> FETCH_HEAD\n   a992a7d76..475b4ab65  main       -> origin/main\nAuto-merging Cargo.lock\nAuto-merging lib/crates/fabro-api/build.rs\nAuto-merging lib/crates/fabro-api/src/lib.rs\nAuto-merging lib/crates/fabro-server/Cargo.toml\nAuto-merging lib/crates/fabro-server/src/lib.rs\nAuto-merging lib/crates/fabro-server/src/serve.rs\nAuto-merging lib/crates/fabro-server/src/server.rs\nAuto-merging lib/crates/fabro-server/src/server/tests.rs\nAuto-merging lib/crates/fabro-server/src/test_support.rs\nCONFLICT (content): Merge conflict in lib/crates/fabro-server/src/test_support.rs\nAutomatic merge failed; fix conflicts and then commit the result.\n",
+  "timestamp": "2026-05-28T01:02:42.285529Z"
+}
