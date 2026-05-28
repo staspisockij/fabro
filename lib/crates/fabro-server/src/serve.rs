@@ -778,6 +778,8 @@ where
         shutdown: shutdown.clone(),
         #[cfg(test)]
         worker_control_bus: None,
+        #[cfg(test)]
+        worker_runtime: None,
         #[cfg(any(test, feature = "test-support"))]
         automation_materializer_override: None,
     })?;
