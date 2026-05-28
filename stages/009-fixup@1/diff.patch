@@ -1,0 +1,566 @@
+diff --git a/.fabro/project.toml b/.fabro/project.toml
+index e4a408181..9f8490704 100644
+--- a/.fabro/project.toml
++++ b/.fabro/project.toml
+@@ -4,26 +4,6 @@ _version = 1
+ enabled = true
+ draft = false
+ 
+-[run.environment]
+-id = "fabro-dev"
+-
+-[environments.fabro-dev]
+-provider = "daytona"
+-
+-[environments.fabro-dev.lifecycle]
+-auto_stop = "30m"
+-
+-[environments.fabro-dev.labels]
+-repo = "fabro-sh/fabro"
+-
+-[environments.fabro-dev.image]
+-dockerfile = { path = "Dockerfile" }
+-
+-[environments.fabro-dev.resources]
+-cpu = 8
+-memory = "16GB"
+-disk = "20GB"
+-
+ # [[run.hooks]]
+ # id = "cargo-fmt"
+ # name = "cargo-fmt"
+diff --git a/Cargo.lock b/Cargo.lock
+index bf92dc00e..0d4da12fe 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1829,6 +1829,7 @@ dependencies = [
+  "fabro-client",
+  "fabro-config",
+  "fabro-dump",
++ "fabro-environment",
+  "fabro-github",
+  "fabro-graphviz",
+  "fabro-hooks",
+@@ -2695,6 +2696,7 @@ dependencies = [
+  "fabro-config",
+  "fabro-core",
+  "fabro-dump",
++ "fabro-environment",
+  "fabro-github",
+  "fabro-graphviz",
+  "fabro-hooks",
+diff --git a/lib/crates/fabro-api/tests/workflow_settings_round_trip.rs b/lib/crates/fabro-api/tests/workflow_settings_round_trip.rs
+index 1f528ecb5..f999aa8aa 100644
+--- a/lib/crates/fabro-api/tests/workflow_settings_round_trip.rs
++++ b/lib/crates/fabro-api/tests/workflow_settings_round_trip.rs
+@@ -1,9 +1,31 @@
+ use std::any::{TypeId, type_name};
+ 
+ use fabro_api::types::WorkflowSettings as ApiWorkflowSettings;
+-use fabro_config::WorkflowSettingsBuilder;
++use fabro_config::{EnvironmentLayer, MergeMap, RunLayer, SettingsLayer, WorkflowSettingsBuilder};
+ use fabro_types::WorkflowSettings;
+ 
++fn seeded_environment_catalog() -> MergeMap<EnvironmentLayer> {
++    r#"
++[environments.default]
++provider = "docker"
++
++[environments.default.image]
++docker = "buildpack-deps:noble"
++"#
++    .parse::<SettingsLayer>()
++    .expect("seeded environment catalog should parse")
++    .environments
++}
++
++fn workflow_settings_from_toml(source: &str) -> WorkflowSettings {
++    WorkflowSettingsBuilder::new()
++        .server_manifest_defaults(RunLayer::default(), seeded_environment_catalog())
++        .workflow_toml(source)
++        .expect("workflow settings should parse")
++        .build()
++        .expect("workflow settings should resolve")
++}
++
+ #[test]
+ fn workflow_settings_family_reuses_domain_types() {
+     assert_same_type::<ApiWorkflowSettings, WorkflowSettings>();
+@@ -11,7 +33,7 @@ fn workflow_settings_family_reuses_domain_types() {
+ 
+ #[test]
+ fn workflow_settings_json_matches_openapi_shape() {
+-    let settings = WorkflowSettingsBuilder::from_toml(
++    let settings = workflow_settings_from_toml(
+         r#"
+ _version = 1
+ 
+@@ -28,8 +50,7 @@ goal = "Ship it"
+ [run.execution]
+ approval = "auto"
+ "#,
+-    )
+-    .expect("settings should resolve");
++    );
+ 
+     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
+     assert!(
+@@ -53,15 +74,14 @@ approval = "auto"
+ 
+ #[test]
+ fn workflow_settings_json_includes_run_checkpoint_skip_git_hooks() {
+-    let settings = WorkflowSettingsBuilder::from_toml(
++    let settings = workflow_settings_from_toml(
+         r#"
+ _version = 1
+ 
+ [run.checkpoint]
+ skip_git_hooks = true
+ "#,
+-    )
+-    .expect("settings with run.checkpoint.skip_git_hooks should resolve");
++    );
+ 
+     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
+     assert_eq!(json["run"]["checkpoint"]["skip_git_hooks"], true);
+@@ -78,8 +98,7 @@ skip_git_hooks = true
+ 
+ #[test]
+ fn workflow_settings_default_run_checkpoint_skip_git_hooks_is_false() {
+-    let settings = WorkflowSettingsBuilder::from_toml("_version = 1\n")
+-        .expect("default settings should resolve");
++    let settings = workflow_settings_from_toml("_version = 1\n");
+     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
+     assert_eq!(json["run"]["checkpoint"]["skip_git_hooks"], false);
+ }
+diff --git a/lib/crates/fabro-cli/Cargo.toml b/lib/crates/fabro-cli/Cargo.toml
+index d0b8b7373..266f41244 100644
+--- a/lib/crates/fabro-cli/Cargo.toml
++++ b/lib/crates/fabro-cli/Cargo.toml
+@@ -20,6 +20,7 @@ workspace = true
+ [dependencies]
+ fabro-auth = { path = "../fabro-auth" }
+ fabro-config = { path = "../fabro-config" }
++fabro-environment = { path = "../fabro-environment" }
+ fabro-llm = { path = "../fabro-llm" }
+ fabro-model = { path = "../fabro-model" }
+ fabro-oauth = { path = "../fabro-oauth" }
+diff --git a/lib/crates/fabro-cli/src/commands/graph.rs b/lib/crates/fabro-cli/src/commands/graph.rs
+index 5730fc873..9af9863dd 100644
+--- a/lib/crates/fabro-cli/src/commands/graph.rs
++++ b/lib/crates/fabro-cli/src/commands/graph.rs
+@@ -36,6 +36,7 @@ pub(crate) async fn run(
+     let built = build_run_manifest(ManifestBuildInput {
+         workflow: args.workflow.clone(),
+         cwd: ctx.cwd().to_path_buf(),
++        environment_defaults: fabro_environment::seeded_catalog_layer(),
+         user_settings_path: Some(active_settings_path(None)),
+         ..Default::default()
+     })?;
+diff --git a/lib/crates/fabro-cli/src/commands/preflight.rs b/lib/crates/fabro-cli/src/commands/preflight.rs
+index f51c508ad..c148ddfa9 100644
+--- a/lib/crates/fabro-cli/src/commands/preflight.rs
++++ b/lib/crates/fabro-cli/src/commands/preflight.rs
+@@ -29,6 +29,7 @@ pub(crate) async fn execute(
+         cli_overrides: cli_args_config.cli,
+         input_overrides: cli_args_config.input_overrides,
+         args: preflight_manifest_args(&args),
++        environment_defaults: fabro_environment::seeded_catalog_layer(),
+         user_settings_path: Some(active_settings_path(None)),
+         ..Default::default()
+     })?;
+diff --git a/lib/crates/fabro-cli/src/commands/run/create.rs b/lib/crates/fabro-cli/src/commands/run/create.rs
+index c2c672f75..ad4360384 100644
+--- a/lib/crates/fabro-cli/src/commands/run/create.rs
++++ b/lib/crates/fabro-cli/src/commands/run/create.rs
+@@ -48,6 +48,7 @@ pub(crate) async fn create_run(
+         input_overrides: cli_args_config.input_overrides,
+         args: run_manifest_args(args),
+         run_id,
++        environment_defaults: fabro_environment::seeded_catalog_layer(),
+         user_settings_path: Some(active_settings_path(None)),
+     })?;
+ 
+diff --git a/lib/crates/fabro-cli/src/commands/validate.rs b/lib/crates/fabro-cli/src/commands/validate.rs
+index fbd07d555..b87460f28 100644
+--- a/lib/crates/fabro-cli/src/commands/validate.rs
++++ b/lib/crates/fabro-cli/src/commands/validate.rs
+@@ -19,6 +19,7 @@ pub(crate) fn run(
+     let built = build_run_manifest(ManifestBuildInput {
+         workflow: args.workflow.clone(),
+         cwd: base_ctx.cwd().to_path_buf(),
++        environment_defaults: fabro_environment::seeded_catalog_layer(),
+         user_settings_path: Some(active_settings_path(None)),
+         ..Default::default()
+     })?;
+diff --git a/lib/crates/fabro-cli/src/user_config.rs b/lib/crates/fabro-cli/src/user_config.rs
+index b6369ed97..3ec462f8c 100644
+--- a/lib/crates/fabro-cli/src/user_config.rs
++++ b/lib/crates/fabro-cli/src/user_config.rs
+@@ -96,9 +96,10 @@ fn load_settings_document_with_lookup(
+ }
+ 
+ fn load_run_settings(config_path: Option<&Path>) -> anyhow::Result<RunNamespace> {
++    let catalog = fabro_environment::seeded_catalog_layer();
+     Ok(match config_path {
+-        Some(path) => RunSettingsBuilder::load_from(path)?,
+-        None => RunSettingsBuilder::load_default()?,
++        Some(path) => RunSettingsBuilder::load_from_with_catalog(path, catalog)?,
++        None => RunSettingsBuilder::load_default_with_catalog(catalog)?,
+     })
+ }
+ 
+@@ -360,8 +361,11 @@ pub(crate) fn load_resolved_settings_from_toml(
+     let storage_override = storage_dir.map(Path::to_path_buf);
+     let storage_dir = storage_dir_from_document(&document, storage_dir)?;
+     let pre_tracing_config = pre_tracing_config_from_document(&document)?;
+-    let run_settings = RunSettingsBuilder::from_toml(source)
+-        .map_err(|err| SharedError::new(anyhow::Error::new(err)));
++    let run_settings = RunSettingsBuilder::from_toml_with_catalog(
++        source,
++        fabro_environment::seeded_catalog_layer(),
++    )
++    .map_err(|err| SharedError::new(anyhow::Error::new(err)));
+     let server_settings = ServerSettingsBuilder::from_toml(source)
+         .map(|settings| match storage_override.as_deref() {
+             Some(dir) => settings.with_storage_override(dir),
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/config.rs b/lib/crates/fabro-cli/tests/it/cmd/config.rs
+index 4a4a7b6e5..7aed153ca 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/config.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/config.rs
+@@ -260,9 +260,6 @@ _version = 1
+ 
+ [[run.prepare.steps]]
+ script = "project-setup"
+-
+-[run.environment.lifecycle]
+-preserve = true
+ "#,
+     )
+     .expect("external workflow project config should write");
+@@ -356,10 +353,6 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
+         run_spec["settings"]["run"]["execution"]["approval"].as_str(),
+         Some("auto")
+     );
+-    assert_eq!(
+-        run_spec["settings"]["run"]["environment"]["lifecycle"]["preserve"].as_bool(),
+-        Some(true)
+-    );
+     assert_eq!(
+         run_spec["settings"]["run"]["model"]["name"].as_str(),
+         Some("gpt-5.4-pro")
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/dump.rs b/lib/crates/fabro-cli/tests/it/cmd/dump.rs
+index a795ba8d2..08b7712c2 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/dump.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/dump.rs
+@@ -180,12 +180,6 @@ goal = "Generate oversized command output and artifacts"
+ [run.environment]
+ id = "local"
+ 
+-[environments.local]
+-provider = "local"
+-
+-[environments.local.lifecycle]
+-preserve = true
+-
+ [run.artifacts]
+ include = ["assets/**"]
+ "#,
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/run.rs b/lib/crates/fabro-cli/tests/it/cmd/run.rs
+index 350f290c8..fe5d6c6cc 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/run.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/run.rs
+@@ -757,12 +757,6 @@ goal = "Show stored artifacts"
+ [run.environment]
+ id = "local"
+ 
+-[environments.local]
+-provider = "local"
+-
+-[environments.local.lifecycle]
+-preserve = true
+-
+ [run.artifacts]
+ include = ["assets/**"]
+ "#,
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/support.rs b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+index 2cc3e7c1f..275ff9437 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/support.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+@@ -414,12 +414,6 @@ goal = "Exercise sandbox commands"
+ [run.environment]
+ id = "local"
+ 
+-[environments.local]
+-provider = "local"
+-
+-[environments.local.lifecycle]
+-preserve = true
+-
+ "#,
+     );
+ 
+diff --git a/lib/crates/fabro-config/src/builders.rs b/lib/crates/fabro-config/src/builders.rs
+index 11b7fbc32..cf621e70c 100644
+--- a/lib/crates/fabro-config/src/builders.rs
++++ b/lib/crates/fabro-config/src/builders.rs
+@@ -170,16 +170,40 @@ impl RunSettingsBuilder {
+         Self::from_layer(&layer)
+     }
+ 
++    pub fn load_default_with_catalog(catalog: MergeMap<EnvironmentLayer>) -> Result<RunNamespace> {
++        let mut layer = load_settings_config(None)?;
++        layer.environments = layer.environments.combine(catalog);
++        Self::from_layer(&layer)
++    }
++
+     pub fn load_from(path: &Path) -> Result<RunNamespace> {
+         let layer = load_settings_path(path, SettingsSource::DirectRun)?;
+         Self::from_layer(&layer)
+     }
+ 
++    pub fn load_from_with_catalog(
++        path: &Path,
++        catalog: MergeMap<EnvironmentLayer>,
++    ) -> Result<RunNamespace> {
++        let mut layer = load_settings_path(path, SettingsSource::DirectRun)?;
++        layer.environments = layer.environments.combine(catalog);
++        Self::from_layer(&layer)
++    }
++
+     pub fn from_toml(source: &str) -> Result<RunNamespace> {
+         let layer = parse_settings_toml(source, SettingsSource::DirectRun)?;
+         Self::from_layer(&layer)
+     }
+ 
++    pub fn from_toml_with_catalog(
++        source: &str,
++        catalog: MergeMap<EnvironmentLayer>,
++    ) -> Result<RunNamespace> {
++        let mut layer = parse_settings_toml(source, SettingsSource::DirectRun)?;
++        layer.environments = layer.environments.combine(catalog);
++        Self::from_layer(&layer)
++    }
++
+     pub(crate) fn from_layer(layer: &SettingsLayer) -> Result<RunNamespace> {
+         let layer = layer.clone().combine(DEFAULTS_LAYER.clone());
+         let mut errors = Vec::new();
+diff --git a/lib/crates/fabro-environment/src/lib.rs b/lib/crates/fabro-environment/src/lib.rs
+index ec80a7cf8..9de628740 100644
+--- a/lib/crates/fabro-environment/src/lib.rs
++++ b/lib/crates/fabro-environment/src/lib.rs
+@@ -6,4 +6,4 @@ mod store;
+ pub use error::{EnvironmentStoreError, EnvironmentValidationError};
+ pub use id::{EnvironmentId, EnvironmentRevision, EnvironmentRevisionParseError};
+ pub use model::{Environment, EnvironmentDraft};
+-pub use store::EnvironmentStore;
++pub use store::{EnvironmentStore, seeded_catalog_layer};
+diff --git a/lib/crates/fabro-environment/src/store.rs b/lib/crates/fabro-environment/src/store.rs
+index e4606e686..172c518b1 100644
+--- a/lib/crates/fabro-environment/src/store.rs
++++ b/lib/crates/fabro-environment/src/store.rs
+@@ -21,6 +21,19 @@ const SEEDS: &[(&str, &str)] = &[
+     ("daytona", DAYTONA_ENVIRONMENT_TOML),
+ ];
+ 
++/// Returns the built-in seeded environment catalog as a `MergeMap` of
++/// `EnvironmentLayer`s. Useful for client-side manifest validation where no
++/// live `EnvironmentStore` is available.
++pub fn seeded_catalog_layer() -> MergeMap<EnvironmentLayer> {
++    let mut catalog: HashMap<String, EnvironmentLayer> = HashMap::new();
++    for (id, body) in SEEDS {
++        let layer: EnvironmentLayer =
++            toml::from_str(body).expect("built-in environment seed should parse");
++        catalog.insert((*id).to_string(), layer);
++    }
++    MergeMap::from(catalog)
++}
++
+ const DEFAULT_ENVIRONMENT_TOML: &str = r#"provider = "docker"
+ 
+ [image]
+@@ -421,6 +434,15 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn seeded_catalog_layer_contains_built_ins() {
++        let catalog = super::seeded_catalog_layer();
++        let inner = catalog.into_inner();
++        for id in ["default", "local", "docker", "daytona"] {
++            assert!(inner.contains_key(id), "missing {id}");
++        }
++    }
++
+     #[tokio::test]
+     async fn absent_directory_loads_and_seeds_built_ins() {
+         let dir = tempfile::tempdir().unwrap();
+diff --git a/lib/crates/fabro-server/src/manifest_validation.rs b/lib/crates/fabro-server/src/manifest_validation.rs
+index 638442a13..40c432d92 100644
+--- a/lib/crates/fabro-server/src/manifest_validation.rs
++++ b/lib/crates/fabro-server/src/manifest_validation.rs
+@@ -2,7 +2,7 @@ use std::sync::Arc;
+ 
+ use anyhow::Result;
+ use fabro_api::types;
+-use fabro_config::RunLayer;
++use fabro_config::{EnvironmentLayer, MergeMap, RunLayer};
+ use fabro_model::Catalog;
+ use fabro_workflow::pipeline::TEMPLATE_UNDEFINED_VARIABLE_RULE;
+ 
+@@ -13,7 +13,25 @@ pub fn validate_manifest(
+     manifest: &types::RunManifest,
+     catalog: Arc<Catalog>,
+ ) -> Result<types::ValidateResponse> {
+-    let prepared = run_manifest::prepare_manifest(manifest_run_defaults, manifest)?;
++    validate_manifest_with_environment_defaults(
++        manifest_run_defaults,
++        &fabro_environment::seeded_catalog_layer(),
++        manifest,
++        catalog,
++    )
++}
++
++pub fn validate_manifest_with_environment_defaults(
++    manifest_run_defaults: &RunLayer,
++    manifest_environment_defaults: &MergeMap<EnvironmentLayer>,
++    manifest: &types::RunManifest,
++    catalog: Arc<Catalog>,
++) -> Result<types::ValidateResponse> {
++    let prepared = run_manifest::prepare_manifest_with_environment_defaults(
++        manifest_run_defaults,
++        manifest_environment_defaults,
++        manifest,
++    )?;
+     let validated =
+         run_manifest::validate_prepared_manifest(&prepared, catalog).map_err(anyhow::Error::new)?;
+     Ok(run_manifest::validate_response(&prepared, &validated))
+diff --git a/lib/crates/fabro-server/src/run_manifest.rs b/lib/crates/fabro-server/src/run_manifest.rs
+index e721bcc3f..a34588ea9 100644
+--- a/lib/crates/fabro-server/src/run_manifest.rs
++++ b/lib/crates/fabro-server/src/run_manifest.rs
+@@ -70,17 +70,6 @@ pub(crate) fn manifest_run_defaults(run: Option<&RunLayer>) -> RunLayer {
+     run.cloned().unwrap_or_default()
+ }
+ 
+-pub(crate) fn prepare_manifest(
+-    manifest_run_defaults: &RunLayer,
+-    manifest: &types::RunManifest,
+-) -> Result<PreparedManifest> {
+-    prepare_manifest_with_environment_defaults(
+-        manifest_run_defaults,
+-        &MergeMap::default(),
+-        manifest,
+-    )
+-}
+-
+ pub(crate) fn prepare_manifest_with_environment_defaults(
+     manifest_run_defaults: &RunLayer,
+     manifest_environment_defaults: &MergeMap<EnvironmentLayer>,
+diff --git a/lib/crates/fabro-server/src/run_tool_manifest.rs b/lib/crates/fabro-server/src/run_tool_manifest.rs
+index 742ed07fb..d17f5ccd0 100644
+--- a/lib/crates/fabro-server/src/run_tool_manifest.rs
++++ b/lib/crates/fabro-server/src/run_tool_manifest.rs
+@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
+ use std::sync::Arc;
+ 
+ use fabro_api::types;
+-use fabro_config::{CliLayer, EnvironmentLayer, MergeMap, RunGoalLayer, RunLayer};
++use fabro_config::{CliLayer, RunGoalLayer, RunLayer};
+ use fabro_manifest::{ManifestBuildInput, RunOverrideInput};
+ use fabro_model::Catalog;
+ use fabro_tool::{ToolError, ToolResult, ValidatedCreateRunSpec};
+@@ -24,7 +24,7 @@ pub fn build_run_tool_manifest(
+         input_overrides:      spec.inputs.clone(),
+         args:                 run_tool_manifest_args(spec),
+         run_id:               spec.run_id,
+-        environment_defaults: MergeMap::<EnvironmentLayer>::default(),
++        environment_defaults: fabro_environment::seeded_catalog_layer(),
+         user_settings_path:   Some(user_settings_path.to_path_buf()),
+     })
+     .map_err(|err| ToolError::from_anyhow(&err))?;
+diff --git a/lib/crates/fabro-server/tests/it/api/variables.rs b/lib/crates/fabro-server/tests/it/api/variables.rs
+index b149e6c74..cc5b390c6 100644
+--- a/lib/crates/fabro-server/tests/it/api/variables.rs
++++ b/lib/crates/fabro-server/tests/it/api/variables.rs
+@@ -210,14 +210,11 @@ async fn run_config_substitutes_variables_before_persisting_settings() {
+         "source": r#"
+ _version = 1
+ 
++[run]
++goal = "secret: {{ vars.RUNTIME_TOKEN }}"
++
+ [run.environment]
+ id = "local"
+-
+-[environments.local]
+-provider = "local"
+-
+-[environments.local.env]
+-RUNTIME_TOKEN = "{{ vars.RUNTIME_TOKEN }}"
+ "#
+     }]);
+ 
+@@ -247,8 +244,5 @@ RUNTIME_TOKEN = "{{ vars.RUNTIME_TOKEN }}"
+     )
+     .await;
+ 
+-    assert_eq!(
+-        body["run"]["environment"]["env"]["RUNTIME_TOKEN"],
+-        "token-from-variable"
+-    );
++    assert_eq!(body["run"]["goal"]["value"], "secret: token-from-variable");
+ }
+diff --git a/lib/crates/fabro-workflow/Cargo.toml b/lib/crates/fabro-workflow/Cargo.toml
+index 3e735f9c7..48306375b 100644
+--- a/lib/crates/fabro-workflow/Cargo.toml
++++ b/lib/crates/fabro-workflow/Cargo.toml
+@@ -75,6 +75,7 @@ fabro-vault = { path = "../fabro-vault" }
+ base64.workspace = true
+ fabro-acp = { path = "../fabro-acp", features = ["test-support"] }
+ fabro-api = { path = "../fabro-api" }
++fabro-environment = { path = "../fabro-environment" }
+ fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona", "docker", "test-support"] }
+ fabro-mcp = { path = "../fabro-mcp" }
+ tokio = { workspace = true, features = ["test-util", "macros"] }
+diff --git a/lib/crates/fabro-workflow/src/operations/create.rs b/lib/crates/fabro-workflow/src/operations/create.rs
+index 9ce70f963..8bf16d115 100644
+--- a/lib/crates/fabro-workflow/src/operations/create.rs
++++ b/lib/crates/fabro-workflow/src/operations/create.rs
+@@ -443,6 +443,10 @@ mod tests {
+ 
+     fn settings_from_run_layer(run: RunLayer) -> WorkflowSettings {
+         WorkflowSettingsBuilder::new()
++            .server_manifest_defaults(
++                RunLayer::default(),
++                fabro_environment::seeded_catalog_layer(),
++            )
+             .run_overrides(run)
+             .build()
+             .expect("settings should resolve")
+@@ -450,6 +454,10 @@ mod tests {
+ 
+     fn test_default_settings() -> WorkflowSettings {
+         WorkflowSettingsBuilder::new()
++            .server_manifest_defaults(
++                RunLayer::default(),
++                fabro_environment::seeded_catalog_layer(),
++            )
+             .build()
+             .expect("default settings should resolve")
+     }
+diff --git a/lib/crates/fabro-workflow/src/operations/start.rs b/lib/crates/fabro-workflow/src/operations/start.rs
+index 23c90f3ff..8083350be 100644
+--- a/lib/crates/fabro-workflow/src/operations/start.rs
++++ b/lib/crates/fabro-workflow/src/operations/start.rs
+@@ -1213,6 +1213,10 @@ mod tests {
+ 
+     fn settings_from_run_layer(run: RunLayer) -> WorkflowSettings {
+         WorkflowSettingsBuilder::new()
++            .server_manifest_defaults(
++                RunLayer::default(),
++                fabro_environment::seeded_catalog_layer(),
++            )
+             .run_overrides(run)
+             .build()
+             .expect("settings should resolve")
