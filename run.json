@@ -496,14 +496,112 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KSTNZTNTN8QP3QMKQZ6JCH3F",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-05-29T20:14:56.507200Z",
+    "run_branch": "fabro/run/01KSTNZTNTN8QP3QMKQZ6JCH3F",
+    "base_sha": "0e224aa70598433ce2dccb0a669b8b4e497978dc"
   },
-  "status_updated_at": "2026-05-29T20:14:40.873706Z",
-  "last_event_at": "2026-05-29T20:14:55.699196Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-05-29T20:14:56.507237Z",
+  "last_event_at": "2026-05-29T20:14:59.488523Z",
   "pending_control": null,
-  "checkpoints": [],
+  "checkpoints": [
+    {
+      "seq": 21,
+      "checkpoint": {
+        "timestamp": "2026-05-29T20:14:59.488375Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.thread_id": null,
+          "internal.fidelity": "compact",
+          "failure_signature": "",
+          "graph.goal": "# Remove Automation Master Enabled Gate Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Remove the top-level automation `enabled` field so trigger-level `enabled` is the only activation control.\n\n**Architecture:** Automations keep their existing file-backed TOML store and REST API, but the top-level master gate disappears from the Rust domain model, persisted TOML, OpenAPI schemas, generated clients, and web UI. API/manual run creation checks only for an enabled `api` trigger. No migration or legacy parser path is added because automations are brand new; TOML that still contains top-level `enabled` is obsolete input.\n\n**Tech Stack:** Rust, serde/TOML, Axum, OpenAPI/progenitor, TypeScript Axios client generation, React 19, SWR, Tailwind CSS.\n\n---\n\n## File Structure\n\n- Modify `lib/crates/fabro-automation/src/model.rs` for the core type and TOML shape.\n- Modify `lib/crates/fabro-automation/src/store.rs` for unit fixtures that create automation drafts/replacements.\n- Modify `lib/crates/fabro-server/src/server/handler/automations.rs` for API-trigger conflict wording.\n- Modify `lib/crates/fabro-server/tests/it/api/automations.rs` for HTTP fixtures and behavior tests.\n- Modify `docs/public/api-reference/fabro-api.yaml` and regenerate `lib/packages/fabro-api-client/src/**`.\n- Modify `lib/crates/fabro-api/tests/automation_round_trip.rs` for Rust/OpenAPI type parity.\n- Modify `apps/fabro-web/app/components/automation-form.tsx`, `apps/fabro-web/app/routes/automations-new.tsx`, `apps/fabro-web/app/routes/automations-edit.tsx`, `apps/fabro-web/app/routes/automation-detail.tsx`, and `apps/fabro-web/app/routes/automations.tsx` for UI state and trigger-derived run availability.\n\n## Task 1: Remove The Domain Master Gate\n\n**Files:**\n- Modify: `lib/crates/fabro-automation/src/model.rs`\n- Modify: `lib/crates/fabro-automation/src/store.rs`\n\n- [ ] Remove `pub enabled: bool` from `Automation`, `AutomationDraft`, `AutomationReplace`, and `PersistedAutomation`.\n- [ ] Remove `enabled` from every conversion between `AutomationDraft`, `AutomationReplace`, `PersistedAutomation`, and `Automation`.\n- [ ] Update `Automation::enabled_api_trigger()` to return an enabled API trigger without checking a top-level automation flag:\n\n```rust\n/// Returns the enabled API trigger if the automation has one.\n/// Returns `None` when the automation has no enabled API trigger.\n#[must_use]\npub fn enabled_api_trigger(&self) -> Option<&ApiTrigger> {\n    self.triggers.iter().find_map(|trigger| match trigger {\n        AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),\n        _ => None,\n    })\n}\n```\n\n- [ ] Remove the now-unused `default_true()` helper if no other code in the file still uses it.\n- [ ] Update `persisted_toml_applies_defaults_and_canonicalizes_without_id_or_revision` so the fixture has no top-level `enabled = true`, does not assert `automation.enabled`, and asserts the canonical TOML has no top-level `enabled` line:\n\n```rust\nassert!(!top_level_lines(&toml).any(|line| line.starts_with(\"enabled = \")));\n```\n\n- [ ] Add a focused no-compatibility test in `lib/crates/fabro-automation/src/model.rs`:\n\n```rust\n#[test]\nfn persisted_toml_rejects_legacy_top_level_enabled() {\n    let bytes = br#\"\nname = \"Legacy\"\nenabled = false\n\n[target]\nrepository = \"fabro-sh/fabro\"\nref = \"main\"\nworkflow = \"release\"\n\n[[triggers]]\ntype = \"api\"\nid = \"manual\"\nenabled = true\n\"#;\n\n    let result = Automation::from_toml_bytes(AutomationId::new(\"legacy\").unwrap(), bytes);\n\n    assert!(result.is_err());\n}\n```\n\n- [ ] Update `lib/crates/fabro-automation/src/store.rs` test helpers so `draft()` and `replacement()` no longer set top-level `enabled`.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-automation\n```\n\nExpected: all `fabro-automation` tests pass.\n\n## Task 2: Update Server Behavior And Tests\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server/handler/automations.rs`\n- Modify: `lib/crates/fabro-server/tests/it/api/automations.rs`\n\n- [ ] Change the `create_automation_run` conflict detail from:\n\n```rust\n\"automation is disabled or has no enabled API trigger\"\n```\n\nto:\n\n```rust\n\"automation has no enabled API trigger\"\n```\n\nKeep the existing code `\"automation_api_trigger_disabled\"` for compatibility with current clients and tests.\n\n- [ ] Remove top-level `\"enabled\": true` from `automation_body()`.\n- [ ] Remove top-level `\"enabled\": false` from `replacement_body()`.\n- [ ] Delete `disabled_automation_run_endpoint_returns_conflict_code`; the master gate no longer exists.\n- [ ] Keep `disabled_api_trigger_run_endpoint_returns_conflict_code` and `missing_api_trigger_run_endpoint_returns_conflict_code` as the authoritative inactive-run tests.\n- [ ] Update any test that mutates `body[\"enabled\"]` or expects top-level enabled in automation JSON/TOML.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-server automations\n```\n\nExpected: automation integration tests pass.\n\n## Task 3: Update OpenAPI And Generated API Types\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Modify: `lib/crates/fabro-api/tests/automation_round_trip.rs`\n- Regenerate: `lib/packages/fabro-api-client/src/**`\n\n- [ ] In the `Automation` schema, remove top-level `enabled` from `required` and `properties`.\n- [ ] In `CreateAutomationRequest`, remove top-level `enabled` from `properties`.\n- [ ] In `ReplaceAutomationRequest`, remove top-level `enabled` from `required` and `properties`.\n- [ ] Keep `enabled` on `AutomationApiTrigger` and `AutomationScheduleTrigger`.\n- [ ] Update the `POST /api/v1/automations/{id}/runs` `409` description from:\n\n```yaml\ndescription: Automation is disabled or has no enabled API trigger\n```\n\nto:\n\n```yaml\ndescription: Automation has no enabled API trigger\n```\n\n- [ ] Update `lib/crates/fabro-api/tests/automation_round_trip.rs` so the `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest` JSON fixtures no longer include top-level `\"enabled\"`.\n- [ ] Run:\n\n```bash\ncargo build -p fabro-api\n```\n\nExpected: progenitor type generation succeeds.\n\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-api automation_round_trip\n```\n\nExpected: automation type identity and JSON parity tests pass.\n\n- [ ] Regenerate the TypeScript client:\n\n```bash\ncd lib/packages/fabro-api-client && bun run generate\n```\n\nExpected: generated model files remove top-level `enabled` from `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest`.\n\n## Task 4: Remove The Web UI Master Toggle\n\n**Files:**\n- Modify: `apps/fabro-web/app/components/automation-form.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-new.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-edit.tsx`\n- Modify: `apps/fabro-web/app/routes/automation-detail.tsx`\n- Modify: `apps/fabro-web/app/routes/automations.tsx`\n\n- [ ] Remove `enabled` from `AutomationFormValues` and `EMPTY_AUTOMATION_FORM`.\n- [ ] Remove `enabled: automation.enabled` from `automationToFormValues`.\n- [ ] Delete the `Row title=\"Enabled\"` block from `AutomationFormFields`.\n- [ ] Remove `enabled: values.enabled` from the create payload in `automations-new.tsx`.\n- [ ] Remove `enabled: values.enabled` from the replace payload in `automations-edit.tsx`.\n- [ ] In `isFormValid`, remove the requirement that at least one trigger is enabled. The final return should only require non-empty ID, name, repository, ref, and workflow:\n\n```ts\nreturn (\n  values.id.trim() !== \"\" &&\n  values.name.trim() !== \"\" &&\n  values.repository.trim() !== \"\" &&\n  values.ref.trim() !== \"\" &&\n  values.workflow.trim() !== \"\"\n);\n```\n\n- [ ] In `automation-detail.tsx`, change run availability to:\n\n```ts\nconst canRun = apiTrigger?.enabled === true;\n```\n\n- [ ] In `automation-detail.tsx`, remove `StatusChip`, remove its use, and simplify the Run button `title` so only a missing/disabled API trigger explains the disabled state:\n\n```ts\ntitle={!apiTrigger?.enabled ? \"Enable the API trigger to run it\" : undefined}\n```\n\n- [ ] In `automations.tsx`, extend `AutomationRow` with `apiEnabled: boolean`, set it from the enabled API trigger in `mapAutomations`, and pass `disabled={deleting || !automation.apiEnabled || (runningId !== null && runningId !== automation.id)}` to the run button path.\n- [ ] In `AutomationCard`, make the run button title reflect trigger-disabled state:\n\n```tsx\ntitle={\n  running\n    ? \"Starting run...\"\n    : automation.apiEnabled\n      ? \"Run automation\"\n      : \"Enable the API trigger to run it\"\n}\n```\n\nUse exactly this title text for the disabled/run states; do not change visible button copy.\n\n- [ ] Run:\n\n```bash\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: TypeScript passes with no `automation.enabled` references.\n\n## Task 5: Final Verification\n\n**Files:**\n- No additional source edits expected.\n\n- [ ] Run the focused backend checks:\n\n```bash\ncargo nextest run -p fabro-automation\ncargo nextest run -p fabro-api automation_round_trip\ncargo nextest run -p fabro-server automations\n```\n\nExpected: all focused Rust checks pass.\n\n- [ ] Run the focused frontend checks:\n\n```bash\ncd lib/packages/fabro-api-client && bun run typecheck\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: generated client and web app typecheck.\n\n- [ ] Search for leftover master-gate references:\n\n```bash\nrg -n \"automation\\\\.enabled|enabled_api_trigger\\\\(\\\\).*automation|Automation is disabled|automation is disabled|\\\\\\\"enabled\\\\\\\": true\" \\\n  lib/crates/fabro-automation \\\n  lib/crates/fabro-server/tests/it/api/automations.rs \\\n  lib/crates/fabro-server/src/server/handler/automations.rs \\\n  lib/crates/fabro-api/tests/automation_round_trip.rs \\\n  apps/fabro-web/app/components/automation-form.tsx \\\n  apps/fabro-web/app/routes/automations-new.tsx \\\n  apps/fabro-web/app/routes/automations-edit.tsx \\\n  apps/fabro-web/app/routes/automation-detail.tsx \\\n  apps/fabro-web/app/routes/automations.tsx\n```\n\nExpected: no hits for the removed top-level automation enabled gate. Hits for trigger-level `enabled` are acceptable when they are clearly on `AutomationTrigger`, `ApiTrigger`, or `ScheduleTrigger`.\n\n- [ ] Optional formatting check:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\nExpected: Rust formatting passes. If it fails on touched Rust files, run `cargo +nightly-2026-04-14 fmt --all` and re-run the focused Rust checks.\n\n## Explicit Assumptions\n\n- No migration or compatibility parser is added for top-level automation `enabled`.\n- Existing automation TOML files that still contain top-level `enabled` are obsolete and may fail startup until manually edited.\n- Trigger-level `enabled` remains public API and persisted TOML.\n- API/manual run creation remains controlled by the enabled `api` trigger only.\n- Schedule execution, cron semantics, and schedule-trigger preservation are outside this cleanup.\n",
+          "graph.rankdir": "LR",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "failure_class": "",
+          "internal.retry_count.start": 0,
+          "current_node": "start",
+          "internal.run_id": "01KSTNZTNTN8QP3QMKQZ6JCH3F",
+          "outcome": "succeeded",
+          "internal.node_visit_count": 1,
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        "
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "toolchain",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-05-29T20:15:01.102843Z",
+        "current_node": "toolchain",
+        "completed_nodes": [
+          "start",
+          "toolchain"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "graph.goal": "# Remove Automation Master Enabled Gate Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Remove the top-level automation `enabled` field so trigger-level `enabled` is the only activation control.\n\n**Architecture:** Automations keep their existing file-backed TOML store and REST API, but the top-level master gate disappears from the Rust domain model, persisted TOML, OpenAPI schemas, generated clients, and web UI. API/manual run creation checks only for an enabled `api` trigger. No migration or legacy parser path is added because automations are brand new; TOML that still contains top-level `enabled` is obsolete input.\n\n**Tech Stack:** Rust, serde/TOML, Axum, OpenAPI/progenitor, TypeScript Axios client generation, React 19, SWR, Tailwind CSS.\n\n---\n\n## File Structure\n\n- Modify `lib/crates/fabro-automation/src/model.rs` for the core type and TOML shape.\n- Modify `lib/crates/fabro-automation/src/store.rs` for unit fixtures that create automation drafts/replacements.\n- Modify `lib/crates/fabro-server/src/server/handler/automations.rs` for API-trigger conflict wording.\n- Modify `lib/crates/fabro-server/tests/it/api/automations.rs` for HTTP fixtures and behavior tests.\n- Modify `docs/public/api-reference/fabro-api.yaml` and regenerate `lib/packages/fabro-api-client/src/**`.\n- Modify `lib/crates/fabro-api/tests/automation_round_trip.rs` for Rust/OpenAPI type parity.\n- Modify `apps/fabro-web/app/components/automation-form.tsx`, `apps/fabro-web/app/routes/automations-new.tsx`, `apps/fabro-web/app/routes/automations-edit.tsx`, `apps/fabro-web/app/routes/automation-detail.tsx`, and `apps/fabro-web/app/routes/automations.tsx` for UI state and trigger-derived run availability.\n\n## Task 1: Remove The Domain Master Gate\n\n**Files:**\n- Modify: `lib/crates/fabro-automation/src/model.rs`\n- Modify: `lib/crates/fabro-automation/src/store.rs`\n\n- [ ] Remove `pub enabled: bool` from `Automation`, `AutomationDraft`, `AutomationReplace`, and `PersistedAutomation`.\n- [ ] Remove `enabled` from every conversion between `AutomationDraft`, `AutomationReplace`, `PersistedAutomation`, and `Automation`.\n- [ ] Update `Automation::enabled_api_trigger()` to return an enabled API trigger without checking a top-level automation flag:\n\n```rust\n/// Returns the enabled API trigger if the automation has one.\n/// Returns `None` when the automation has no enabled API trigger.\n#[must_use]\npub fn enabled_api_trigger(&self) -> Option<&ApiTrigger> {\n    self.triggers.iter().find_map(|trigger| match trigger {\n        AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),\n        _ => None,\n    })\n}\n```\n\n- [ ] Remove the now-unused `default_true()` helper if no other code in the file still uses it.\n- [ ] Update `persisted_toml_applies_defaults_and_canonicalizes_without_id_or_revision` so the fixture has no top-level `enabled = true`, does not assert `automation.enabled`, and asserts the canonical TOML has no top-level `enabled` line:\n\n```rust\nassert!(!top_level_lines(&toml).any(|line| line.starts_with(\"enabled = \")));\n```\n\n- [ ] Add a focused no-compatibility test in `lib/crates/fabro-automation/src/model.rs`:\n\n```rust\n#[test]\nfn persisted_toml_rejects_legacy_top_level_enabled() {\n    let bytes = br#\"\nname = \"Legacy\"\nenabled = false\n\n[target]\nrepository = \"fabro-sh/fabro\"\nref = \"main\"\nworkflow = \"release\"\n\n[[triggers]]\ntype = \"api\"\nid = \"manual\"\nenabled = true\n\"#;\n\n    let result = Automation::from_toml_bytes(AutomationId::new(\"legacy\").unwrap(), bytes);\n\n    assert!(result.is_err());\n}\n```\n\n- [ ] Update `lib/crates/fabro-automation/src/store.rs` test helpers so `draft()` and `replacement()` no longer set top-level `enabled`.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-automation\n```\n\nExpected: all `fabro-automation` tests pass.\n\n## Task 2: Update Server Behavior And Tests\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server/handler/automations.rs`\n- Modify: `lib/crates/fabro-server/tests/it/api/automations.rs`\n\n- [ ] Change the `create_automation_run` conflict detail from:\n\n```rust\n\"automation is disabled or has no enabled API trigger\"\n```\n\nto:\n\n```rust\n\"automation has no enabled API trigger\"\n```\n\nKeep the existing code `\"automation_api_trigger_disabled\"` for compatibility with current clients and tests.\n\n- [ ] Remove top-level `\"enabled\": true` from `automation_body()`.\n- [ ] Remove top-level `\"enabled\": false` from `replacement_body()`.\n- [ ] Delete `disabled_automation_run_endpoint_returns_conflict_code`; the master gate no longer exists.\n- [ ] Keep `disabled_api_trigger_run_endpoint_returns_conflict_code` and `missing_api_trigger_run_endpoint_returns_conflict_code` as the authoritative inactive-run tests.\n- [ ] Update any test that mutates `body[\"enabled\"]` or expects top-level enabled in automation JSON/TOML.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-server automations\n```\n\nExpected: automation integration tests pass.\n\n## Task 3: Update OpenAPI And Generated API Types\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Modify: `lib/crates/fabro-api/tests/automation_round_trip.rs`\n- Regenerate: `lib/packages/fabro-api-client/src/**`\n\n- [ ] In the `Automation` schema, remove top-level `enabled` from `required` and `properties`.\n- [ ] In `CreateAutomationRequest`, remove top-level `enabled` from `properties`.\n- [ ] In `ReplaceAutomationRequest`, remove top-level `enabled` from `required` and `properties`.\n- [ ] Keep `enabled` on `AutomationApiTrigger` and `AutomationScheduleTrigger`.\n- [ ] Update the `POST /api/v1/automations/{id}/runs` `409` description from:\n\n```yaml\ndescription: Automation is disabled or has no enabled API trigger\n```\n\nto:\n\n```yaml\ndescription: Automation has no enabled API trigger\n```\n\n- [ ] Update `lib/crates/fabro-api/tests/automation_round_trip.rs` so the `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest` JSON fixtures no longer include top-level `\"enabled\"`.\n- [ ] Run:\n\n```bash\ncargo build -p fabro-api\n```\n\nExpected: progenitor type generation succeeds.\n\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-api automation_round_trip\n```\n\nExpected: automation type identity and JSON parity tests pass.\n\n- [ ] Regenerate the TypeScript client:\n\n```bash\ncd lib/packages/fabro-api-client && bun run generate\n```\n\nExpected: generated model files remove top-level `enabled` from `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest`.\n\n## Task 4: Remove The Web UI Master Toggle\n\n**Files:**\n- Modify: `apps/fabro-web/app/components/automation-form.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-new.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-edit.tsx`\n- Modify: `apps/fabro-web/app/routes/automation-detail.tsx`\n- Modify: `apps/fabro-web/app/routes/automations.tsx`\n\n- [ ] Remove `enabled` from `AutomationFormValues` and `EMPTY_AUTOMATION_FORM`.\n- [ ] Remove `enabled: automation.enabled` from `automationToFormValues`.\n- [ ] Delete the `Row title=\"Enabled\"` block from `AutomationFormFields`.\n- [ ] Remove `enabled: values.enabled` from the create payload in `automations-new.tsx`.\n- [ ] Remove `enabled: values.enabled` from the replace payload in `automations-edit.tsx`.\n- [ ] In `isFormValid`, remove the requirement that at least one trigger is enabled. The final return should only require non-empty ID, name, repository, ref, and workflow:\n\n```ts\nreturn (\n  values.id.trim() !== \"\" &&\n  values.name.trim() !== \"\" &&\n  values.repository.trim() !== \"\" &&\n  values.ref.trim() !== \"\" &&\n  values.workflow.trim() !== \"\"\n);\n```\n\n- [ ] In `automation-detail.tsx`, change run availability to:\n\n```ts\nconst canRun = apiTrigger?.enabled === true;\n```\n\n- [ ] In `automation-detail.tsx`, remove `StatusChip`, remove its use, and simplify the Run button `title` so only a missing/disabled API trigger explains the disabled state:\n\n```ts\ntitle={!apiTrigger?.enabled ? \"Enable the API trigger to run it\" : undefined}\n```\n\n- [ ] In `automations.tsx`, extend `AutomationRow` with `apiEnabled: boolean`, set it from the enabled API trigger in `mapAutomations`, and pass `disabled={deleting || !automation.apiEnabled || (runningId !== null && runningId !== automation.id)}` to the run button path.\n- [ ] In `AutomationCard`, make the run button title reflect trigger-disabled state:\n\n```tsx\ntitle={\n  running\n    ? \"Starting run...\"\n    : automation.apiEnabled\n      ? \"Run automation\"\n      : \"Enable the API trigger to run it\"\n}\n```\n\nUse exactly this title text for the disabled/run states; do not change visible button copy.\n\n- [ ] Run:\n\n```bash\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: TypeScript passes with no `automation.enabled` references.\n\n## Task 5: Final Verification\n\n**Files:**\n- No additional source edits expected.\n\n- [ ] Run the focused backend checks:\n\n```bash\ncargo nextest run -p fabro-automation\ncargo nextest run -p fabro-api automation_round_trip\ncargo nextest run -p fabro-server automations\n```\n\nExpected: all focused Rust checks pass.\n\n- [ ] Run the focused frontend checks:\n\n```bash\ncd lib/packages/fabro-api-client && bun run typecheck\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: generated client and web app typecheck.\n\n- [ ] Search for leftover master-gate references:\n\n```bash\nrg -n \"automation\\\\.enabled|enabled_api_trigger\\\\(\\\\).*automation|Automation is disabled|automation is disabled|\\\\\\\"enabled\\\\\\\": true\" \\\n  lib/crates/fabro-automation \\\n  lib/crates/fabro-server/tests/it/api/automations.rs \\\n  lib/crates/fabro-server/src/server/handler/automations.rs \\\n  lib/crates/fabro-api/tests/automation_round_trip.rs \\\n  apps/fabro-web/app/components/automation-form.tsx \\\n  apps/fabro-web/app/routes/automations-new.tsx \\\n  apps/fabro-web/app/routes/automations-edit.tsx \\\n  apps/fabro-web/app/routes/automation-detail.tsx \\\n  apps/fabro-web/app/routes/automations.tsx\n```\n\nExpected: no hits for the removed top-level automation enabled gate. Hits for trigger-level `enabled` are acceptable when they are clearly on `AutomationTrigger`, `ApiTrigger`, or `ScheduleTrigger`.\n\n- [ ] Optional formatting check:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\nExpected: Rust formatting passes. If it fails on touched Rust files, run `cargo +nightly-2026-04-14 fmt --all` and re-run the focused Rust checks.\n\n## Explicit Assumptions\n\n- No migration or compatibility parser is added for top-level automation `enabled`.\n- Existing automation TOML files that still contain top-level `enabled` are obsolete and may fail startup until manually edited.\n- Trigger-level `enabled` remains public API and persisted TOML.\n- API/manual run creation remains controlled by the enabled `api` trigger only.\n- Schedule execution, cron semantics, and schedule-trigger preservation are outside this cleanup.\n",
+          "failure_class": "",
+          "internal.run_id": "01KSTNZTNTN8QP3QMKQZ6JCH3F",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.fidelity": "compact",
+          "internal.node_visit_count": 1,
+          "outcome": "succeeded",
+          "failure_signature": "",
+          "internal.retry_count.toolchain": 0,
+          "graph.rankdir": "LR",
+          "internal.thread_id": "start",
+          "thread.start.current_node": "toolchain",
+          "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "current_node": "toolchain",
+          "internal.retry_count.start": 0
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 1604,
+              "active_time_ms": 1604
+            }
+          }
+        },
+        "next_node_id": "preflight_compile",
+        "node_visits": {
+          "toolchain": 1,
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
   "conclusion": null,
   "sandbox": {
     "kind": "ready",
@@ -529,5 +627,67 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "toolchain@1": {
+      "first_event_seq": 22,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "command": "exec 2>&1\ncommand -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-29T20:14:59.488492Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "running"
+    },
+    "start@1": {
+      "first_event_seq": 18,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-29T20:14:59.488206Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-29T20:14:59.488072Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    }
+  }
 }
