@@ -1,0 +1,6 @@
+{
+  "outcome": "failed",
+  "notes": null,
+  "failure_reason": "Script failed with exit code: 127\n\n## output\n/home/daytona/.daytona/sessions/fabro-d2267c915e79320b/d21418c0-6671-4a93-beff-81d139756420/cmd.sh:4: command not found: rustc\n",
+  "timestamp": "2026-05-29T13:20:06.431759Z"
+}
