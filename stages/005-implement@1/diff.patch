@@ -1,0 +1,636 @@
+diff --git a/apps/fabro-web/app/components/automation-form.tsx b/apps/fabro-web/app/components/automation-form.tsx
+index 5f79f4a78..5d623534c 100644
+--- a/apps/fabro-web/app/components/automation-form.tsx
++++ b/apps/fabro-web/app/components/automation-form.tsx
+@@ -9,7 +9,6 @@ export interface AutomationFormValues {
+   id: string;
+   name: string;
+   description: string;
+-  enabled: boolean;
+   repository: string;
+   ref: string;
+   workflow: string;
+@@ -22,7 +21,6 @@ export const EMPTY_AUTOMATION_FORM: AutomationFormValues = {
+   id:              "",
+   name:            "",
+   description:     "",
+-  enabled:         true,
+   repository:      "",
+   ref:             "main",
+   workflow:        "",
+@@ -45,7 +43,6 @@ export function automationToFormValues(automation: Automation): AutomationFormVa
+     id:              automation.id,
+     name:            automation.name,
+     description:     automation.description ?? "",
+-    enabled:         automation.enabled,
+     repository:      automation.target.repository,
+     ref:             automation.target.ref,
+     workflow:        automation.target.workflow,
+@@ -77,8 +74,7 @@ export function isFormValid(values: AutomationFormValues): boolean {
+     values.name.trim() !== "" &&
+     values.repository.trim() !== "" &&
+     values.ref.trim() !== "" &&
+-    values.workflow.trim() !== "" &&
+-    (values.manualEnabled || values.scheduleEnabled)
++    values.workflow.trim() !== ""
+   );
+ }
+ 
+@@ -187,13 +183,6 @@ export function AutomationFormFields({
+             className={`${INPUT_CLASS} resize-y`}
+           />
+         </Row>
+-        <Row title="Enabled" help="Disabled automations skip scheduled triggers and reject API runs.">
+-          <ToggleSwitch
+-            checked={values.enabled}
+-            onChange={(enabled) => patch({ enabled })}
+-            label="Enable automation"
+-          />
+-        </Row>
+       </Panel>
+ 
+       <Panel title="Source">
+diff --git a/apps/fabro-web/app/routes/automation-detail.tsx b/apps/fabro-web/app/routes/automation-detail.tsx
+index d8c3021dc..57d2274f2 100644
+--- a/apps/fabro-web/app/routes/automation-detail.tsx
++++ b/apps/fabro-web/app/routes/automation-detail.tsx
+@@ -92,7 +92,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
+ 
+   const scheduleTrigger = automation.triggers.find((t) => t.type === "schedule");
+   const apiTrigger = automation.triggers.find((t) => t.type === "api");
+-  const canRun = apiTrigger?.enabled === true && automation.enabled;
++  const canRun = apiTrigger?.enabled === true;
+ 
+   async function onRun() {
+     if (!canRun || running) return;
+@@ -137,7 +137,6 @@ function AutomationHeader({ automation }: { automation: Automation }) {
+             <span className="font-mono text-xs text-fg-muted">{automation.id}</span>
+           </div>
+           <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+-            <StatusChip enabled={automation.enabled} />
+             <Chip icon={FolderIcon}>
+               {automation.target.repository}
+               <span className="text-fg-muted/70"> · {automation.target.ref}</span>
+@@ -165,13 +164,7 @@ function AutomationHeader({ automation }: { automation: Automation }) {
+             type="button"
+             onClick={onRun}
+             disabled={!canRun || running}
+-            title={
+-              !automation.enabled
+-                ? "Enable the automation to run it"
+-                : !apiTrigger?.enabled
+-                  ? "Enable the API trigger to run it"
+-                  : undefined
+-            }
++            title={!apiTrigger?.enabled ? "Enable the API trigger to run it" : undefined}
+             className={PRIMARY_BUTTON_CLASS}
+           >
+             <PlayIcon className="size-4" aria-hidden="true" />
+@@ -183,19 +176,6 @@ function AutomationHeader({ automation }: { automation: Automation }) {
+   );
+ }
+ 
+-function StatusChip({ enabled }: { enabled: boolean }) {
+-  return (
+-    <span className="flex items-center gap-1.5">
+-      <span
+-        className={`size-2 rounded-full ${enabled ? "bg-teal-500" : "bg-fg-muted"}`}
+-      />
+-      <span className={`font-medium ${enabled ? "text-teal-500" : "text-fg-muted"}`}>
+-        {enabled ? "Enabled" : "Disabled"}
+-      </span>
+-    </span>
+-  );
+-}
+-
+ function Chip({
+   icon: Icon,
+   children,
+diff --git a/apps/fabro-web/app/routes/automations-edit.tsx b/apps/fabro-web/app/routes/automations-edit.tsx
+index cb8e10324..e77a1e159 100644
+--- a/apps/fabro-web/app/routes/automations-edit.tsx
++++ b/apps/fabro-web/app/routes/automations-edit.tsx
+@@ -85,7 +85,6 @@ function EditAutomationForm({ automation }: { automation: Automation }) {
+         automationsApi.replaceAutomation(automation.id, automation.revision, {
+           name:        trimmedName,
+           description: values.description.trim() || null,
+-          enabled:     values.enabled,
+           target:      {
+             repository: values.repository.trim(),
+             ref:        values.ref.trim(),
+diff --git a/apps/fabro-web/app/routes/automations-new.tsx b/apps/fabro-web/app/routes/automations-new.tsx
+index 1ee221c35..02d56b11f 100644
+--- a/apps/fabro-web/app/routes/automations-new.tsx
++++ b/apps/fabro-web/app/routes/automations-new.tsx
+@@ -47,7 +47,6 @@ export default function AutomationsNew() {
+           id:          values.id.trim(),
+           name:        trimmedName,
+           description: values.description.trim() || null,
+-          enabled:     values.enabled,
+           target:      {
+             repository: values.repository.trim(),
+             ref:        values.ref.trim(),
+diff --git a/apps/fabro-web/app/routes/automations.tsx b/apps/fabro-web/app/routes/automations.tsx
+index 7cb32b59f..f8dfb025f 100644
+--- a/apps/fabro-web/app/routes/automations.tsx
++++ b/apps/fabro-web/app/routes/automations.tsx
+@@ -48,6 +48,7 @@ interface AutomationRow {
+   workflow: string;
+   repository: string;
+   schedule?: string;
++  apiEnabled: boolean;
+   icon: ComponentType<{ className?: string }>;
+   color: string;
+ }
+@@ -81,6 +82,10 @@ function scheduleFor(automation: Automation): string | undefined {
+   return schedule?.expression;
+ }
+ 
++function hasEnabledApiTrigger(automation: Automation): boolean {
++  return automation.triggers.some((t) => t.type === "api" && t.enabled);
++}
++
+ function mapAutomations(result: AutomationListResponse | undefined): AutomationRow[] {
+   const automations = result?.data ?? [];
+   return automations.map((a) => ({
+@@ -90,6 +95,7 @@ function mapAutomations(result: AutomationListResponse | undefined): AutomationR
+     workflow:   a.target.workflow,
+     repository: a.target.repository,
+     schedule:   scheduleFor(a),
++    apiEnabled: hasEnabledApiTrigger(a),
+     icon:       slugIconMap[a.target.workflow] ?? CodeBracketIcon,
+     color:      slugColorMap[a.target.workflow] ?? "var(--color-teal-500)",
+   }));
+@@ -106,12 +112,14 @@ function PlayIcon({ className }: { className?: string }) {
+ function AutomationCard({
+   automation,
+   disabled,
++  menuDisabled,
+   running,
+   onRun,
+   onDelete,
+ }: {
+   automation: AutomationRow;
+   disabled: boolean;
++  menuDisabled: boolean;
+   running: boolean;
+   onRun: () => void;
+   onDelete: () => void;
+@@ -156,7 +164,13 @@ function AutomationCard({
+           onClick={onRun}
+           disabled={running || disabled}
+           aria-label={running ? "Starting run…" : "Run automation"}
+-          title={running ? "Starting run…" : "Run automation"}
++          title={
++            running
++              ? "Starting run..."
++              : automation.apiEnabled
++                ? "Run automation"
++                : "Enable the API trigger to run it"
++          }
+           className="flex size-8 shrink-0 items-center justify-center rounded-full border border-mint/20 text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-mint"
+         >
+           {running ? (
+@@ -167,7 +181,7 @@ function AutomationCard({
+         </button>
+       )}
+ 
+-      <RowMenu automation={automation} disabled={disabled} onDelete={onDelete} />
++      <RowMenu automation={automation} disabled={menuDisabled} onDelete={onDelete} />
+     </div>
+   );
+ }
+@@ -242,7 +256,7 @@ export default function Automations() {
+   const [runningId, setRunningId] = useState<string | null>(null);
+ 
+   async function runAutomation(automation: AutomationRow) {
+-    if (runningId) return;
++    if (runningId || !automation.apiEnabled) return;
+     setRunningId(automation.id);
+     try {
+       const run = await apiData(() => automationsApi.createAutomationRun(automation.id));
+@@ -322,7 +336,12 @@ export default function Automations() {
+           <AutomationCard
+             key={automation.id}
+             automation={automation}
+-            disabled={deleting || (runningId !== null && runningId !== automation.id)}
++            disabled={
++              deleting ||
++              !automation.apiEnabled ||
++              (runningId !== null && runningId !== automation.id)
++            }
++            menuDisabled={deleting || (runningId !== null && runningId !== automation.id)}
+             running={runningId === automation.id}
+             onRun={() => runAutomation(automation)}
+             onDelete={() => setPendingDelete(automation)}
+diff --git a/docs/public/api-reference/fabro-api.yaml b/docs/public/api-reference/fabro-api.yaml
+index 103ab4cad..b7c77775a 100644
+--- a/docs/public/api-reference/fabro-api.yaml
++++ b/docs/public/api-reference/fabro-api.yaml
+@@ -4206,7 +4206,7 @@ paths:
+               schema:
+                 $ref: "#/components/schemas/ErrorResponse"
+         "409":
+-          description: Automation is disabled or has no enabled API trigger
++          description: Automation has no enabled API trigger
+           headers:
+             x-request-id:
+               $ref: "#/components/headers/XRequestId"
+@@ -5841,7 +5841,6 @@ components:
+         - revision
+         - name
+         - description
+-        - enabled
+         - target
+         - triggers
+       properties:
+@@ -5860,9 +5859,6 @@ components:
+         description:
+           type: ["string", "null"]
+           example: Keeps dependencies fresh.
+-        enabled:
+-          type: boolean
+-          example: true
+         target:
+           $ref: "#/components/schemas/AutomationTarget"
+         triggers:
+@@ -5970,9 +5966,6 @@ components:
+         description:
+           type: ["string", "null"]
+           example: Keeps dependencies fresh.
+-        enabled:
+-          type: boolean
+-          default: true
+         target:
+           $ref: "#/components/schemas/AutomationTarget"
+         triggers:
+@@ -5986,7 +5979,6 @@ components:
+       additionalProperties: false
+       required:
+         - name
+-        - enabled
+         - target
+         - triggers
+       properties:
+@@ -5996,8 +5988,6 @@ components:
+         description:
+           type: ["string", "null"]
+           example: Keeps dependencies fresh.
+-        enabled:
+-          type: boolean
+         target:
+           $ref: "#/components/schemas/AutomationTarget"
+         triggers:
+diff --git a/lib/crates/fabro-api/tests/automation_round_trip.rs b/lib/crates/fabro-api/tests/automation_round_trip.rs
+index 9984fbb39..db4a66d03 100644
+--- a/lib/crates/fabro-api/tests/automation_round_trip.rs
++++ b/lib/crates/fabro-api/tests/automation_round_trip.rs
+@@ -26,7 +26,6 @@ fn automation_response_round_trips_public_json_shape() {
+         "revision": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+         "name": "Nightly dependency update",
+         "description": null,
+-        "enabled": true,
+         "target": {
+             "repository": "fabro-sh/fabro",
+             "ref": "main",
+@@ -57,7 +56,6 @@ fn create_automation_request_round_trips_public_json_shape() {
+         "id": "nightly-deps",
+         "name": "Nightly dependency update",
+         "description": "Keep dependencies fresh",
+-        "enabled": true,
+         "target": {
+             "repository": "fabro-sh/fabro",
+             "ref": "main",
+@@ -81,7 +79,6 @@ fn replace_automation_request_round_trips_public_json_shape() {
+     let value = json!({
+         "name": "Nightly dependency update",
+         "description": "Keep dependencies fresh",
+-        "enabled": true,
+         "target": {
+             "repository": "fabro-sh/fabro",
+             "ref": "main",
+diff --git a/lib/crates/fabro-automation/src/model.rs b/lib/crates/fabro-automation/src/model.rs
+index 6e5cda0c1..90dc24eb7 100644
+--- a/lib/crates/fabro-automation/src/model.rs
++++ b/lib/crates/fabro-automation/src/model.rs
+@@ -15,7 +15,6 @@ pub struct Automation {
+     pub revision:    AutomationRevision,
+     pub name:        String,
+     pub description: Option<String>,
+-    pub enabled:     bool,
+     pub target:      AutomationTarget,
+     pub triggers:    Vec<AutomationTrigger>,
+ }
+@@ -54,7 +53,6 @@ impl Automation {
+         PersistedAutomation {
+             name:        self.name.clone(),
+             description: self.description.clone(),
+-            enabled:     self.enabled,
+             target:      self.target.clone(),
+             triggers:    self.triggers.clone(),
+         }
+@@ -64,14 +62,10 @@ impl Automation {
+         toml::to_string_pretty(&self.to_persisted()).map_err(AutomationStoreError::from)
+     }
+ 
+-    /// Returns the enabled API trigger if the automation itself is enabled and
+-    /// has one. Returns `None` when the automation is disabled or has no
+-    /// enabled API trigger.
++    /// Returns the enabled API trigger if the automation has one.
++    /// Returns `None` when the automation has no enabled API trigger.
+     #[must_use]
+     pub fn enabled_api_trigger(&self) -> Option<&ApiTrigger> {
+-        if !self.enabled {
+-            return None;
+-        }
+         self.triggers.iter().find_map(|trigger| match trigger {
+             AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),
+             _ => None,
+@@ -98,7 +92,6 @@ impl Automation {
+             revision,
+             name: replace.name,
+             description: replace.description,
+-            enabled: replace.enabled,
+             target: replace.target,
+             triggers: replace.triggers,
+         }
+@@ -161,8 +154,6 @@ pub struct AutomationDraft {
+     pub name:        String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub description: Option<String>,
+-    #[serde(default = "default_true")]
+-    pub enabled:     bool,
+     pub target:      AutomationTarget,
+     pub triggers:    Vec<AutomationTrigger>,
+ }
+@@ -172,7 +163,6 @@ impl From<AutomationDraft> for (AutomationId, AutomationReplace) {
+         (value.id, AutomationReplace {
+             name:        value.name,
+             description: value.description,
+-            enabled:     value.enabled,
+             target:      value.target,
+             triggers:    value.triggers,
+         })
+@@ -185,7 +175,6 @@ pub struct AutomationReplace {
+     pub name:        String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub description: Option<String>,
+-    pub enabled:     bool,
+     pub target:      AutomationTarget,
+     pub triggers:    Vec<AutomationTrigger>,
+ }
+@@ -196,8 +185,6 @@ pub(crate) struct PersistedAutomation {
+     name:        String,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     description: Option<String>,
+-    #[serde(default = "default_true")]
+-    enabled:     bool,
+     target:      AutomationTarget,
+     #[serde(default)]
+     triggers:    Vec<AutomationTrigger>,
+@@ -208,7 +195,6 @@ impl From<AutomationReplace> for PersistedAutomation {
+         Self {
+             name:        value.name,
+             description: value.description,
+-            enabled:     value.enabled,
+             target:      value.target,
+             triggers:    value.triggers,
+         }
+@@ -220,7 +206,6 @@ impl From<PersistedAutomation> for AutomationReplace {
+         Self {
+             name:        value.name,
+             description: value.description,
+-            enabled:     value.enabled,
+             target:      value.target,
+             triggers:    value.triggers,
+         }
+@@ -390,10 +375,6 @@ fn validate_triggers(triggers: &[AutomationTrigger]) -> Result<(), AutomationVal
+     Ok(())
+ }
+ 
+-fn default_true() -> bool {
+-    true
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use crate::{
+@@ -450,30 +431,49 @@ expression = "0 0 * * *"
+             Automation::from_toml_bytes(AutomationId::new("nightly").unwrap(), bytes).unwrap();
+ 
+         assert_eq!(automation.description, None);
+-        assert!(automation.enabled);
+         assert!(automation.triggers.iter().all(AutomationTrigger::enabled));
+ 
+         let toml = automation.to_toml_string().unwrap();
+         assert!(!top_level_lines(&toml).any(|line| line.starts_with("id = ")));
+         assert!(!top_level_lines(&toml).any(|line| line.starts_with("revision = ")));
+-        assert!(toml.contains("enabled = true"));
++        assert!(!top_level_lines(&toml).any(|line| line.starts_with("enabled = ")));
+         assert!(toml.contains("type = \"api\""));
+     }
+ 
++    #[test]
++    fn persisted_toml_rejects_legacy_top_level_enabled() {
++        let bytes = br#"
++name = "Legacy"
++enabled = false
++
++[target]
++repository = "fabro-sh/fabro"
++ref = "main"
++workflow = "release"
++
++[[triggers]]
++type = "api"
++id = "manual"
++enabled = true
++"#;
++
++        let result = Automation::from_toml_bytes(AutomationId::new("legacy").unwrap(), bytes);
++
++        assert!(result.is_err());
++    }
++
+     #[test]
+     fn validation_rejects_invalid_inputs() {
+         let cases = [
+             AutomationReplace {
+                 name:        " ".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      target(),
+                 triggers:    vec![api_trigger("manual")],
+             },
+             AutomationReplace {
+                 name:        "Bad repo".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      AutomationTarget {
+                     repository:   "not/github/slug".to_string(),
+                     ref_selector: "main".to_string(),
+@@ -484,7 +484,6 @@ expression = "0 0 * * *"
+             AutomationReplace {
+                 name:        "Bad ref".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      AutomationTarget {
+                     repository:   "fabro-sh/fabro".to_string(),
+                     ref_selector: "main;rm".to_string(),
+@@ -495,7 +494,6 @@ expression = "0 0 * * *"
+             AutomationReplace {
+                 name:        "Bad workflow".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      AutomationTarget {
+                     repository:   "fabro-sh/fabro".to_string(),
+                     ref_selector: "main".to_string(),
+@@ -506,7 +504,6 @@ expression = "0 0 * * *"
+             AutomationReplace {
+                 name:        "Duplicate trigger".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      target(),
+                 triggers:    vec![
+                     api_trigger("manual"),
+@@ -516,21 +513,18 @@ expression = "0 0 * * *"
+             AutomationReplace {
+                 name:        "Two API triggers".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      target(),
+                 triggers:    vec![api_trigger("one"), api_trigger("two")],
+             },
+             AutomationReplace {
+                 name:        "Six field cron".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      target(),
+                 triggers:    vec![schedule_trigger("nightly", "0 0 0 * * *")],
+             },
+             AutomationReplace {
+                 name:        "Bad cron".to_string(),
+                 description: None,
+-                enabled:     true,
+                 target:      target(),
+                 triggers:    vec![schedule_trigger("nightly", "99 0 * * *")],
+             },
+diff --git a/lib/crates/fabro-automation/src/store.rs b/lib/crates/fabro-automation/src/store.rs
+index 6c0541441..ccd6ea7a4 100644
+--- a/lib/crates/fabro-automation/src/store.rs
++++ b/lib/crates/fabro-automation/src/store.rs
+@@ -290,7 +290,6 @@ mod tests {
+             id:          AutomationId::new(id).unwrap(),
+             name:        name.to_string(),
+             description: None,
+-            enabled:     true,
+             target:      target(),
+             triggers:    vec![
+                 AutomationTrigger::Api(ApiTrigger {
+@@ -310,7 +309,6 @@ mod tests {
+         AutomationReplace {
+             name:        name.to_string(),
+             description: Some("updated".to_string()),
+-            enabled:     false,
+             target:      target(),
+             triggers:    vec![AutomationTrigger::Api(ApiTrigger {
+                 id:      AutomationTriggerId::new("manual").unwrap(),
+diff --git a/lib/crates/fabro-server/src/server/handler/automations.rs b/lib/crates/fabro-server/src/server/handler/automations.rs
+index c29920d1d..70feedc7e 100644
+--- a/lib/crates/fabro-server/src/server/handler/automations.rs
++++ b/lib/crates/fabro-server/src/server/handler/automations.rs
+@@ -133,7 +133,7 @@ async fn create_automation_run(
+     let Some(api_trigger) = automation.enabled_api_trigger() else {
+         return ApiError::with_code(
+             StatusCode::CONFLICT,
+-            "automation is disabled or has no enabled API trigger",
++            "automation has no enabled API trigger",
+             "automation_api_trigger_disabled",
+         )
+         .into_response();
+diff --git a/lib/crates/fabro-server/tests/it/api/automations.rs b/lib/crates/fabro-server/tests/it/api/automations.rs
+index f09f94f38..11ad21a28 100644
+--- a/lib/crates/fabro-server/tests/it/api/automations.rs
++++ b/lib/crates/fabro-server/tests/it/api/automations.rs
+@@ -19,7 +19,6 @@ fn automation_body(id: &str, name: &str) -> Value {
+         "id": id,
+         "name": name,
+         "description": "Runs on a schedule.",
+-        "enabled": true,
+         "target": {
+             "repository": "fabro-sh/fabro",
+             "ref": "main",
+@@ -45,7 +44,6 @@ fn replacement_body(name: &str) -> Value {
+     json!({
+         "name": name,
+         "description": null,
+-        "enabled": false,
+         "target": {
+             "repository": "fabro-sh/fabro",
+             "ref": "main",
+@@ -289,6 +287,7 @@ async fn schedule_trigger_round_trips_through_create_list_get_and_toml() {
+     assert_persisted_schedule_trigger(&persisted, "0 3 * * *", true);
+     assert!(persisted.get("id").is_none());
+     assert!(persisted.get("revision").is_none());
++    assert!(persisted.get("enabled").is_none());
+ }
+ 
+ #[tokio::test]
+@@ -692,21 +691,6 @@ async fn automations_routes_require_authenticated_user() {
+     .await;
+ }
+ 
+-#[tokio::test]
+-async fn disabled_automation_run_endpoint_returns_conflict_code() {
+-    let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+-    let mut body = automation_body("nightly", "Nightly");
+-    body["enabled"] = json!(false);
+-    create_automation_with_body(&app, &body).await;
+-
+-    let error = create_automation_run(&app, "nightly", StatusCode::CONFLICT).await;
+-
+-    assert_eq!(
+-        error["errors"][0]["code"],
+-        "automation_api_trigger_disabled"
+-    );
+-}
+-
+ #[tokio::test]
+ async fn missing_automation_run_endpoint_returns_not_found() {
+     let (app, _temp_dir, _automation_dir) = automation_app_with_fake_materializer();
+diff --git a/lib/packages/fabro-api-client/src/models/automation.ts b/lib/packages/fabro-api-client/src/models/automation.ts
+index 575759e19..5c1c20bb1 100644
+--- a/lib/packages/fabro-api-client/src/models/automation.ts
++++ b/lib/packages/fabro-api-client/src/models/automation.ts
+@@ -31,7 +31,6 @@ export interface Automation {
+     'revision': string;
+     'name': string;
+     'description': string | null;
+-    'enabled': boolean;
+     'target': AutomationTarget;
+     'triggers': Array<AutomationTrigger>;
+ }
+diff --git a/lib/packages/fabro-api-client/src/models/create-automation-request.ts b/lib/packages/fabro-api-client/src/models/create-automation-request.ts
+index 5f21f795b..ce99d34db 100644
+--- a/lib/packages/fabro-api-client/src/models/create-automation-request.ts
++++ b/lib/packages/fabro-api-client/src/models/create-automation-request.ts
+@@ -27,7 +27,6 @@ export interface CreateAutomationRequest {
+     'id': string;
+     'name': string;
+     'description'?: string | null;
+-    'enabled'?: boolean;
+     'target': AutomationTarget;
+     'triggers': Array<AutomationTrigger>;
+ }
+diff --git a/lib/packages/fabro-api-client/src/models/replace-automation-request.ts b/lib/packages/fabro-api-client/src/models/replace-automation-request.ts
+index 4edb9df6b..49a5533f4 100644
+--- a/lib/packages/fabro-api-client/src/models/replace-automation-request.ts
++++ b/lib/packages/fabro-api-client/src/models/replace-automation-request.ts
+@@ -26,7 +26,6 @@ import type { AutomationTrigger } from './automation-trigger';
+ export interface ReplaceAutomationRequest {
+     'name': string;
+     'description'?: string | null;
+-    'enabled': boolean;
+     'target': AutomationTarget;
+     'triggers': Array<AutomationTrigger>;
+ }
