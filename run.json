@@ -507,7 +507,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-05-29T17:52:04.100451Z",
-  "last_event_at": "2026-05-29T17:52:13.019312Z",
+  "last_event_at": "2026-05-29T17:53:00.111428Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -611,9 +611,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 38,
       "checkpoint": {
-        "timestamp": "2026-05-29T17:52:55.553711Z",
+        "timestamp": "2026-05-29T17:53:00.111302Z",
         "current_node": "preflight_compile",
         "completed_nodes": [
           "start",
@@ -622,24 +622,24 @@
         ],
         "node_retries": {},
         "context_values": {
-          "thread.start.current_node": "toolchain",
-          "internal.retry_count.start": 0,
-          "internal.retry_count.toolchain": 0,
-          "internal.thread_id": "toolchain",
-          "failure_class": "transient_infra",
-          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
-          "internal.retry_count.preflight_compile": 0,
-          "current_node": "preflight_compile",
-          "outcome": "failed",
           "graph.rankdir": "LR",
+          "internal.thread_id": "toolchain",
           "internal.fidelity": "compact",
-          "thread.toolchain.current_node": "preflight_compile",
           "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c",
+          "failure_class": "transient_infra",
           "failure_signature": "preflight_compile|transient_infra|failed to spawn script",
-          "internal.run_id": "01KSTDT820G3PQC64V37321J2N",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.retry_count.start": 0,
+          "thread.start.current_node": "toolchain",
           "internal.node_visit_count": 1,
+          "internal.run_id": "01KSTDT820G3PQC64V37321J2N",
+          "current_node": "preflight_compile",
           "graph.goal": "---\ntitle: \"feat: Add Environment REST CRUD API\"\ntype: feat\nstatus: active\ndate: 2026-05-28\n---\n\n# feat: Add Environment REST CRUD API\n\n## Summary\n\nAdd server-owned Environment CRUD under `/api/v1/environments`, modeled after\nAutomations and backed by the existing `EnvironmentStore`. The API manages only\nthe server-side environment catalog in `environments/*.toml`; client-side\nenvironment definitions in `workflow.toml`, `.fabro/project.toml`, or run inputs\ncontinue to work and are not managed by this API.\n\n## API Contract\n\n- Add OpenAPI paths:\n  - `GET /api/v1/environments`\n  - `POST /api/v1/environments`\n  - `GET /api/v1/environments/{id}`\n  - `PUT /api/v1/environments/{id}`\n  - `DELETE /api/v1/environments/{id}`\n- Mirror Automations semantics:\n  - List returns `{ data: Environment[], meta: { total } }`, sorted by id.\n  - Create body includes `id`; replace body omits `id`; path id is authoritative.\n  - `GET` and `PUT` return `ETag: \"<revision>\"`.\n  - `PUT` and `DELETE` require `If-Match`.\n  - Use existing Automation-style statuses: `400`, `404`, `409`, `422`, `428`, `500`.\n  - Stale revisions return `409` to match Automations.\n- Add API-specific Environment request/response schemas so REST `image.dockerfile`\n  accepts only inline content or `null`.\n  - Existing workflow/settings schemas keep supporting Dockerfile `path`.\n  - REST requests with Dockerfile `path` return `422` and must not read\n    server-local files.\n- Do not add `PATCH` in v1.\n\n## Implementation Changes\n\n- OpenAPI and generated clients:\n  - Update `docs/public/api-reference/fabro-api.yaml` with an `Environments` tag,\n    an `EnvironmentId` parameter, CRUD paths, list envelope, and inline-only API\n    image schema.\n  - Regenerate Rust API types and the TypeScript Axios client.\n  - Keep the existing `EnvironmentSettings` schema intact for workflow settings.\n- Server:\n  - Add `lib/crates/fabro-server/src/server/handler/environments.rs`, following\n    `automations.rs` for routes, auth, ETag parsing, and error mapping.\n  - Merge the routes into real API routes; do not add demo routes unless an\n    existing convention requires it.\n  - Convert API request DTOs into `EnvironmentDraft` / `EnvironmentSettings` only\n    after rejecting Dockerfile path sources.\n  - Map `EnvironmentStoreError` similarly to Automations: duplicate, protected,\n    and stale as `409`; missing as `404`; validation as `422`; internal\n    storage/parse/io as curated `500`.\n  - After successful create, replace, or delete, refresh cached manifest run\n    settings from the current `EnvironmentStore` catalog so `/system/info` and\n    default run settings reflect the updated catalog.\n- Domain and API types:\n  - Use a meaningful API DTO boundary rather than treating REST and TOML as\n    identical Dockerfile-source surfaces.\n  - Reuse `fabro-environment::Environment` for persisted domain behavior where\n    the wire shape matches; keep API-only request schemas distinct where\n    inline-only Dockerfile behavior differs.\n\n## Implementation Units\n\n- [ ] **Unit 1: Define the OpenAPI contract**\n  - Add the environment CRUD paths, schemas, and path parameter.\n  - Ensure the spec distinguishes REST-safe inline Dockerfile sources from the\n    existing workflow/settings Dockerfile source schema.\n  - Verification: OpenAPI route conformance can see the new paths and generated\n    clients expose an `EnvironmentsApi`.\n\n- [ ] **Unit 2: Add server environment handlers**\n  - Implement a new handler module mirroring the Automation CRUD handler shape.\n  - Enforce authentication, id parsing, ETag/If-Match behavior, and error mapping.\n  - Reject REST Dockerfile path sources before calling `EnvironmentStore`.\n  - Verification: server API tests prove CRUD behavior and failure responses.\n\n- [ ] **Unit 3: Refresh derived server state after mutations**\n  - Ensure successful environment create, replace, and delete refresh any cached\n    manifest run settings derived from `EnvironmentStore::catalog_layer()`.\n  - Preserve existing client-side environment precedence and behavior.\n  - Verification: a test proves newly created server environments affect the\n    resolved server default run environment where applicable.\n\n- [ ] **Unit 4: Regenerate clients and add contract tests**\n  - Regenerate `fabro-api` and `lib/packages/fabro-api-client`.\n  - Add Rust server integration tests and keep OpenAPI conformance passing.\n  - Verification: generated Rust and TypeScript surfaces compile and expose the\n    new environment operations.\n\n## Test Plan\n\n- Add server API tests in\n  `lib/crates/fabro-server/tests/it/api/environments.rs` and register the module.\n- Cover:\n  - List returns seeded environments and correct total.\n  - Create persists `environments/{id}.toml`, returns `201`, and is visible via\n    list/get.\n  - Get returns current `ETag` matching `revision`.\n  - Replace with valid `If-Match` updates the file, returns a new revision, and\n    updates the `ETag`.\n  - Replace/delete without `If-Match` return `428`.\n  - Stale replace/delete return `409`.\n  - Duplicate create returns `409`.\n  - Invalid id/header returns `400`.\n  - Domain validation failures return `422`.\n  - Dockerfile `path` over REST returns `422` and does not persist or expose file\n    contents.\n  - Delete removes a non-default environment; deleting `default` returns a\n    protected conflict.\n  - Unauthenticated environment routes return `401`.\n  - Creating an environment referenced by server default run settings refreshes\n    cached manifest run settings.\n\n## Assumptions\n\n- This API manages server-owned environments only; client-defined catalogs remain\n  file/request scoped.\n- Built-in seed behavior follows the current store: seeded environments are\n  listed, create conflicts with existing ids, and `default` is protected from\n  delete.\n- Create responses match Automations and do not need an `ETag`; clients can use\n  the returned `revision` or call `GET`.\n- Inline-only Dockerfile policy applies only to REST CRUD, not local TOML\n  configuration.\n\n## Sources\n\n- `docs/public/api-reference/fabro-api.yaml`\n- `lib/crates/fabro-server/src/server/handler/automations.rs`\n- `lib/crates/fabro-environment/src/store.rs`\n- `lib/crates/fabro-environment/src/model.rs`\n- `docs/public/execution/environments.mdx`\n",
-          "internal.work_dir": "/home/daytona/workspace/fabro"
+          "internal.retry_count.preflight_compile": 0,
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "thread.toolchain.current_node": "preflight_compile",
+          "outcome": "failed",
+          "internal.retry_count.toolchain": 0
         },
         "node_outcomes": {
           "start": {
@@ -674,16 +674,70 @@
           }
         },
         "next_node_id": "exit",
+        "git_commit_sha": "dda6434fff61a357c9db706b7c2d11e634e3116c",
         "node_visits": {
           "preflight_compile": 1,
           "start": 1,
           "toolchain": 1
         }
       },
-      "diff": {}
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
     }
   ],
-  "conclusion": null,
+  "conclusion": {
+    "timestamp": "2026-05-29T17:53:00.137134Z",
+    "status": "succeeded",
+    "timing": {
+      "wall_time_ms": 56017,
+      "inference_time_ms": 0,
+      "tool_time_ms": 1569,
+      "active_time_ms": 1569
+    },
+    "final_git_commit_sha": "dda6434fff61a357c9db706b7c2d11e634e3116c",
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "toolchain",
+        "stage_label": "toolchain",
+        "timing": {
+          "wall_time_ms": 1583,
+          "inference_time_ms": 0,
+          "tool_time_ms": 1569,
+          "active_time_ms": 1569
+        },
+        "retries": 0
+      },
+      {
+        "stage_id": "preflight_compile",
+        "stage_label": "preflight_compile",
+        "timing": {
+          "wall_time_ms": 42531,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      }
+    ],
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "kind": "ready",
     "plan": {
@@ -709,42 +763,15 @@
   "superseded_by": null,
   "pending_interviews": {},
   "stages": {
-    "preflight_compile@1": {
-      "first_event_seq": 32,
-      "prompt": null,
-      "response": null,
-      "completion": null,
-      "provider_used": null,
-      "diff": null,
-      "script_invocation": {
-        "script": "cargo check -q --workspace 2>&1",
-        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
-        "language": "shell"
-      },
-      "script_timing": null,
-      "parallel_results": null,
-      "output": null,
-      "started_at": "2026-05-29T17:52:13.018772Z",
-      "handler": "command",
-      "usage": {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "reasoning_tokens": 0,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0
-      },
-      "state": "running"
-    },
-    "start@1": {
-      "first_event_seq": 18,
+    "exit@1": {
+      "first_event_seq": 41,
       "prompt": null,
       "response": null,
       "completion": {
         "outcome": "succeeded",
         "notes": null,
         "failure_reason": null,
-        "timestamp": "2026-05-29T17:52:06.576398Z"
+        "timestamp": "2026-05-29T17:53:00.111428Z"
       },
       "provider_used": null,
       "diff": null,
@@ -752,8 +779,8 @@
       "script_timing": null,
       "parallel_results": null,
       "output": null,
-      "started_at": "2026-05-29T17:52:06.576184Z",
-      "handler": "start",
+      "started_at": "2026-05-29T17:53:00.111402Z",
+      "handler": "exit",
       "timing": {
         "wall_time_ms": 0,
         "inference_time_ms": 0,
@@ -817,6 +844,78 @@
         "cache_write_tokens": 0
       },
       "state": "succeeded"
+    },
+    "start@1": {
+      "first_event_seq": 18,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-05-29T17:52:06.576398Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-29T17:52:06.576184Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "preflight_compile@1": {
+      "first_event_seq": 32,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "failed",
+        "notes": null,
+        "failure_reason": "Failed to spawn script",
+        "timestamp": "2026-05-29T17:52:55.551833Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "cargo check -q --workspace 2>&1",
+        "command": "exec 2>&1\ncargo check -q --workspace 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-05-29T17:52:13.018772Z",
+      "handler": "command",
+      "timing": {
+        "wall_time_ms": 42531,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "failed"
     }
   }
 }
