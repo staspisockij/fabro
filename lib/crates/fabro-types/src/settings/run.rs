@@ -77,6 +77,27 @@ impl Default for RunNamespace {
 }
 
 impl RunNamespace {
+    /// True when the run is guaranteed to need GitHub credentials: a run-level
+    /// token is requested, or a clone-based sandbox in non-dry-run mode must
+    /// pull the repository. Pull-request-driven acquisition is handled
+    /// separately by callers as a soft fallback (see
+    /// [`Self::github_credentials_useful_for_pull_request`]).
+    pub fn requires_github_credentials(&self) -> bool {
+        self.integrations.github.is_token_requested()
+            || (self.execution.mode != RunMode::DryRun
+                && self.environment.provider.is_clone_based())
+    }
+
+    pub fn github_credentials_useful_for_clone(&self, repo_origin_url: Option<&str>) -> bool {
+        self.execution.mode != RunMode::DryRun
+            && self.environment.provider.is_clone_based()
+            && repo_origin_url.is_some_and(|origin| !origin.trim().is_empty())
+    }
+
+    pub fn github_credentials_useful_for_pull_request(&self) -> bool {
+        self.execution.mode != RunMode::DryRun && self.pull_request.is_some()
+    }
+
     pub fn substitute_variables<F>(&mut self, mut lookup: F) -> Result<(), ResolveEnvError>
     where
         F: FnMut(&str) -> Option<String>,

@@ -18,8 +18,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::Key;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 pub use fabro_api::types::{
@@ -89,7 +87,7 @@ use fabro_store::{
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
-use fabro_types::settings::run::{NotificationRouteSettings, RunMode};
+use fabro_types::settings::run::NotificationRouteSettings;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination, ServerWorkerRuntime,
 };
@@ -1497,7 +1495,8 @@ impl AppState {
                 let Some(raw) = raw else {
                     return Ok(None);
                 };
-                let private_key_pem = decode_secret_pem(EnvVars::GITHUB_APP_PRIVATE_KEY, &raw)?;
+                let private_key_pem =
+                    fabro_github::decode_private_key_pem(EnvVars::GITHUB_APP_PRIVATE_KEY, &raw)?;
                 Ok(Some(fabro_github::GitHubCredentials::App(
                     fabro_github::GitHubAppCredentials {
                         app_id,
@@ -1552,12 +1551,13 @@ impl AppState {
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
         let manifest_run_defaults = Arc::new(manifest_run_defaults);
+        let llm_catalog_settings = Arc::new(llm_catalog_settings);
         let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
             manifest_run_defaults.as_ref(),
             &self.environment_store,
         );
         let catalog = Arc::new(
-            Catalog::from_builtin_with_overrides(&llm_catalog_settings)
+            Catalog::from_builtin_with_overrides(llm_catalog_settings.as_ref())
                 .context("building LLM model catalog")?,
         );
         resolve_canonical_origin(&server_settings.server, &self.env_lookup)
@@ -1575,6 +1575,10 @@ impl AppState {
             .server_settings
             .write()
             .expect("server settings lock poisoned") = server_settings;
+        *self
+            .llm_catalog_settings
+            .write()
+            .expect("LLM catalog settings lock poisoned") = llm_catalog_settings;
         *self.catalog.write().expect("catalog lock poisoned") = catalog;
         Ok(())
     }
@@ -1595,17 +1599,6 @@ async fn resolve_llm_client_from_source(
         auth_issues:         resolved.auth_issues,
         registration_issues: report.registration_issues,
     })
-}
-
-fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
-    if raw.starts_with("-----") {
-        return Ok(raw.to_string());
-    }
-    let pem_bytes = BASE64_STANDARD
-        .decode(raw)
-        .map_err(|err| format!("{name} is not valid PEM or base64: {err}"))?;
-    String::from_utf8(pem_bytes)
-        .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
 }
 
 fn resolve_interp_string(value: &InterpString) -> anyhow::Result<String> {
@@ -3575,15 +3568,18 @@ fn worker_launch_spec(
             Ok(WorkerLaunchSpec::Docker(DockerWorkerLaunchSpec {
                 common,
                 image: resolve_required_worker_docker_setting(
+                    state,
                     docker.image.as_ref(),
                     "server.worker.docker.image",
                 )?,
                 server_url: resolve_required_worker_docker_setting(
+                    state,
                     docker.server_url.as_ref(),
                     "server.worker.docker.server_url",
                 )?,
-                network: resolve_optional_worker_docker_setting(docker.network.as_ref())?,
+                network: resolve_optional_worker_docker_setting(state, docker.network.as_ref())?,
                 docker_socket: resolve_optional_worker_docker_setting(
+                    state,
                     docker.docker_socket.as_ref(),
                 )?
                 .map(PathBuf::from),
@@ -3594,13 +3590,16 @@ fn worker_launch_spec(
 }
 
 fn resolve_required_worker_docker_setting(
+    state: &AppState,
     value: Option<&InterpString>,
     path: &str,
 ) -> anyhow::Result<String> {
-    let resolved = resolve_interp_string(
-        value.with_context(|| format!("{path} is required when server.worker.runtime = docker"))?,
-    )
-    .with_context(|| format!("resolve {path}"))?;
+    let resolved =
+        state
+            .resolve_interp(value.with_context(|| {
+                format!("{path} is required when server.worker.runtime = docker")
+            })?)
+            .with_context(|| format!("resolve {path}"))?;
     if resolved.trim().is_empty() {
         anyhow::bail!("{path} must not be empty when server.worker.runtime = docker");
     }
@@ -3608,10 +3607,11 @@ fn resolve_required_worker_docker_setting(
 }
 
 fn resolve_optional_worker_docker_setting(
+    state: &AppState,
     value: Option<&InterpString>,
 ) -> anyhow::Result<Option<String>> {
     value
-        .map(resolve_interp_string)
+        .map(|value| state.resolve_interp(value))
         .transpose()
         .map(|value| value.filter(|resolved| !resolved.trim().is_empty()))
 }
@@ -3972,16 +3972,11 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let github_app_result = {
         let run_spec = persisted.run_spec();
         let settings = &run_spec.settings.run;
-        let clone_can_use_github_credentials = settings.execution.mode != RunMode::DryRun
-            && settings.environment.provider.is_clone_based()
-            && run_spec
-                .repo_origin_url()
-                .is_some_and(|origin| !origin.trim().is_empty());
-        let pull_request_can_use_github_credentials =
-            settings.execution.mode != RunMode::DryRun && settings.pull_request.is_some();
         if settings.integrations.github.is_token_requested() {
             state.github_credentials(github_settings)
-        } else if clone_can_use_github_credentials || pull_request_can_use_github_credentials {
+        } else if settings.github_credentials_useful_for_clone(run_spec.repo_origin_url())
+            || settings.github_credentials_useful_for_pull_request()
+        {
             match state.github_credentials(github_settings) {
                 Ok(github_app) => Ok(github_app),
                 Err(err) => {

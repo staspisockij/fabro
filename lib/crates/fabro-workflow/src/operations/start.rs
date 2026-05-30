@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -22,7 +22,9 @@ use fabro_types::settings::run::{
     TlsMode as ResolvedTlsMode,
 };
 use fabro_types::settings::{InterpString, ModelRegistry, ResolvedModelRef};
-use fabro_types::{ManifestPath, RunId, RunRunnableSource, SandboxProviderKind};
+use fabro_types::{
+    Graph, ManifestPath, RunId, RunRunnableSource, SandboxProviderKind, is_llm_handler_type,
+};
 use fabro_vault::Vault;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock as AsyncRwLock;
@@ -85,10 +87,10 @@ struct RunSession {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StartLlmResolution {
-    pub model:          String,
-    pub provider_id:    ProviderId,
-    pub fallback_chain: Vec<FallbackTarget>,
+pub(crate) struct StartLlmResolution {
+    pub(crate) model:          String,
+    pub(crate) provider_id:    ProviderId,
+    pub(crate) fallback_chain: Vec<FallbackTarget>,
 }
 
 pub struct StartServices {
@@ -482,7 +484,7 @@ impl RunSession {
     }
 }
 
-pub async fn configured_providers_for_start(
+pub(crate) async fn configured_providers_for_start(
     vault: Option<&Arc<AsyncRwLock<Vault>>>,
     catalog: Arc<Catalog>,
 ) -> Vec<ProviderId> {
@@ -561,7 +563,7 @@ fn resolve_docker_config(settings: &ResolvedRunSettings) -> DockerSandboxOptions
     docker_config_from_environment(&settings.environment, !settings.clone.enabled)
 }
 
-pub fn resolve_start_llm(
+pub(crate) fn resolve_start_llm(
     catalog: &Catalog,
     configured: &[ProviderId],
     settings: &ResolvedRunSettings,
@@ -595,6 +597,38 @@ pub fn resolve_start_llm(
         provider_id,
         fallback_chain,
     })
+}
+
+/// Provider ids whose secrets a worker could need for this run: the resolved
+/// start provider, its fallback chain, and any per-node provider overrides in
+/// the accepted graph. Returns an empty set when start resolution fails (e.g.
+/// no configured providers), matching the run's own start behavior.
+pub fn reachable_provider_ids(
+    catalog: &Catalog,
+    configured: &[ProviderId],
+    settings: &ResolvedRunSettings,
+    graph: &Graph,
+) -> BTreeSet<ProviderId> {
+    let Ok(start) = resolve_start_llm(catalog, configured, settings) else {
+        return BTreeSet::new();
+    };
+
+    let mut provider_ids = BTreeSet::new();
+    provider_ids.insert(start.provider_id.clone());
+    for fallback in &start.fallback_chain {
+        provider_ids.insert(ProviderId::from(fallback.provider.as_str()));
+    }
+    for node in graph.nodes.values() {
+        if !is_llm_handler_type(node.handler_type()) {
+            continue;
+        }
+        if let Ok(context) =
+            routing::resolve_node_provider_context(catalog, &start.provider_id, &start.model, node)
+        {
+            provider_ids.insert(context.provider_id);
+        }
+    }
+    provider_ids
 }
 
 fn resolve_fallback_chain(

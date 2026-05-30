@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -15,19 +14,23 @@ use bollard::models::HostConfig;
 use fabro_static::EnvVars;
 use fabro_types::RunId;
 use fabro_types::settings::server::LogDestination;
+use fabro_types::worker_bootstrap::{WORKER_BOOTSTRAP_RUN_DIR, WORKER_BOOTSTRAP_STORAGE_DIR};
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
-use tokio::sync::{Mutex, mpsc};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+
+const DOCKER_SOCKET_CONTAINER_PATH: &str = "/var/run/docker.sock";
+const WORKER_OUTPUT_BUFFER_LINES: usize = 1024;
+
+/// Docker Engine API status codes the worker runtime branches on.
+const DOCKER_STATUS_NAME_CONFLICT: u16 = 409;
+const DOCKER_STATUS_NOT_FOUND: u16 = 404;
 
 use crate::spawn_env::apply_worker_env;
-
-const DOCKER_WORKER_STORAGE_DIR: &str = "/tmp/fabro-worker/storage";
-const DOCKER_WORKER_RUN_DIR: &str = "/tmp/fabro-worker/run";
-const DOCKER_SOCKET_CONTAINER_PATH: &str = "/var/run/docker.sock";
 
 const DOCKER_WORKER_ENV_ALLOWLIST: &[&str] = &[
     EnvVars::RUST_LOG,
@@ -65,11 +68,10 @@ pub(crate) enum WorkerRef {
     /// A worker running as a local subprocess. `pre_exec_setpgid` ensures the
     /// child is the leader of its own process group with `pgid == pid`, so a
     /// single PID identifies both the process and its group.
-    Local {
-        pid: u32,
-    },
+    Local { pid: u32 },
     Docker {
-        container_id: String,
+        container_id:   String,
+        remove_on_exit: bool,
     },
 }
 
@@ -253,8 +255,7 @@ impl WorkerRuntime for LocalWorkerRuntime {
 }
 
 pub(crate) struct DockerWorkerRuntime {
-    docker:         Docker,
-    remove_on_exit: Arc<Mutex<HashMap<String, bool>>>,
+    docker: Docker,
 }
 
 impl DockerWorkerRuntime {
@@ -265,10 +266,7 @@ impl DockerWorkerRuntime {
     }
 
     fn from_docker(docker: Docker) -> Self {
-        Self {
-            docker,
-            remove_on_exit: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self { docker }
     }
 }
 
@@ -284,69 +282,65 @@ impl WorkerRuntime for DockerWorkerRuntime {
             anyhow::bail!("Docker worker runtime received local launch spec");
         };
 
-        let (container_id, _container_name) =
-            create_docker_worker_container(&self.docker, &spec).await?;
-        self.remove_on_exit
-            .lock()
-            .await
-            .insert(container_id.clone(), spec.remove_on_exit);
-        self.docker
+        let container_id = create_docker_worker_container(&self.docker, &spec).await?;
+        if let Err(err) = self
+            .docker
             .start_container(&container_id, None::<StartContainerOptions<String>>)
             .await
-            .with_context(|| format!("failed to start Docker worker container {container_id}"))?;
+        {
+            if spec.remove_on_exit {
+                remove_docker_worker_container(&self.docker, &container_id).await;
+            }
+            return Err(anyhow::Error::new(err).context(format!(
+                "failed to start Docker worker container {container_id}"
+            )));
+        }
 
         let output = docker_worker_output_stream(self.docker.clone(), container_id.clone());
         let docker = self.docker.clone();
-        let remove_on_exit = Arc::clone(&self.remove_on_exit);
+        let remove_on_exit = spec.remove_on_exit;
         let wait_container_id = container_id.clone();
         let wait: BoxFuture<'static, Result<WorkerExit>> = Box::pin(async move {
-            let policy = remove_on_exit
-                .lock()
-                .await
-                .get(&wait_container_id)
-                .copied()
-                .unwrap_or(spec.remove_on_exit);
             let exit = wait_for_docker_worker(&docker, &wait_container_id).await;
-            remove_on_exit.lock().await.remove(&wait_container_id);
-            if policy {
+            if remove_on_exit {
                 remove_docker_worker_container(&docker, &wait_container_id).await;
             }
             exit
         });
 
         Ok(StartedWorker {
-            worker_ref: WorkerRef::Docker { container_id },
+            worker_ref: WorkerRef::Docker {
+                container_id,
+                remove_on_exit: spec.remove_on_exit,
+            },
             output,
             wait,
         })
     }
 
     async fn request_stop(&self, worker_ref: &WorkerRef) {
-        let WorkerRef::Docker { container_id } = worker_ref else {
+        let WorkerRef::Docker { container_id, .. } = worker_ref else {
             return;
         };
         kill_docker_worker(&self.docker, container_id, "SIGTERM").await;
     }
 
     async fn force_stop(&self, worker_ref: &WorkerRef) {
-        let WorkerRef::Docker { container_id } = worker_ref else {
+        let WorkerRef::Docker {
+            container_id,
+            remove_on_exit,
+        } = worker_ref
+        else {
             return;
         };
         kill_docker_worker(&self.docker, container_id, "SIGKILL").await;
-        let remove = self
-            .remove_on_exit
-            .lock()
-            .await
-            .get(container_id)
-            .copied()
-            .unwrap_or(false);
-        if remove {
+        if *remove_on_exit {
             remove_docker_worker_container(&self.docker, container_id).await;
         }
     }
 
     async fn is_alive(&self, worker_ref: &WorkerRef) -> bool {
-        let WorkerRef::Docker { container_id } = worker_ref else {
+        let WorkerRef::Docker { container_id, .. } = worker_ref else {
             return false;
         };
         let Ok(details) = self
@@ -367,7 +361,7 @@ fn local_worker_output_stream<R>(stderr: R) -> BoxStream<'static, Result<WorkerO
 where
     R: AsyncRead + Send + Unpin + 'static,
 {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, rx) = mpsc::channel(WORKER_OUTPUT_BUFFER_LINES);
     tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         loop {
@@ -378,6 +372,7 @@ where
                             stream: WorkerOutputStreamKind::Stderr,
                             line,
                         }))
+                        .await
                         .is_err()
                     {
                         break;
@@ -385,35 +380,41 @@ where
                 }
                 Ok(None) => break,
                 Err(err) => {
-                    let _ = tx.send(Err(
-                        anyhow::Error::new(err).context("failed to read worker stderr")
-                    ));
+                    let _ = tx
+                        .send(Err(
+                            anyhow::Error::new(err).context("failed to read worker stderr")
+                        ))
+                        .await;
                     break;
                 }
             }
         }
     });
-    UnboundedReceiverStream::new(rx).boxed()
+    ReceiverStream::new(rx).boxed()
 }
 
 async fn create_docker_worker_container(
     docker: &Docker,
     spec: &DockerWorkerLaunchSpec,
-) -> Result<(String, String)> {
-    let mut last_error = None;
-    for attempt in 0..2 {
-        let name = docker_worker_container_name(&spec.common.run_id);
+) -> Result<String> {
+    // A name collision (the ULID suffix is unlikely but not impossible) is
+    // retried once with a freshly generated name.
+    let mut attempt = 0;
+    loop {
         let options = Some(CreateContainerOptions {
-            name:     name.clone(),
+            name:     docker_worker_container_name(&spec.common.run_id),
             platform: None,
         });
         match docker
             .create_container(options, docker_worker_container_config(spec))
             .await
         {
-            Ok(container) => return Ok((container.id, name)),
-            Err(err) if attempt == 0 && docker_status_code(&err) == Some(409) => {
-                last_error = Some(err);
+            Ok(container) => return Ok(container.id),
+            Err(err)
+                if attempt == 0
+                    && docker_status_code(&err) == Some(DOCKER_STATUS_NAME_CONFLICT) =>
+            {
+                attempt += 1;
             }
             Err(err) => {
                 return Err(
@@ -422,9 +423,6 @@ async fn create_docker_worker_container(
             }
         }
     }
-
-    let err = last_error.expect("name-conflict retry should retain the last Docker error");
-    Err(anyhow::Error::new(err).context("failed to create Docker worker container"))
 }
 
 fn docker_worker_container_config(spec: &DockerWorkerLaunchSpec) -> Config<String> {
@@ -456,9 +454,9 @@ fn docker_worker_command(spec: &DockerWorkerLaunchSpec) -> Vec<String> {
         "--server".to_string(),
         spec.server_url.clone(),
         "--storage-dir".to_string(),
-        DOCKER_WORKER_STORAGE_DIR.to_string(),
+        WORKER_BOOTSTRAP_STORAGE_DIR.to_string(),
         "--run-dir".to_string(),
-        DOCKER_WORKER_RUN_DIR.to_string(),
+        WORKER_BOOTSTRAP_RUN_DIR.to_string(),
         "--run-id".to_string(),
         spec.common.run_id.to_string(),
         "--mode".to_string(),
@@ -524,7 +522,7 @@ fn docker_worker_output_stream(
     docker: Docker,
     container_id: String,
 ) -> BoxStream<'static, Result<WorkerOutputLine>> {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, rx) = mpsc::channel(WORKER_OUTPUT_BUFFER_LINES);
     tokio::spawn(async move {
         let mut logs = docker.logs::<String>(
             &container_id,
@@ -540,21 +538,23 @@ fn docker_worker_output_stream(
             match item {
                 Ok(output) => {
                     for line in worker_lines_from_log_output(output) {
-                        if tx.send(Ok(line)).is_err() {
+                        if tx.send(Ok(line)).await.is_err() {
                             return;
                         }
                     }
                 }
                 Err(err) => {
-                    let _ = tx.send(Err(
-                        anyhow::Error::new(err).context("failed to read Docker worker logs")
-                    ));
+                    let _ = tx
+                        .send(Err(
+                            anyhow::Error::new(err).context("failed to read Docker worker logs")
+                        ))
+                        .await;
                     return;
                 }
             }
         }
     });
-    UnboundedReceiverStream::new(rx).boxed()
+    ReceiverStream::new(rx).boxed()
 }
 
 fn worker_lines_from_log_output(output: LogOutput) -> Vec<WorkerOutputLine> {
@@ -629,7 +629,7 @@ async fn remove_docker_worker_container(docker: &Docker, container_id: &str) {
         )
         .await
     {
-        if docker_status_code(&err) != Some(404) {
+        if docker_status_code(&err) != Some(DOCKER_STATUS_NOT_FOUND) {
             tracing::warn!(
                 container_id,
                 error = %err,
@@ -759,9 +759,9 @@ mod tests {
             "--server".to_string(),
             "http://fabro-server:3333".to_string(),
             "--storage-dir".to_string(),
-            DOCKER_WORKER_STORAGE_DIR.to_string(),
+            WORKER_BOOTSTRAP_STORAGE_DIR.to_string(),
             "--run-dir".to_string(),
-            DOCKER_WORKER_RUN_DIR.to_string(),
+            WORKER_BOOTSTRAP_RUN_DIR.to_string(),
             "--run-id".to_string(),
             spec.common.run_id.to_string(),
             "--mode".to_string(),

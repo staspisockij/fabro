@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use fabro_api::types::{RunManifest, WorkerBootstrapResponse};
+use fabro_api::types::{RunManifest, WorkerBootstrapGithubIntegration, WorkerBootstrapResponse};
 use fabro_client::ServerTarget;
 use fabro_config::user::active_settings_path;
 use fabro_config::{ServerSettingsBuilder, Storage, load_llm_catalog_settings};
@@ -28,8 +28,10 @@ use fabro_server::run_tool_manifest;
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_tool::fabro_client::ClientBackend;
 use fabro_types::settings::InterpString;
-use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::settings::server::GithubIntegrationStrategy;
+use fabro_types::worker_bootstrap::{
+    WORKER_BOOTSTRAP_CONFIG_PATH, WORKER_BOOTSTRAP_RUN_DIR, WORKER_BOOTSTRAP_STORAGE_DIR,
+};
 use fabro_types::{
     ArtifactUpload, EventBody, FailureReason, Principal, RunBlobId, RunEvent, RunId,
     WorkflowSettings,
@@ -64,10 +66,6 @@ use crate::args::{RunWorkerBootstrap, RunWorkerMode};
 use crate::server_client;
 use crate::shared::github::{GitHubCredentialLookup, build_github_credentials};
 
-const API_BOOTSTRAP_STORAGE_DIR: &str = "/tmp/fabro-worker/storage";
-const API_BOOTSTRAP_RUN_DIR: &str = "/tmp/fabro-worker/run";
-const API_BOOTSTRAP_CONFIG_PATH: &str = "/tmp/fabro-worker/settings.toml";
-
 #[derive(Debug, Clone)]
 struct WorkerBootstrapFiles {
     storage_dir: Option<PathBuf>,
@@ -78,9 +76,9 @@ struct WorkerBootstrapFiles {
 impl WorkerBootstrapFiles {
     fn api() -> Self {
         Self {
-            storage_dir: Some(PathBuf::from(API_BOOTSTRAP_STORAGE_DIR)),
-            config_path: Some(PathBuf::from(API_BOOTSTRAP_CONFIG_PATH)),
-            run_dir:     PathBuf::from(API_BOOTSTRAP_RUN_DIR),
+            storage_dir: Some(PathBuf::from(WORKER_BOOTSTRAP_STORAGE_DIR)),
+            config_path: Some(PathBuf::from(WORKER_BOOTSTRAP_CONFIG_PATH)),
+            run_dir:     PathBuf::from(WORKER_BOOTSTRAP_RUN_DIR),
         }
     }
 }
@@ -118,27 +116,33 @@ pub(crate) async fn execute(
 
     let target = server.parse::<ServerTarget>()?;
     let client = server_client::connect_server_target_with_bearer(&target, worker_token).await?;
-    let run_store = HttpRunStore::connect(run_id, client.clone_for_reuse()).await?;
+    let (run_store, bootstrap_payload) = tokio::try_join!(
+        HttpRunStore::connect(run_id, client.clone_for_reuse()),
+        fetch_worker_bootstrap_payload(client.clone_for_reuse(), run_id, bootstrap),
+    )?;
     let run_state = run_store
         .state()
         .await
         .with_context(|| format!("failed to load run state for {run_id}"))?;
     let run_spec = &run_state.spec;
-    let bootstrap_files = match bootstrap {
-        RunWorkerBootstrap::Local => WorkerBootstrapFiles {
-            storage_dir,
-            config_path: None,
-            run_dir,
-        },
+    let (bootstrap_files, github_settings) = match bootstrap {
+        RunWorkerBootstrap::Local => (
+            WorkerBootstrapFiles {
+                storage_dir,
+                config_path: None,
+                run_dir,
+            },
+            GitHubCredentialSettings::from_default_config(),
+        ),
         RunWorkerBootstrap::Api => {
-            let bootstrap_payload = client
-                .get_run_worker_bootstrap(&run_id)
-                .await
-                .context("failed to retrieve worker bootstrap payload")?;
+            let bootstrap_payload =
+                bootstrap_payload.context("API bootstrap payload missing for API bootstrap")?;
             let files = WorkerBootstrapFiles::api();
+            let github_settings =
+                GitHubCredentialSettings::from_bootstrap(&bootstrap_payload.github);
             write_api_bootstrap_files(&bootstrap_payload, &files)
                 .context("failed to write worker bootstrap files")?;
-            files
+            (files, github_settings)
         }
     };
     let llm_catalog_settings = load_llm_catalog_settings(bootstrap_files.config_path.as_deref())
@@ -203,7 +207,7 @@ pub(crate) async fn execute(
         maybe_build_github_credentials(
             &run_spec.settings,
             vault_guard.as_deref(),
-            bootstrap_files.config_path.as_deref(),
+            &github_settings,
             lookup,
         )?
     };
@@ -348,6 +352,21 @@ fn load_worker_vault(storage_dir: Option<&Path>) -> Result<Option<Arc<AsyncRwLoc
         )
     })?;
     Ok(Some(Arc::new(AsyncRwLock::new(vault))))
+}
+
+async fn fetch_worker_bootstrap_payload(
+    client: server_client::Client,
+    run_id: RunId,
+    bootstrap: RunWorkerBootstrap,
+) -> Result<Option<WorkerBootstrapResponse>> {
+    match bootstrap {
+        RunWorkerBootstrap::Local => Ok(None),
+        RunWorkerBootstrap::Api => client
+            .get_run_worker_bootstrap(&run_id)
+            .await
+            .map(Some)
+            .context("failed to retrieve worker bootstrap payload"),
+    }
 }
 
 fn write_api_bootstrap_files(
@@ -1274,15 +1293,44 @@ fn stamp_system_worker(mut event: RunEvent) -> RunEvent {
 fn maybe_build_github_credentials(
     settings: &WorkflowSettings,
     vault: Option<&fabro_vault::Vault>,
-    config_path: Option<&Path>,
+    github_settings: &GitHubCredentialSettings,
     lookup: GitHubCredentialLookup,
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = &settings.run;
-    let github_settings = match config_path {
-        Some(path) => github_credential_settings_from_bootstrap_config(path)?,
-        None => ServerSettingsBuilder::load_default()
+    let required = resolved_run.requires_github_credentials();
+    if !required && !resolved_run.github_credentials_useful_for_pull_request() {
+        return Ok(None);
+    }
+
+    let credentials = build_github_credentials(
+        github_settings.strategy,
+        github_settings.app_id.as_deref(),
+        github_settings.app_slug.as_deref(),
+        vault,
+        lookup,
+    );
+
+    // A hard requirement propagates errors; the pull-request soft fallback
+    // tolerates missing credentials.
+    if required {
+        credentials
+    } else {
+        Ok(credentials.ok().flatten())
+    }
+}
+
+#[derive(Default)]
+struct GitHubCredentialSettings {
+    strategy: GithubIntegrationStrategy,
+    app_id:   Option<String>,
+    app_slug: Option<String>,
+}
+
+impl GitHubCredentialSettings {
+    fn from_default_config() -> Self {
+        ServerSettingsBuilder::load_default()
             .ok()
-            .map(|settings| GitHubCredentialSettings {
+            .map(|settings| Self {
                 strategy: settings.server.integrations.github.strategy,
                 app_id:   settings
                     .server
@@ -1299,90 +1347,16 @@ fn maybe_build_github_credentials(
                     .as_ref()
                     .map(InterpString::as_source),
             })
-            .unwrap_or_default(),
-    };
-
-    if requires_github_credentials(resolved_run) {
-        return build_github_credentials(
-            github_settings.strategy,
-            github_settings.app_id.as_deref(),
-            github_settings.app_slug.as_deref(),
-            vault,
-            lookup,
-        );
+            .unwrap_or_default()
     }
 
-    let pull_request_enabled =
-        resolved_run.execution.mode != RunMode::DryRun && resolved_run.pull_request.is_some();
-    if pull_request_enabled {
-        return Ok(build_github_credentials(
-            github_settings.strategy,
-            github_settings.app_id.as_deref(),
-            github_settings.app_slug.as_deref(),
-            vault,
-            lookup,
-        )
-        .ok()
-        .flatten());
+    fn from_bootstrap(github: &WorkerBootstrapGithubIntegration) -> Self {
+        Self {
+            strategy: github.strategy,
+            app_id:   github.app_id.clone(),
+            app_slug: github.slug.clone(),
+        }
     }
-
-    Ok(None)
-}
-
-#[derive(Default)]
-struct GitHubCredentialSettings {
-    strategy: GithubIntegrationStrategy,
-    app_id:   Option<String>,
-    app_slug: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct WorkerBootstrapSettingsFile {
-    server: Option<WorkerBootstrapServerSettings>,
-}
-
-#[derive(serde::Deserialize)]
-struct WorkerBootstrapServerSettings {
-    integrations: Option<WorkerBootstrapIntegrationsSettings>,
-}
-
-#[derive(serde::Deserialize)]
-struct WorkerBootstrapIntegrationsSettings {
-    github: Option<WorkerBootstrapGithubSettings>,
-}
-
-#[derive(serde::Deserialize)]
-struct WorkerBootstrapGithubSettings {
-    #[serde(default)]
-    strategy: GithubIntegrationStrategy,
-    app_id:   Option<InterpString>,
-    slug:     Option<InterpString>,
-}
-
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Worker bootstrap reads one small generated settings file during startup."
-)]
-fn github_credential_settings_from_bootstrap_config(
-    path: &Path,
-) -> Result<GitHubCredentialSettings> {
-    let source = fs::read_to_string(path)
-        .with_context(|| format!("failed to read worker settings from {}", path.display()))?;
-    let settings = toml::from_str::<WorkerBootstrapSettingsFile>(&source)
-        .with_context(|| format!("failed to parse worker settings from {}", path.display()))?;
-    let Some(github) = settings
-        .server
-        .and_then(|server| server.integrations)
-        .and_then(|integrations| integrations.github)
-    else {
-        return Ok(GitHubCredentialSettings::default());
-    };
-
-    Ok(GitHubCredentialSettings {
-        strategy: github.strategy,
-        app_id:   github.app_id.as_ref().map(InterpString::as_source),
-        app_slug: github.slug.as_ref().map(InterpString::as_source),
-    })
 }
 
 #[expect(
@@ -1391,17 +1365,6 @@ fn github_credential_settings_from_bootstrap_config(
 )]
 fn process_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
-}
-
-/// Hard-gate for the CLI worker path: a run-level token is requested, or
-/// a clone-based sandbox in non-dry-run mode will need credentials to
-/// pull the repository. Pull-request-driven credential acquisition is
-/// handled separately by the caller as a soft fallback.
-fn requires_github_credentials(run: &RunNamespace) -> bool {
-    if run.integrations.github.is_token_requested() {
-        return true;
-    }
-    run.execution.mode != RunMode::DryRun && run.environment.provider.is_clone_based()
 }
 
 fn install_signal_handlers(
@@ -2073,31 +2036,17 @@ mod tests {
         settings
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "Test helper writes a tiny bootstrap settings fixture."
-    )]
-    fn write_worker_github_config(path: &std::path::Path) {
-        std::fs::write(
-            path,
-            r#"
-_version = 1
-
-[server.integrations.github]
-enabled = true
-strategy = "app"
-app_id = "12345"
-slug = "fabro-dev"
-"#,
-        )
-        .unwrap();
+    fn worker_github_app_settings() -> super::GitHubCredentialSettings {
+        super::GitHubCredentialSettings {
+            strategy: GithubIntegrationStrategy::App,
+            app_id:   Some("12345".to_string()),
+            app_slug: Some("fabro-dev".to_string()),
+        }
     }
 
     #[test]
     fn api_bootstrap_github_app_credentials_load_from_worker_vault() {
         let temp = tempfile::tempdir().unwrap();
-        let config_path = temp.path().join("settings.toml");
-        write_worker_github_config(&config_path);
         let vault_path = temp.path().join("secrets.json");
         let mut vault = Vault::load(vault_path).unwrap();
         vault
@@ -2113,7 +2062,7 @@ slug = "fabro-dev"
         let credentials = maybe_build_github_credentials(
             &settings,
             Some(&vault),
-            Some(&config_path),
+            &worker_github_app_settings(),
             GitHubCredentialLookup::ApiBootstrapVault,
         )
         .unwrap()
@@ -2135,15 +2084,13 @@ slug = "fabro-dev"
     #[test]
     fn api_bootstrap_github_app_credentials_fail_when_vault_secret_is_missing() {
         let temp = tempfile::tempdir().unwrap();
-        let config_path = temp.path().join("settings.toml");
-        write_worker_github_config(&config_path);
         let vault = Vault::load(temp.path().join("secrets.json")).unwrap();
         let settings = workflow_settings_requesting_github_credentials();
 
         let err = maybe_build_github_credentials(
             &settings,
             Some(&vault),
-            Some(&config_path),
+            &worker_github_app_settings(),
             GitHubCredentialLookup::ApiBootstrapVault,
         )
         .unwrap_err();
@@ -2155,8 +2102,6 @@ slug = "fabro-dev"
     #[test]
     fn api_bootstrap_github_app_credentials_fail_for_invalid_pem() {
         let temp = tempfile::tempdir().unwrap();
-        let config_path = temp.path().join("settings.toml");
-        write_worker_github_config(&config_path);
         let vault_path = temp.path().join("secrets.json");
         let mut vault = Vault::load(vault_path).unwrap();
         vault
@@ -2172,7 +2117,7 @@ slug = "fabro-dev"
         let err = maybe_build_github_credentials(
             &settings,
             Some(&vault),
-            Some(&config_path),
+            &worker_github_app_settings(),
             GitHubCredentialLookup::ApiBootstrapVault,
         )
         .unwrap_err();
@@ -2192,8 +2137,6 @@ slug = "fabro-dev"
             EnvironmentProvider, RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode,
             RunNamespace,
         };
-
-        use super::super::requires_github_credentials;
 
         fn run_with(
             permissions: HashMap<String, InterpString>,
@@ -2217,28 +2160,28 @@ slug = "fabro-dev"
             // Even with local sandbox + dry-run, non-empty permissions
             // force credential acquisition.
             let run = run_with(permissions, "local", RunMode::DryRun);
-            assert!(requires_github_credentials(&run));
+            assert!(run.requires_github_credentials());
         }
 
         #[test]
         fn requires_github_credentials_for_clone_based_provider() {
             let run = run_with(HashMap::new(), "docker", RunMode::Normal);
-            assert!(requires_github_credentials(&run));
+            assert!(run.requires_github_credentials());
 
             let daytona = run_with(HashMap::new(), "daytona", RunMode::Normal);
-            assert!(requires_github_credentials(&daytona));
+            assert!(daytona.requires_github_credentials());
         }
 
         #[test]
         fn does_not_require_github_credentials_for_local_clean_run() {
             let run = run_with(HashMap::new(), "local", RunMode::Normal);
-            assert!(!requires_github_credentials(&run));
+            assert!(!run.requires_github_credentials());
         }
 
         #[test]
         fn does_not_require_github_credentials_for_clone_provider_in_dry_run() {
             let run = run_with(HashMap::new(), "docker", RunMode::DryRun);
-            assert!(!requires_github_credentials(&run));
+            assert!(!run.requires_github_credentials());
         }
     }
 }

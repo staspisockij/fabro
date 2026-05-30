@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::SecretType;
 use crate::settings::server::GithubIntegrationStrategy;
 
+pub const WORKER_BOOTSTRAP_STORAGE_DIR: &str = "/tmp/fabro-worker/storage";
+pub const WORKER_BOOTSTRAP_RUN_DIR: &str = "/tmp/fabro-worker/run";
+pub const WORKER_BOOTSTRAP_CONFIG_PATH: &str = "/tmp/fabro-worker/settings.toml";
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerBootstrapResponse {
     pub config_toml: String,

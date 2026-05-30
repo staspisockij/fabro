@@ -1,8 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_auth::auth_issue_message;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
@@ -71,16 +69,6 @@ pub(crate) struct ProviderProbeSummary {
 pub(crate) enum ProviderProbeStatus {
     Ok,
     Error,
-}
-
-fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
-    if value.starts_with("-----") {
-        return Ok(value.to_string());
-    }
-    let bytes = BASE64_STANDARD
-        .decode(value)
-        .map_err(|e| format!("{name} is not valid PEM or base64: {e}"))?;
-    String::from_utf8(bytes).map_err(|e| format!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
 
 fn validate_session_secret(value: &str) -> Result<(), String> {
@@ -500,7 +488,10 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         };
     };
 
-    let private_key = match decode_pem_value(EnvVars::GITHUB_APP_PRIVATE_KEY, &private_key_raw) {
+    let private_key = match fabro_github::decode_private_key_pem(
+        EnvVars::GITHUB_APP_PRIVATE_KEY,
+        &private_key_raw,
+    ) {
         Ok(value) => value,
         Err(err) => {
             return CheckResult {

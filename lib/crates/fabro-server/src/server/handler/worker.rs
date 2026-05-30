@@ -5,14 +5,13 @@ use fabro_model::catalog::{CredentialRef, HeaderValueRef, LlmCatalogSettings};
 use fabro_model::{Catalog, ProviderId};
 use fabro_static::EnvVars;
 use fabro_types::settings::InterpString;
-use fabro_types::settings::run::{EnvironmentProvider, McpTransport, RunMode, RunNamespace};
+use fabro_types::settings::run::{EnvironmentProvider, McpTransport, RunNamespace};
 use fabro_types::settings::server::{GithubIntegrationSettings, GithubIntegrationStrategy};
 use fabro_types::{
-    Graph, ServerSettings, WorkerBootstrapGithubIntegration, WorkerBootstrapResponse,
-    WorkerBootstrapSecret, is_llm_handler_type,
+    ServerSettings, WorkerBootstrapGithubIntegration, WorkerBootstrapResponse,
+    WorkerBootstrapSecret,
 };
 use fabro_vault::Vault;
-use fabro_workflow::handler::llm::routing;
 use fabro_workflow::operations;
 use serde::Serialize;
 use toml::ser;
@@ -44,31 +43,33 @@ async fn retrieve_worker_bootstrap(
 
     let server_settings = state.server_settings();
     let github = github_bootstrap_metadata(&server_settings.server.integrations.github);
-    let config_toml =
-        match worker_bootstrap_config_toml(state.llm_catalog_settings().as_ref(), &github) {
-            Ok(config_toml) => config_toml,
-            Err(err) => {
-                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                    .into_response();
-            }
-        };
+    let config_toml = match worker_bootstrap_config_toml(state.llm_catalog_settings().as_ref()) {
+        Ok(config_toml) => config_toml,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
 
     let run_spec = &cached.projection.spec;
     let catalog = state.catalog();
-    let configured_providers =
-        operations::configured_providers_for_start(Some(&state.vault), Arc::clone(&catalog))
-            .await
-            .into_iter()
-            .collect::<BTreeSet<_>>();
+    // Workers only receive vault-delivered secrets, so scope provider discovery
+    // to the vault rather than the server's process environment.
+    let configured = state.configured_llm_provider_ids().await;
+    let reachable_providers = operations::reachable_provider_ids(
+        catalog.as_ref(),
+        &configured,
+        &run_spec.settings.run,
+        run_spec.graph(),
+    );
     let vault = state.vault.read().await;
     let selector = WorkerBootstrapSecretSelector {
-        repo_origin_url:      run_spec.repo_origin_url(),
-        run_settings:         &run_spec.settings.run,
-        accepted_graph:       run_spec.graph(),
-        catalog:              catalog.as_ref(),
-        configured_providers: &configured_providers,
-        server_settings:      server_settings.as_ref(),
-        server_vault:         &vault,
+        repo_origin_url:     run_spec.repo_origin_url(),
+        run_settings:        &run_spec.settings.run,
+        catalog:             catalog.as_ref(),
+        reachable_providers: &reachable_providers,
+        server_settings:     server_settings.as_ref(),
+        server_vault:        &vault,
     };
     let secrets = selector
         .required_secret_names()
@@ -92,32 +93,10 @@ struct WorkerBootstrapConfig<'a> {
     #[serde(rename = "_version")]
     version: u8,
     llm:     &'a LlmCatalogSettings,
-    server:  WorkerBootstrapServerConfig,
 }
 
-#[derive(Serialize)]
-struct WorkerBootstrapServerConfig {
-    integrations: WorkerBootstrapIntegrationsConfig,
-}
-
-#[derive(Serialize)]
-struct WorkerBootstrapIntegrationsConfig {
-    github: WorkerBootstrapGithubIntegration,
-}
-
-fn worker_bootstrap_config_toml(
-    llm: &LlmCatalogSettings,
-    github: &WorkerBootstrapGithubIntegration,
-) -> Result<String, ser::Error> {
-    toml::to_string(&WorkerBootstrapConfig {
-        version: 1,
-        llm,
-        server: WorkerBootstrapServerConfig {
-            integrations: WorkerBootstrapIntegrationsConfig {
-                github: github.clone(),
-            },
-        },
-    })
+fn worker_bootstrap_config_toml(llm: &LlmCatalogSettings) -> Result<String, ser::Error> {
+    toml::to_string(&WorkerBootstrapConfig { version: 1, llm })
 }
 
 fn github_bootstrap_metadata(
@@ -142,13 +121,12 @@ fn secret_response_for_name(vault: &Vault, name: &str) -> Option<WorkerBootstrap
 }
 
 struct WorkerBootstrapSecretSelector<'a> {
-    repo_origin_url:      Option<&'a str>,
-    run_settings:         &'a RunNamespace,
-    accepted_graph:       &'a Graph,
-    catalog:              &'a Catalog,
-    configured_providers: &'a BTreeSet<ProviderId>,
-    server_settings:      &'a ServerSettings,
-    server_vault:         &'a Vault,
+    repo_origin_url:     Option<&'a str>,
+    run_settings:        &'a RunNamespace,
+    catalog:             &'a Catalog,
+    reachable_providers: &'a BTreeSet<ProviderId>,
+    server_settings:     &'a ServerSettings,
+    server_vault:        &'a Vault,
 }
 
 impl WorkerBootstrapSecretSelector<'_> {
@@ -163,8 +141,8 @@ impl WorkerBootstrapSecretSelector<'_> {
     }
 
     fn collect_llm_provider_secrets(&self, names: &mut BTreeSet<String>) {
-        for provider_id in self.reachable_llm_provider_ids() {
-            let Some(provider) = self.catalog.provider(&provider_id) else {
+        for provider_id in self.reachable_providers {
+            let Some(provider) = self.catalog.provider(provider_id) else {
                 continue;
             };
             if let Some(auth) = &provider.auth {
@@ -180,38 +158,6 @@ impl WorkerBootstrapSecretSelector<'_> {
                 }
             }
         }
-    }
-
-    fn reachable_llm_provider_ids(&self) -> BTreeSet<ProviderId> {
-        let configured = self
-            .configured_providers
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        let Ok(start) = operations::resolve_start_llm(self.catalog, &configured, self.run_settings)
-        else {
-            return BTreeSet::new();
-        };
-
-        let mut provider_ids = BTreeSet::new();
-        provider_ids.insert(start.provider_id.clone());
-        for fallback in &start.fallback_chain {
-            provider_ids.insert(ProviderId::from(fallback.provider.as_str()));
-        }
-        for node in self.accepted_graph.nodes.values() {
-            if !is_llm_handler_type(node.handler_type()) {
-                continue;
-            }
-            if let Ok(context) = routing::resolve_node_provider_context(
-                self.catalog,
-                &start.provider_id,
-                &start.model,
-                node,
-            ) {
-                provider_ids.insert(context.provider_id);
-            }
-        }
-        provider_ids
     }
 
     fn collect_mcp_header_secrets(&self, names: &mut BTreeSet<String>) {
@@ -249,17 +195,11 @@ impl WorkerBootstrapSecretSelector<'_> {
             return true;
         }
 
-        if self.run_settings.execution.mode == RunMode::DryRun {
-            return false;
-        }
-
-        let clone_can_use_github_credentials =
-            self.run_settings.environment.provider.is_clone_based()
-                && self
-                    .repo_origin_url
-                    .is_some_and(|origin| !origin.trim().is_empty());
-        let pull_request_can_use_github_credentials = self.run_settings.pull_request.is_some();
-        clone_can_use_github_credentials || pull_request_can_use_github_credentials
+        self.run_settings
+            .github_credentials_useful_for_clone(self.repo_origin_url)
+            || self
+                .run_settings
+                .github_credentials_useful_for_pull_request()
     }
 
     fn collect_sandbox_provider_secrets(&self, names: &mut BTreeSet<String>) {
@@ -291,8 +231,7 @@ mod tests {
             )
             .expect("test vault entry should persist");
         let catalog = Catalog::from_builtin().expect("test catalog should build");
-        let configured_providers = BTreeSet::new();
-        let graph = Graph::new("test");
+        let reachable_providers = BTreeSet::new();
         let server_settings = fabro_config::ServerSettingsBuilder::from_toml(
             r#"
 _version = 1
@@ -305,13 +244,12 @@ methods = ["dev-token"]
 
         let local_settings = RunNamespace::default();
         let local_selector = WorkerBootstrapSecretSelector {
-            repo_origin_url:      None,
-            run_settings:         &local_settings,
-            accepted_graph:       &graph,
-            catalog:              &catalog,
-            configured_providers: &configured_providers,
-            server_settings:      &server_settings,
-            server_vault:         &vault,
+            repo_origin_url:     None,
+            run_settings:        &local_settings,
+            catalog:             &catalog,
+            reachable_providers: &reachable_providers,
+            server_settings:     &server_settings,
+            server_vault:        &vault,
         };
         assert!(
             !local_selector
@@ -322,13 +260,12 @@ methods = ["dev-token"]
         let mut daytona_settings = RunNamespace::default();
         daytona_settings.environment.provider = EnvironmentProvider::Daytona;
         let daytona_selector = WorkerBootstrapSecretSelector {
-            repo_origin_url:      None,
-            run_settings:         &daytona_settings,
-            accepted_graph:       &graph,
-            catalog:              &catalog,
-            configured_providers: &configured_providers,
-            server_settings:      &server_settings,
-            server_vault:         &vault,
+            repo_origin_url:     None,
+            run_settings:        &daytona_settings,
+            catalog:             &catalog,
+            reachable_providers: &reachable_providers,
+            server_settings:     &server_settings,
+            server_vault:        &vault,
         };
         assert!(
             daytona_selector

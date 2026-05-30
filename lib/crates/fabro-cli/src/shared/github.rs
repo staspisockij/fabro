@@ -1,6 +1,4 @@
 use anyhow::anyhow;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_github::{GitHubAppCredentials, GitHubCredentials};
 use fabro_static::EnvVars;
 use fabro_types::settings::server::GithubIntegrationStrategy;
@@ -60,26 +58,11 @@ fn build_github_app_credentials_from_vault(
         anyhow!("GITHUB_APP_PRIVATE_KEY is missing from the worker bootstrap vault")
     })?;
     let private_key_pem =
-        decode_pem_value(EnvVars::GITHUB_APP_PRIVATE_KEY, &raw).map_err(anyhow::Error::msg)?;
-    Ok(Some(GitHubCredentials::App(GitHubAppCredentials {
-        app_id: app_id.to_string(),
-        private_key_pem,
-        slug: app_slug
-            .map(str::trim)
-            .filter(|slug| !slug.is_empty())
-            .map(str::to_string),
-    })))
-}
-
-fn decode_pem_value(name: &str, raw: &str) -> Result<String, String> {
-    if raw.starts_with("-----") {
-        return Ok(raw.to_string());
-    }
-    let pem_bytes = BASE64_STANDARD
-        .decode(raw)
-        .map_err(|err| format!("{name} is not valid PEM or base64: {err}"))?;
-    String::from_utf8(pem_bytes)
-        .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
+        fabro_github::decode_private_key_pem(EnvVars::GITHUB_APP_PRIVATE_KEY, &raw)
+            .map_err(anyhow::Error::msg)?;
+    Ok(Some(GitHubCredentials::App(
+        GitHubAppCredentials::from_pem_with_slug(app_id, app_slug, private_key_pem),
+    )))
 }
 
 /// Look up GitHub token: GITHUB_TOKEN env -> vault GITHUB_TOKEN -> GH_TOKEN env

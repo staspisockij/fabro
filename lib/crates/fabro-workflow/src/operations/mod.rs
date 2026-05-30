@@ -20,10 +20,7 @@ pub use resume::resume;
 pub use retry::{RetryOutcome, RetryRunInput, retry_run};
 pub use rewind::{RewindInput, RewindOutcome, rewind};
 pub use source::WorkflowInput;
-pub use start::{
-    StartLlmResolution, StartServices, Started, configured_providers_for_start, resolve_start_llm,
-    start,
-};
+pub use start::{StartServices, Started, reachable_provider_ids, start};
 pub use timeline::{ForkTarget, RunTimeline, TimelineEntry, build_timeline, timeline};
 pub use validate::{ValidateInput, validate};
 

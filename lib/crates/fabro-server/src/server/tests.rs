@@ -9,6 +9,8 @@ use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
 use axum::body::Body;
 use axum::http::{Method, Request, header};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use chrono::{Duration as ChronoDuration, Utc};
 use fabro_automation::{AutomationId, AutomationTarget};
 use fabro_config::bind::Bind;
@@ -23,6 +25,7 @@ use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest, TokenCounts
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelRef, ProviderId, ReasoningEffort, Speed};
 use fabro_types::settings::ServerAuthMethod;
+use fabro_types::settings::run::RunMode;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
@@ -1113,9 +1116,10 @@ async fn worker_bootstrap_includes_default_provider_secret_and_excludes_unrelate
         );
     }
     let config_toml = body["config_toml"].as_str().unwrap();
-    assert!(config_toml.contains("[server.integrations.github]"));
+    assert!(!config_toml.contains("[server.integrations.github]"));
     assert!(!config_toml.contains("[server.storage]"));
     assert!(!config_toml.contains(EnvVars::SESSION_SECRET));
+    assert_eq!(body["github"]["strategy"], "token");
 }
 
 #[tokio::test]
@@ -1424,9 +1428,40 @@ mode = "dry_run"
 [server.storage]
 root = "/srv/new"
 "#;
+    let updated_llm_catalog_settings: LlmCatalogSettings = toml::from_str(
+        r#"
+[providers.acme]
+display_name = "Acme"
+adapter = "openai_compatible"
+agent_profile = "openai"
+base_url = "https://api.acme.test/v1"
+
+[providers.acme.auth]
+credentials = ["env:ACME_API_KEY"]
+
+[models."acme-large"]
+provider = "acme"
+display_name = "Acme Large"
+family = "acme"
+default = true
+
+[models."acme-large".limits]
+context_window = 128000
+
+[models."acme-large".features]
+tools = true
+vision = false
+reasoning = false
+"#,
+    )
+    .expect("catalog fixture should parse");
 
     state
-        .replace_runtime_settings(resolved_runtime_settings_from_toml(updated))
+        .replace_runtime_settings(resolved_runtime_settings_for_tests(
+            server_settings_from_toml(updated),
+            manifest_run_defaults_from_toml(updated),
+            updated_llm_catalog_settings,
+        ))
         .expect("valid settings should replace current state");
 
     assert_eq!(state.canonical_origin().unwrap(), "http://new.example.com");
@@ -1450,6 +1485,13 @@ root = "/srv/new"
             .and_then(|execution| execution.mode),
         Some(RunMode::DryRun)
     );
+    assert!(
+        state
+            .llm_catalog_settings()
+            .models
+            .contains_key("acme-large")
+    );
+    assert!(state.catalog().get("acme-large").is_some());
 }
 
 #[test]
@@ -2675,7 +2717,7 @@ destination = "file"
 #[test]
 fn worker_launch_spec_uses_docker_worker_settings() {
     let storage_dir = tempfile::tempdir().unwrap();
-    let state = worker_command_test_state_with_extra_config(
+    let state = worker_command_test_state_with_extra_config_and_env_lookup(
         storage_dir.path(),
         &["dev-token"],
         Some(TEST_DEV_TOKEN),
@@ -2684,12 +2726,20 @@ fn worker_launch_spec_uses_docker_worker_settings() {
 runtime = "docker"
 
 [server.worker.docker]
-image = "ghcr.io/fabro-sh/fabro-worker:test"
-server_url = "http://fabro-server:3333"
-network = "fabro-net"
-docker_socket = "/var/run/docker.sock"
+image = "{{ env.WORKER_IMAGE }}"
+server_url = "{{ env.WORKER_SERVER_URL }}"
+network = "{{ env.WORKER_NETWORK }}"
+docker_socket = "{{ env.WORKER_SOCKET }}"
 remove_on_exit = false
 "#,
+        &[],
+        |name| match name {
+            "WORKER_IMAGE" => Some("ghcr.io/fabro-sh/fabro-worker:test".to_string()),
+            "WORKER_SERVER_URL" => Some("http://fabro-server:3333".to_string()),
+            "WORKER_NETWORK" => Some("fabro-net".to_string()),
+            "WORKER_SOCKET" => Some("/var/run/docker.sock".to_string()),
+            _ => None,
+        },
     );
     state
         .vault
