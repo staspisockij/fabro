@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { useSWRConfig } from "swr";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 
 import { ApiError, apiData, automationsApi } from "../lib/api-client";
 import { queryKeys } from "../lib/query-keys";
+import { useRun, useRunSettings } from "../lib/queries";
 import {
   AutomationFormFields,
   EMPTY_AUTOMATION_FORM,
+  automationFormValuesFromRun,
   isFormValid,
   triggersFromFormValues,
   type AutomationFormValues,
@@ -26,10 +28,69 @@ export function meta() {
 export const handle = { hideHeader: true };
 
 export default function AutomationsNew() {
+  const [searchParams] = useSearchParams();
+  const fromRunId = searchParams.get("from_run")?.trim() || undefined;
+  const runQuery = useRun(fromRunId);
+  const settingsQuery = useRunSettings(fromRunId);
+
+  if (!fromRunId) {
+    return (
+      <AutomationCreateForm
+        key="blank"
+        initialValues={EMPTY_AUTOMATION_FORM}
+      />
+    );
+  }
+
+  // Wait for both queries to settle before mounting the form, so the user's
+  // edits aren't blown away when settings arrive after the run.
+  const runPending = runQuery.isLoading && !runQuery.data;
+  const settingsPending = settingsQuery.isLoading && !settingsQuery.data;
+  if (runPending || settingsPending) {
+    return (
+      <div className="space-y-6">
+        <PageHeader />
+        <p className="rounded-lg bg-panel-alt px-4 py-3 text-sm text-fg-3">
+          Loading source run…
+        </p>
+      </div>
+    );
+  }
+
+  if (!runQuery.data) {
+    return (
+      <AutomationCreateForm
+        key={`missing:${fromRunId}`}
+        initialValues={EMPTY_AUTOMATION_FORM}
+        sourceError="The source run could not be loaded. You can still fill it out manually."
+      />
+    );
+  }
+
+  const initialValues = automationFormValuesFromRun(
+    runQuery.data,
+    settingsQuery.data ?? null,
+  );
+
+  return (
+    <AutomationCreateForm
+      key={`from-run:${fromRunId}`}
+      initialValues={initialValues}
+    />
+  );
+}
+
+function AutomationCreateForm({
+  initialValues,
+  sourceError = null,
+}: {
+  initialValues: AutomationFormValues;
+  sourceError?: string | null;
+}) {
   const navigate = useNavigate();
   const { mutate } = useSWRConfig();
   const toast = useToast();
-  const [values, setValues] = useState<AutomationFormValues>(EMPTY_AUTOMATION_FORM);
+  const [values, setValues] = useState<AutomationFormValues>(initialValues);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +108,6 @@ export default function AutomationsNew() {
           id:          values.id.trim(),
           name:        trimmedName,
           description: values.description.trim() || null,
-          enabled:     values.enabled,
           target:      {
             repository: values.repository.trim(),
             ref:        values.ref.trim(),
@@ -75,6 +135,7 @@ export default function AutomationsNew() {
 
       <AutomationFormFields values={values} onChange={setValues} />
 
+      {sourceError ? <ErrorMessage message={sourceError} /> : null}
       {error ? <ErrorMessage message={error} /> : null}
 
       <FormFooter

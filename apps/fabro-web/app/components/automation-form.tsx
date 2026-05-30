@@ -1,15 +1,21 @@
 import { useRef, type ReactNode } from "react";
 import { Switch } from "@headlessui/react";
-import type { Automation, AutomationTrigger } from "@qltysh/fabro-api-client";
+import type {
+  Automation,
+  AutomationTrigger,
+  Run,
+  WorkflowSettings,
+} from "@qltysh/fabro-api-client";
 
+import { findApiTrigger, findScheduleTrigger } from "../lib/automation";
 import { Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
+import { sandboxRuntime } from "../lib/run-sandbox-lifecycle";
 
 export interface AutomationFormValues {
   id: string;
   name: string;
   description: string;
-  enabled: boolean;
   repository: string;
   ref: string;
   workflow: string;
@@ -22,7 +28,6 @@ export const EMPTY_AUTOMATION_FORM: AutomationFormValues = {
   id:              "",
   name:            "",
   description:     "",
-  enabled:         true,
   repository:      "",
   ref:             "main",
   workflow:        "",
@@ -39,19 +44,49 @@ const CRON_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
 ];
 
 export function automationToFormValues(automation: Automation): AutomationFormValues {
-  const apiTrigger = automation.triggers.find((t) => t.type === "api");
-  const scheduleTrigger = automation.triggers.find((t) => t.type === "schedule");
+  const apiTrigger = findApiTrigger(automation);
+  const scheduleTrigger = findScheduleTrigger(automation);
   return {
     id:              automation.id,
     name:            automation.name,
     description:     automation.description ?? "",
-    enabled:         automation.enabled,
     repository:      automation.target.repository,
     ref:             automation.target.ref,
     workflow:        automation.target.workflow,
     manualEnabled:   apiTrigger?.enabled ?? false,
     scheduleEnabled: scheduleTrigger?.enabled ?? false,
     cron:            scheduleTrigger?.expression ?? "0 9 * * 1-5",
+  };
+}
+
+export function automationFormValuesFromRun(
+  run: Run,
+  settings?: WorkflowSettings | null,
+): AutomationFormValues {
+  const name = firstPresentString(
+    run.title,
+    run.workflow.name,
+    run.workflow.graph_name,
+    run.workflow.slug,
+    "New automation",
+  );
+  const workflowName = firstPresentString(
+    run.workflow.name,
+    run.workflow.graph_name,
+    name,
+  );
+  const repository = githubRepositoryFromSettings(settings)
+    ?? githubRepositoryName(run.repository?.name)
+    ?? githubRepositoryFromOriginUrl(run.repository?.origin_url)
+    ?? "";
+  const cloneBranch = sandboxRuntime(run.sandbox)?.clone_branch;
+  return {
+    ...EMPTY_AUTOMATION_FORM,
+    id:         kebabify(name),
+    name,
+    repository,
+    ref:        cloneBranch ?? EMPTY_AUTOMATION_FORM.ref,
+    workflow:   run.workflow.slug?.trim() || snakeify(workflowName),
   };
 }
 
@@ -77,8 +112,7 @@ export function isFormValid(values: AutomationFormValues): boolean {
     values.name.trim() !== "" &&
     values.repository.trim() !== "" &&
     values.ref.trim() !== "" &&
-    values.workflow.trim() !== "" &&
-    (values.manualEnabled || values.scheduleEnabled)
+    values.workflow.trim() !== ""
   );
 }
 
@@ -96,6 +130,54 @@ export function snakeify(value: string): string {
     .replace(/[^a-z0-9_]+/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
+}
+
+function firstPresentString(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+function githubRepositoryFromSettings(
+  settings?: WorkflowSettings | null,
+): string | null {
+  const owner = settings?.run?.scm?.owner;
+  const repository = settings?.run?.scm?.repository;
+  if (!owner || !repository) return null;
+  return githubRepositoryName(`${owner}/${repository}`);
+}
+
+function githubRepositoryName(value: string | null | undefined): string | null {
+  const trimmed = value?.trim().replace(/\.git$/i, "");
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/^([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+)$/);
+  if (!match) return null;
+  return `${match[1]}/${match[2]}`;
+}
+
+function githubRepositoryFromOriginUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const scpLikeMatch = trimmed.match(
+    /^git@github\.com:([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)\/([A-Za-z0-9._-]+?)(?:\.git)?$/i,
+  );
+  if (scpLikeMatch) {
+    return githubRepositoryName(`${scpLikeMatch[1]}/${scpLikeMatch[2]}`);
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname.toLowerCase() !== "github.com") return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 2) return null;
+    return githubRepositoryName(`${parts[0]}/${parts[1]}`);
+  } catch {
+    return null;
+  }
 }
 
 function describeCron(expression: string): string {
@@ -185,13 +267,6 @@ export function AutomationFormFields({
             rows={2}
             placeholder="Diagnose and fix CI build failures by analyzing logs and applying targeted patches."
             className={`${INPUT_CLASS} resize-y`}
-          />
-        </Row>
-        <Row title="Enabled" help="Disabled automations skip scheduled triggers and reject API runs.">
-          <ToggleSwitch
-            checked={values.enabled}
-            onChange={(enabled) => patch({ enabled })}
-            label="Enable automation"
           />
         </Row>
       </Panel>
