@@ -1,0 +1,396 @@
+diff --git a/.github/workflows/nightly.yml b/.github/workflows/nightly.yml
+index f63324d41..5dcc0ce3c 100644
+--- a/.github/workflows/nightly.yml
++++ b/.github/workflows/nightly.yml
+@@ -67,4 +67,4 @@ jobs:
+           git remote set-url origin \
+             "https://x-access-token:${release_token}@github.com/${GITHUB_REPOSITORY}.git"
+           unset release_token
+-          cargo dev release --nightly
++          cargo --locked dev release --nightly
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 91519569b..4410f71f7 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -84,7 +84,7 @@ jobs:
+       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
+ 
+       - name: Refresh embedded SPA
+-        run: cargo dev spa refresh
++        run: cargo --locked dev spa refresh
+ 
+       - name: Test (x86_64-musl)
+         # nextest still shells through cargo test for this target, so
+@@ -93,22 +93,22 @@ jobs:
+         env:
+           CC_x86_64_unknown_linux_musl: musl-gcc
+           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+-        run: cargo nextest run --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
++        run: cargo nextest run --locked --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
+ 
+       - name: Test
+         # aarch64-musl test runs have not been validated on the compile
+         # runner yet; shipping binary is exercised via Docker smoke tests.
+         # Re-enable after verifying the workspace passes on this target.
+         if: matrix.target != 'aarch64-unknown-linux-musl' && matrix.target != 'x86_64-unknown-linux-musl'
+-        run: cargo nextest run --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
++        run: cargo nextest run --locked --workspace --target ${{ matrix.target }} --release --status-level slow --profile ci
+ 
+       - name: Build (musl via cargo-zigbuild)
+         if: matrix.musl
+-        run: cargo zigbuild --target ${{ matrix.target }} --release -p fabro-cli
++        run: cargo zigbuild --locked --target ${{ matrix.target }} --release -p fabro-cli
+ 
+       - name: Build
+         if: ${{ !matrix.musl }}
+-        run: cargo build --target ${{ matrix.target }} --release -p fabro-cli
++        run: cargo build --locked --target ${{ matrix.target }} --release -p fabro-cli
+ 
+       - name: Package
+         run: |
+diff --git a/.github/workflows/rust.yml b/.github/workflows/rust.yml
+index cc3582ecf..c20fe22de 100644
+--- a/.github/workflows/rust.yml
++++ b/.github/workflows/rust.yml
+@@ -76,7 +76,7 @@ jobs:
+         run: |
+           ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\bActorRef\b|\bActorKind\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\s*==\s*"disabled"' \
+             lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml
+-      - run: cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings
++      - run: cargo +nightly-2026-04-14 clippy --locked --workspace --all-targets -- -D warnings
+ 
+   generated-docs:
+     name: Generated Docs
+@@ -91,7 +91,7 @@ jobs:
+       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+         with:
+           cache-on-failure: true
+-      - run: cargo dev docs check
++      - run: cargo --locked dev docs check
+ 
+   test:
+     name: Test (Linux)
+@@ -107,7 +107,7 @@ jobs:
+         with:
+           cache-on-failure: true
+       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
+-      - run: cargo nextest run --workspace --status-level slow --profile ci
++      - run: cargo nextest run --locked --workspace --status-level slow --profile ci
+ 
+   test-macos:
+     name: Test (macOS)
+@@ -124,4 +124,4 @@ jobs:
+         with:
+           cache-on-failure: true
+       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
+-      - run: cargo nextest run --workspace --status-level slow --profile ci
++      - run: cargo nextest run --locked --workspace --status-level slow --profile ci
+diff --git a/.github/workflows/typescript.yml b/.github/workflows/typescript.yml
+index c240e3837..e2f63a047 100644
+--- a/.github/workflows/typescript.yml
++++ b/.github/workflows/typescript.yml
+@@ -73,5 +73,5 @@ jobs:
+       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+       - run: bun install --frozen-lockfile
+       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+-      - run: cargo dev build -- -p fabro-cli --release
++      - run: cargo --locked dev build -- --locked -p fabro-cli --release
+       - run: wc -c < target/release/fabro
+diff --git a/apps/fabro-web/app/routes/automations.tsx b/apps/fabro-web/app/routes/automations.tsx
+index dd388a690..03725287c 100644
+--- a/apps/fabro-web/app/routes/automations.tsx
++++ b/apps/fabro-web/app/routes/automations.tsx
+@@ -115,7 +115,7 @@ function AutomationCard({
+   onDelete: () => void;
+ }) {
+   const Icon = automation.icon;
+-  const runDisabled = busy || !automation.apiEnabled;
++  const runDisabled = busy || running || !automation.apiEnabled;
+   return (
+     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
+       <Link to={`/automations/${automation.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+@@ -153,7 +153,7 @@ function AutomationCard({
+         <button
+           type="button"
+           onClick={onRun}
+-          disabled={running || runDisabled}
++          disabled={runDisabled}
+           aria-label={running ? "Starting run…" : "Run automation"}
+           title={
+             running
+diff --git a/lib/crates/fabro-dev/src/commands/docker_build.rs b/lib/crates/fabro-dev/src/commands/docker_build.rs
+index db914cb13..5f048fe7c 100644
+--- a/lib/crates/fabro-dev/src/commands/docker_build.rs
++++ b/lib/crates/fabro-dev/src/commands/docker_build.rs
+@@ -148,6 +148,7 @@ impl DockerBuildPlan {
+ 
+     fn spa_refresh_command() -> PlannedCommand {
+         PlannedCommand::new("cargo")
++            .arg("--locked")
+             .arg("dev")
+             .arg("spa")
+             .arg("refresh")
+@@ -235,6 +236,6 @@ fn build_script(target: &str, zig_arch: &str) -> String {
+          cargo install --locked --root /opt/cargo-tools cargo-zigbuild; \
+          fi; \
+          rustup target add {target}; \
+-         cargo zigbuild --release -p fabro-cli --target {target}"
++         cargo zigbuild --locked --release -p fabro-cli --target {target}"
+     )
+ }
+diff --git a/lib/crates/fabro-dev/src/commands/docs_cli_reference.rs b/lib/crates/fabro-dev/src/commands/docs_cli_reference.rs
+index fda0a3e69..ffab221ee 100644
+--- a/lib/crates/fabro-dev/src/commands/docs_cli_reference.rs
++++ b/lib/crates/fabro-dev/src/commands/docs_cli_reference.rs
+@@ -44,6 +44,7 @@ pub(crate) fn docs_cli_reference_root(root: &Path, check: bool) -> Result<()> {
+ fn render_cli_reference() -> Result<String> {
+     let command = PlannedCommand::new("cargo")
+         .arg("run")
++        .arg("--locked")
+         .arg("-p")
+         .arg("fabro-cli")
+         .arg("--")
+diff --git a/lib/crates/fabro-dev/src/commands/release.rs b/lib/crates/fabro-dev/src/commands/release.rs
+index 8b8ef8029..e088f38d3 100644
+--- a/lib/crates/fabro-dev/src/commands/release.rs
++++ b/lib/crates/fabro-dev/src/commands/release.rs
+@@ -237,6 +237,7 @@ impl ReleasePlan {
+ 
+     fn spa_refresh_command() -> PlannedCommand {
+         PlannedCommand::new("cargo")
++            .arg("--locked")
+             .arg("dev")
+             .arg("spa")
+             .arg("refresh")
+@@ -249,6 +250,7 @@ impl ReleasePlan {
+             .env("SEGMENT_WRITE_KEY", RELEASE_TEST_SEGMENT_WRITE_KEY)
+             .arg("nextest")
+             .arg("run")
++            .arg("--locked")
+             .arg("--workspace")
+             .arg("--release")
+             .arg("--profile")
+diff --git a/lib/crates/fabro-dev/tests/it/docker_build.rs b/lib/crates/fabro-dev/tests/it/docker_build.rs
+index 14f7c9b92..458569e20 100644
+--- a/lib/crates/fabro-dev/tests/it/docker_build.rs
++++ b/lib/crates/fabro-dev/tests/it/docker_build.rs
+@@ -53,7 +53,7 @@ fn dry_run_prints_equivalent_build_commands() {
+     let stdout = output_text(&output.stdout);
+ 
+     assert!(
+-        stdout.contains("cargo dev spa refresh"),
++        stdout.contains("cargo --locked dev spa refresh"),
+         "dry-run should print SPA refresh command:\n{stdout}"
+     );
+     assert!(
+@@ -61,7 +61,9 @@ fn dry_run_prints_equivalent_build_commands() {
+         "dry-run should print builder docker run:\n{stdout}"
+     );
+     assert!(
+-        stdout.contains("cargo zigbuild --release -p fabro-cli --target x86_64-unknown-linux-musl"),
++        stdout.contains(
++            "cargo zigbuild --locked --release -p fabro-cli --target x86_64-unknown-linux-musl"
++        ),
+         "dry-run should print cargo-zigbuild target:\n{stdout}"
+     );
+     assert!(
+diff --git a/lib/crates/fabro-dev/tests/it/release.rs b/lib/crates/fabro-dev/tests/it/release.rs
+index c71a3642d..f6949725e 100644
+--- a/lib/crates/fabro-dev/tests/it/release.rs
++++ b/lib/crates/fabro-dev/tests/it/release.rs
+@@ -96,7 +96,7 @@ fn dry_run_computes_stable_version_from_date() {
+         "dry-run should compute base version from date:\n{stdout}"
+     );
+     assert!(
+-        stdout.contains("cargo dev spa refresh"),
++        stdout.contains("cargo --locked dev spa refresh"),
+         "dry-run should print one SPA refresh command:\n{stdout}"
+     );
+     assert!(
+@@ -109,7 +109,7 @@ fn dry_run_computes_stable_version_from_date() {
+     );
+     assert!(
+         stdout.contains(
+-            "unset GH_TOKEN GITHUB_TOKEN && SEGMENT_WRITE_KEY=fake-for-local-smoke cargo nextest run"
++            "unset GH_TOKEN GITHUB_TOKEN && SEGMENT_WRITE_KEY=fake-for-local-smoke cargo nextest run --locked"
+         ),
+         "dry-run should show release tests without inherited GitHub tokens:\n{stdout}"
+     );
+diff --git a/lib/crates/fabro-server/src/server/handler/lifecycle.rs b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+index 2ca3fb132..5df7e72c5 100644
+--- a/lib/crates/fabro-server/src/server/handler/lifecycle.rs
++++ b/lib/crates/fabro-server/src/server/handler/lifecycle.rs
+@@ -371,46 +371,67 @@ async fn cancel_run(
+     if let Some(response) = reject_if_archived(state.as_ref(), &id).await {
+         return response;
+     }
+-    let pending_control = match load_pending_control(state.as_ref(), id).await {
+-        Ok(pending_control) => pending_control,
++    let durable_summary = match state.store.runs().find(&id).await {
++        Ok(summary) => summary,
+         Err(err) => {
+             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                 .into_response();
+         }
+     };
++    let pending_control = durable_summary
++        .as_ref()
++        .and_then(|summary| summary.lifecycle.pending_control);
++    let durable_status = durable_summary
++        .as_ref()
++        .map(|summary| summary.lifecycle.status);
+     let cancel_target = {
+         let mut runs = state.runs.lock().expect("runs lock poisoned");
+         match runs.get_mut(&id) {
+-            Some(managed_run) => match managed_run.status {
+-                RunStatus::Submitted
+-                | RunStatus::Pending { .. }
+-                | RunStatus::Runnable
+-                | RunStatus::Starting
+-                | RunStatus::Running
+-                | RunStatus::Blocked { .. }
+-                | RunStatus::Paused { .. } => {
+-                    let persist_cancelled_status = matches!(
+-                        managed_run.status,
+-                        RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable
+-                    );
+-                    if persist_cancelled_status {
+-                        managed_run.status = RunStatus::Failed {
+-                            reason: FailureReason::Cancelled,
++            Some(managed_run) => {
++                let managed_status = managed_run.status;
++                match managed_status {
++                    RunStatus::Submitted
++                    | RunStatus::Pending { .. }
++                    | RunStatus::Runnable
++                    | RunStatus::Starting
++                    | RunStatus::Running
++                    | RunStatus::Blocked { .. }
++                    | RunStatus::Paused { .. } => {
++                        let answer_transport = managed_run.answer_transport.clone();
++                        let should_cancel_pending_interview =
++                            matches!(
++                                &answer_transport,
++                                Some(RunAnswerTransport::InProcess { .. })
++                            ) && (matches!(managed_status, RunStatus::Blocked { .. })
++                                || matches!(durable_status, Some(RunStatus::Blocked { .. })));
++                        let persist_cancelled_status = matches!(
++                            managed_status,
++                            RunStatus::Submitted | RunStatus::Pending { .. } | RunStatus::Runnable
++                        ) && !should_cancel_pending_interview;
++                        if persist_cancelled_status {
++                            managed_run.status = RunStatus::Failed {
++                                reason: FailureReason::Cancelled,
++                            };
++                        }
++                        let cancel_tx = if should_cancel_pending_interview {
++                            None
++                        } else {
++                            managed_run.cancel_tx.take()
+                         };
++                        Some((
++                            persist_cancelled_status,
++                            answer_transport,
++                            managed_run.cancel_token.clone(),
++                            cancel_tx,
++                            managed_run.worker_ref.clone(),
++                        ))
++                    }
++                    _ => {
++                        return ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.")
++                            .into_response();
+                     }
+-                    Some((
+-                        persist_cancelled_status,
+-                        managed_run.answer_transport.clone(),
+-                        managed_run.cancel_token.clone(),
+-                        managed_run.cancel_tx.take(),
+-                        managed_run.worker_ref.clone(),
+-                    ))
+-                }
+-                _ => {
+-                    return ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.")
+-                        .into_response();
+                 }
+-            },
++            }
+             None => None,
+         }
+     };
+diff --git a/lib/crates/fabro-server/src/server/tests.rs b/lib/crates/fabro-server/src/server/tests.rs
+index 0bc45a3a4..b72abbdc2 100644
+--- a/lib/crates/fabro-server/src/server/tests.rs
++++ b/lib/crates/fabro-server/src/server/tests.rs
+@@ -13621,6 +13621,72 @@ async fn cancel_run_requests_worker_runtime_stop_when_control_unavailable() {
+     assert_eq!(runtime.requested_refs(), vec![worker_ref]);
+ }
+ 
++#[tokio::test]
++async fn cancel_durably_blocked_in_process_run_cancels_pending_interview_without_abort_signal() {
++    let state = test_app_state();
++    let app = crate::test_support::build_test_router(Arc::clone(&state));
++    let run_id = fixtures::RUN_1;
++    create_durable_run_with_events(&state, run_id, &[
++        workflow_event::Event::RunRunning,
++        workflow_event::Event::RunBlocked {
++            blocked_reason: BlockedReason::HumanInputRequired,
++        },
++    ])
++    .await;
++
++    let interviewer = Arc::new(ControlInterviewer::new());
++    let mut question = Question::new("approve?", QuestionType::YesNo);
++    question.id = "q-1".to_string();
++    let ask_interviewer = Arc::clone(&interviewer);
++    let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
++    tokio::task::yield_now().await;
++
++    let (cancel_tx, mut cancel_rx) = oneshot::channel();
++    let cancel_token = CancellationToken::new();
++    let temp_dir = tempfile::tempdir().unwrap();
++    let mut run = managed_run(
++        MINIMAL_DOT.to_string(),
++        RunStatus::Running,
++        Utc::now(),
++        temp_dir.path().join(run_id.to_string()),
++        RunExecutionMode::Start,
++    );
++    run.answer_transport = Some(RunAnswerTransport::InProcess {
++        interviewer,
++        steering_hub: Arc::new(fabro_workflow::SteeringHub::new(Arc::new(
++            fabro_workflow::event::Emitter::new(run_id),
++        ))),
++    });
++    run.cancel_token = Some(cancel_token);
++    run.cancel_tx = Some(cancel_tx);
++    state
++        .runs
++        .lock()
++        .expect("runs lock poisoned")
++        .insert(run_id, run);
++
++    let req = Request::builder()
++        .method("POST")
++        .uri(api(&format!("/runs/{run_id}/cancel")))
++        .body(Body::empty())
++        .unwrap();
++    let response = app.oneshot(req).await.unwrap();
++    assert_status!(response, StatusCode::OK).await;
++
++    let submission = tokio::time::timeout(std::time::Duration::from_millis(100), ask)
++        .await
++        .expect("cancel should resolve the pending in-process interview")
++        .expect("interview task should not panic");
++    assert_eq!(submission.answer.value, AnswerValue::Cancelled);
++    assert!(
++        matches!(
++            cancel_rx.try_recv(),
++            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
++        ),
++        "blocked in-process cancellation should let the workflow unwind instead of aborting it"
++    );
++}
++
+ #[tokio::test]
+ async fn pause_run_rejects_when_control_is_already_pending() {
+     let state = test_app_state();
