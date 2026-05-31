@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fabro_config::{EnvironmentLayer, MergeMap};
-use fabro_types::settings::run::EnvironmentSettings;
+use fabro_types::settings::run::{EnvironmentProvider, EnvironmentSettings};
 use tokio::fs;
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::Mutex;
@@ -14,16 +14,24 @@ use crate::{
     Environment, EnvironmentDraft, EnvironmentId, EnvironmentRevision, EnvironmentStoreError,
 };
 
+/// Environments written to disk on first startup. `local` is intentionally
+/// absent: it is a reserved, in-memory environment (see [`RESERVED_LOCAL_ID`]).
 const SEEDS: &[(&str, &str)] = &[
     ("default", DEFAULT_ENVIRONMENT_TOML),
-    ("local", LOCAL_ENVIRONMENT_TOML),
     ("docker", DOCKER_ENVIRONMENT_TOML),
     ("daytona", DAYTONA_ENVIRONMENT_TOML),
 ];
 
+/// `local` is a reserved environment: it is synthesized in memory only when the
+/// local sandbox provider is enabled, is never persisted to disk, and cannot be
+/// created, replaced, or deleted through the store.
+const RESERVED_LOCAL_ID: &str = "local";
+
 /// Returns the built-in seeded environment catalog as a `MergeMap` of
 /// `EnvironmentLayer`s. Useful for client-side manifest validation where no
-/// live `EnvironmentStore` is available.
+/// live `EnvironmentStore` is available. Includes the reserved `local` entry so
+/// manifests selecting `id = "local"` validate; server-side provider-enablement
+/// policy decides whether such a run may actually execute.
 pub fn seeded_catalog_layer() -> MergeMap<EnvironmentLayer> {
     let mut catalog: HashMap<String, EnvironmentLayer> = HashMap::new();
     for (id, body) in SEEDS {
@@ -31,6 +39,9 @@ pub fn seeded_catalog_layer() -> MergeMap<EnvironmentLayer> {
             toml::from_str(body).expect("built-in environment seed should parse");
         catalog.insert((*id).to_string(), layer);
     }
+    let local: EnvironmentLayer = toml::from_str(LOCAL_ENVIRONMENT_TOML)
+        .expect("built-in local environment seed should parse");
+    catalog.insert(RESERVED_LOCAL_ID.to_string(), local);
     MergeMap::from(catalog)
 }
 
@@ -96,6 +107,18 @@ impl CatalogState {
     }
 }
 
+/// Builds the reserved, in-memory `local` environment. It carries only
+/// `provider = "local"`; image/resources/network/etc. are irrelevant to the
+/// local sandbox and stay at their defaults.
+fn synthetic_local_environment() -> Result<Environment, EnvironmentStoreError> {
+    let id = EnvironmentId::new(RESERVED_LOCAL_ID).expect("reserved local id is valid");
+    let settings = EnvironmentSettings {
+        provider: EnvironmentProvider::Local,
+        ..EnvironmentSettings::default()
+    };
+    Environment::synthetic(id, &settings)
+}
+
 fn build_catalog_layer(
     environments: &HashMap<EnvironmentId, Environment>,
 ) -> MergeMap<EnvironmentLayer> {
@@ -110,10 +133,17 @@ impl EnvironmentStore {
     /// Synchronously seed missing built-in environment files and load all
     /// persisted environments. The synchronous file access runs during server
     /// startup before request handling begins.
-    pub fn load_or_seed(dir: impl Into<PathBuf>) -> Result<Self, EnvironmentStoreError> {
+    pub fn load_or_seed(
+        dir: impl Into<PathBuf>,
+        local_enabled: bool,
+    ) -> Result<Self, EnvironmentStoreError> {
         let dir = dir.into();
         seed_missing_environments(&dir)?;
-        let environments = load_environments(&dir)?;
+        let mut environments = load_environments(&dir)?;
+        if local_enabled {
+            let local = synthetic_local_environment()?;
+            environments.insert(local.id.clone(), local);
+        }
         let request_base_dir = dir.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
         Ok(Self {
             dir,
@@ -147,6 +177,9 @@ impl EnvironmentStore {
         draft: EnvironmentDraft,
     ) -> Result<Environment, EnvironmentStoreError> {
         let EnvironmentDraft { id, settings } = draft;
+        if id.as_str() == RESERVED_LOCAL_ID {
+            return Err(EnvironmentStoreError::Reserved { id });
+        }
         let (environment, bytes) =
             Environment::from_settings(id.clone(), settings, &self.request_base_dir).await?;
         let _mutation = self.mutations.lock().await;
@@ -171,6 +204,9 @@ impl EnvironmentStore {
         expected: &EnvironmentRevision,
         settings: EnvironmentSettings,
     ) -> Result<Environment, EnvironmentStoreError> {
+        if id.as_str() == RESERVED_LOCAL_ID {
+            return Err(EnvironmentStoreError::Reserved { id: id.clone() });
+        }
         let (environment, bytes) =
             Environment::from_settings(id.clone(), settings, &self.request_base_dir).await?;
         let _mutation = self.mutations.lock().await;
@@ -190,6 +226,9 @@ impl EnvironmentStore {
     ) -> Result<(), EnvironmentStoreError> {
         if id.as_str() == "default" {
             return Err(EnvironmentStoreError::Protected { id: id.clone() });
+        }
+        if id.as_str() == RESERVED_LOCAL_ID {
+            return Err(EnvironmentStoreError::Reserved { id: id.clone() });
         }
 
         let _mutation = self.mutations.lock().await;
@@ -277,6 +316,11 @@ fn load_environments(
             .file_type()
             .map_err(|err| EnvironmentStoreError::io(&path, err))?;
         if !file_type.is_file() || !is_toml_file(&path) {
+            continue;
+        }
+        // `local` is reserved and synthesized in memory; never load a stale
+        // `local.toml` left behind by an earlier build that seeded it.
+        if id_from_path(&path).is_ok_and(|id| id.as_str() == RESERVED_LOCAL_ID) {
             continue;
         }
         let environment = load_environment_file(&path)?;
@@ -448,9 +492,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let environment_dir = dir.path().join("environments");
 
-        let store = EnvironmentStore::load_or_seed(&environment_dir).unwrap();
+        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
         let environments = store.list();
 
+        // `local` is present in memory (local provider enabled) but the other
+        // three are the on-disk seeds.
         assert_eq!(
             environments
                 .iter()
@@ -458,9 +504,73 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["daytona", "default", "docker", "local"]
         );
-        for id in ["default", "local", "docker", "daytona"] {
+        for id in ["default", "docker", "daytona"] {
             assert!(environment_dir.join(format!("{id}.toml")).exists());
         }
+        // `local` is reserved and in-memory; it is never written to disk.
+        assert!(!environment_dir.join("local.toml").exists());
+    }
+
+    #[tokio::test]
+    async fn local_present_only_when_enabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let environment_dir = dir.path().join("environments");
+
+        let enabled = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
+        assert!(enabled.get(&EnvironmentId::new("local").unwrap()).is_some());
+
+        let disabled = EnvironmentStore::load_or_seed(&environment_dir, false).unwrap();
+        assert!(
+            disabled
+                .get(&EnvironmentId::new("local").unwrap())
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn on_disk_local_is_ignored_in_favor_of_synthetic() {
+        let dir = tempfile::tempdir().unwrap();
+        let environment_dir = dir.path().join("environments");
+        fs::create_dir_all(&environment_dir).await.unwrap();
+        // A stale `local.toml` left by an earlier build that seeded it.
+        fs::write(
+            environment_dir.join("local.toml"),
+            "provider = \"local\"\n[resources]\ncpu = 99\n",
+        )
+        .await
+        .unwrap();
+
+        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
+        let local = store.get(&EnvironmentId::new("local").unwrap()).unwrap();
+
+        // The synthetic local carries no resources; the stale file was ignored.
+        assert_eq!(local.settings.resources.cpu, None);
+    }
+
+    #[tokio::test]
+    async fn local_mutations_are_reserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let local = EnvironmentId::new("local").unwrap();
+        let revision = store.get(&local).unwrap().revision;
+
+        let create_err = store
+            .create(draft("local", EnvironmentProvider::Local))
+            .await
+            .unwrap_err();
+        assert!(matches!(create_err, EnvironmentStoreError::Reserved { .. }));
+
+        let replace_err = store
+            .replace(&local, &revision, settings(EnvironmentProvider::Local))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            replace_err,
+            EnvironmentStoreError::Reserved { .. }
+        ));
+
+        let delete_err = store.delete(&local, &revision).await.unwrap_err();
+        assert!(matches!(delete_err, EnvironmentStoreError::Reserved { .. }));
     }
 
     #[tokio::test]
@@ -475,7 +585,7 @@ mod tests {
             .await
             .unwrap();
 
-        let store = EnvironmentStore::load_or_seed(&environment_dir).unwrap();
+        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
 
         assert_eq!(
             store
@@ -494,7 +604,7 @@ mod tests {
         std::fs::create_dir_all(&environment_dir).unwrap();
         std::fs::write(environment_dir.join("Bad.toml"), r#"provider = "local""#).unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir).unwrap_err();
+        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::InvalidFilename { .. }));
     }
@@ -506,7 +616,7 @@ mod tests {
         std::fs::create_dir_all(&environment_dir).unwrap();
         std::fs::write(environment_dir.join("bad.toml"), r#"provider = "bogus""#).unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir).unwrap_err();
+        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
         assert!(err.to_string().contains("unknown environment provider"));
@@ -528,7 +638,7 @@ mode = "cidr_allow_list"
         )
         .unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir).unwrap_err();
+        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
         assert!(
@@ -553,7 +663,7 @@ path = "Dockerfile"
         )
         .unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir).unwrap_err();
+        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
         assert!(err.to_string().contains("Dockerfile"));
@@ -562,10 +672,10 @@ path = "Dockerfile"
     #[tokio::test]
     async fn create_conflict_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
 
         let err = store
-            .create(draft("local", EnvironmentProvider::Local))
+            .create(draft("docker", EnvironmentProvider::Docker))
             .await
             .unwrap_err();
 
@@ -575,7 +685,7 @@ path = "Dockerfile"
     #[tokio::test]
     async fn create_invalid_settings_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
         let mut settings = settings(EnvironmentProvider::Local);
         settings.network.mode = EnvironmentNetworkMode::Block;
 
@@ -597,8 +707,8 @@ path = "Dockerfile"
     #[tokio::test]
     async fn replace_stale_revision_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
-        let current = store.get(&EnvironmentId::new("local").unwrap()).unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let current = store.get(&EnvironmentId::new("docker").unwrap()).unwrap();
         let stale = EnvironmentRevision::from_bytes(b"stale");
 
         let err = store
@@ -612,7 +722,7 @@ path = "Dockerfile"
     #[tokio::test]
     async fn default_delete_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
         let default = store.get(&EnvironmentId::new("default").unwrap()).unwrap();
 
         let err = store
@@ -627,7 +737,7 @@ path = "Dockerfile"
     async fn delete_success_removes_file_and_memory_entry() {
         let dir = tempfile::tempdir().unwrap();
         let environment_dir = dir.path().join("environments");
-        let store = EnvironmentStore::load_or_seed(&environment_dir).unwrap();
+        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
         let created = store
             .create(draft("tmp", EnvironmentProvider::Local))
             .await
@@ -642,7 +752,7 @@ path = "Dockerfile"
     #[tokio::test]
     async fn canonical_revision_changes_when_persisted_bytes_change() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
         let created = store
             .create(draft("rev", EnvironmentProvider::Local))
             .await
@@ -667,7 +777,7 @@ path = "Dockerfile"
         fs::write(dir.path().join("Dockerfile"), "FROM alpine\n")
             .await
             .unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments")).unwrap();
+        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
         let mut settings = settings(EnvironmentProvider::Docker);
         settings.image.dockerfile = Some(DockerfileSource::Path {
             path: "Dockerfile".to_string(),

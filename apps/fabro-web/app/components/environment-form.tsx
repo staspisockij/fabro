@@ -250,11 +250,13 @@ export function EnvironmentFormFields({
             onChange={(e) => patch({ provider: parseProvider(e.target.value) })}
             className={INPUT_CLASS}
           >
-            {Object.values(EnvironmentProvider).map((provider) => (
-              <option key={provider} value={provider}>
-                {provider}
-              </option>
-            ))}
+            {Object.values(EnvironmentProvider)
+              .filter((provider) => provider !== EnvironmentProvider.LOCAL)
+              .map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
           </select>
         </Row>
       </Panel>

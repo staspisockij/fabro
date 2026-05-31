@@ -408,6 +408,71 @@ async fn duplicate_environment_create_returns_conflict() {
 }
 
 #[tokio::test]
+async fn reserved_local_environment_cannot_be_created_or_modified() {
+    let (app, _temp_dir, _environment_dir) = environment_app();
+
+    // `local` is reserved: creating it is rejected with a conflict.
+    let created = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/environments",
+            &environment_body("local", "local"),
+        ))
+        .await
+        .expect("reserved create should respond");
+    response_status(
+        created,
+        StatusCode::CONFLICT,
+        "POST /api/v1/environments local",
+    )
+    .await;
+
+    // It is synthesized in memory (local provider enabled) and readable.
+    let local = app
+        .clone()
+        .oneshot(empty_request(Method::GET, "/environments/local"))
+        .await
+        .expect("get local should respond");
+    let local = response_json(local, StatusCode::OK, "GET /api/v1/environments/local").await;
+    let revision = revision_from(&local);
+
+    // Replace and delete are rejected even with a valid If-Match.
+    let replaced = app
+        .clone()
+        .oneshot(request_with_if_match(
+            Method::PUT,
+            "/environments/local",
+            &format!("\"{revision}\""),
+            Some(environment_settings("local")),
+        ))
+        .await
+        .expect("reserved replace should respond");
+    response_status(
+        replaced,
+        StatusCode::CONFLICT,
+        "PUT /api/v1/environments/local",
+    )
+    .await;
+
+    let deleted = app
+        .oneshot(request_with_if_match(
+            Method::DELETE,
+            "/environments/local",
+            &format!("\"{revision}\""),
+            None,
+        ))
+        .await
+        .expect("reserved delete should respond");
+    response_status(
+        deleted,
+        StatusCode::CONFLICT,
+        "DELETE /api/v1/environments/local",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn invalid_environment_id_and_if_match_return_bad_request() {
     let (app, _temp_dir, _environment_dir) = environment_app();
 

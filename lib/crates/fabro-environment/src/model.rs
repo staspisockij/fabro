@@ -65,6 +65,25 @@ impl Environment {
         ))
     }
 
+    /// Builds an in-memory environment from settings without touching the
+    /// filesystem. Unlike [`from_settings`], this never inlines Dockerfile
+    /// paths, so it stays synchronous — suitable for reserved environments
+    /// (e.g. `local`) that carry no Dockerfile and are never persisted.
+    pub(crate) fn synthetic(
+        id: EnvironmentId,
+        settings: &EnvironmentSettings,
+    ) -> Result<Self, EnvironmentStoreError> {
+        let persisted = environment_settings_to_layer(settings);
+        let settings = resolve_environment(&persisted)?;
+        let bytes = canonical_bytes(&persisted).into_bytes();
+        let revision = EnvironmentRevision::from_bytes(&bytes);
+        Ok(Self {
+            id,
+            revision,
+            settings,
+        })
+    }
+
     pub(crate) fn to_layer(&self) -> EnvironmentLayer {
         environment_settings_to_layer(&self.settings)
     }

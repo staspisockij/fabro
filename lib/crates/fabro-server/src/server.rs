@@ -2319,8 +2319,15 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             .context("load automations")?,
     );
     let environment_dir = environment_dir_for_active_config(&active_config_path);
+    let local_provider_enabled = resolved_settings
+        .server_settings
+        .server
+        .sandbox
+        .providers
+        .local
+        .enabled;
     let environment_store = Arc::new(
-        EnvironmentStore::load_or_seed(environment_dir)
+        EnvironmentStore::load_or_seed(environment_dir, local_provider_enabled)
             .map_err(anyhow::Error::new)
             .context("load environments")?,
     );

@@ -244,6 +244,10 @@ impl From<EnvironmentStoreError> for ApiError {
                 StatusCode::CONFLICT,
                 format!("environment is protected and cannot be deleted: {id}"),
             ),
+            EnvironmentStoreError::Reserved { id } => Self::new(
+                StatusCode::CONFLICT,
+                format!("environment is reserved and cannot be modified: {id}"),
+            ),
             EnvironmentStoreError::Validation { source } => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, source.to_string())
             }

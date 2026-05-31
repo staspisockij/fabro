@@ -23,6 +23,10 @@ import { useToast } from "../components/toast";
 // in the UI instead of letting the delete fail with a 409.
 const PROTECTED_ID = "default";
 
+// `local` is a reserved, in-memory environment (present only when the local
+// sandbox provider is enabled). It cannot be edited or deleted.
+const RESERVED_ID = "local";
+
 const MENU_ITEM_CLASS =
   "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-fg-3 transition-colors data-focus:bg-overlay data-focus:text-fg data-focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -153,6 +157,11 @@ function EnvironmentRow({
             {environment.id}
           </span>
           <Badge>{environment.provider}</Badge>
+          {environment.id === RESERVED_ID ? (
+            <StatusTag>reserved</StatusTag>
+          ) : environment.id === PROTECTED_ID ? (
+            <StatusTag>protected</StatusTag>
+          ) : null}
         </div>
         <div className="mt-0.5 truncate text-xs/5 text-fg-3">
           {resourcesSummary(environment)} · network {environment.network.mode}
@@ -184,6 +193,14 @@ function resourcesSummary(environment: Environment): string {
   return parts.length > 0 ? parts.join(" · ") : "Default resources";
 }
 
+function StatusTag({ children }: { children: string }) {
+  return (
+    <span className="rounded-sm bg-overlay px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-muted">
+      {children}
+    </span>
+  );
+}
+
 function RowMenu({
   environment,
   disabled,
@@ -193,6 +210,7 @@ function RowMenu({
   disabled: boolean;
   onDelete: () => void;
 }) {
+  const reserved = environment.id === RESERVED_ID;
   const protectedFromDelete = environment.id === PROTECTED_ID;
   return (
     <Menu as="div" className="relative inline-block">
@@ -211,23 +229,40 @@ function RowMenu({
         className="z-30 w-36 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
       >
         <MenuItem>
-          <Link
-            to={`/settings/environments/${encodeURIComponent(environment.id)}/edit`}
-            className={MENU_ITEM_CLASS}
-          >
-            Edit
-          </Link>
+          {reserved ? (
+            <button
+              type="button"
+              disabled
+              title="The local environment is reserved and cannot be edited"
+              className={MENU_ITEM_CLASS}
+            >
+              Edit
+            </button>
+          ) : (
+            <Link
+              to={`/settings/environments/${encodeURIComponent(environment.id)}/edit`}
+              className={MENU_ITEM_CLASS}
+            >
+              Edit
+            </Link>
+          )}
         </MenuItem>
         <hr className="my-1 h-px border-0 bg-line" />
         <MenuItem>
           <button
             type="button"
             onClick={onDelete}
-            disabled={disabled || protectedFromDelete}
-            title={protectedFromDelete ? "The default environment is protected" : undefined}
+            disabled={disabled || protectedFromDelete || reserved}
+            title={
+              reserved
+                ? "The local environment is reserved"
+                : protectedFromDelete
+                  ? "The default environment is protected"
+                  : undefined
+            }
             className={MENU_ITEM_DANGER_CLASS}
           >
-            {protectedFromDelete ? "Protected" : "Delete"}
+            {reserved ? "Reserved" : protectedFromDelete ? "Protected" : "Delete"}
           </button>
         </MenuItem>
       </MenuItems>
