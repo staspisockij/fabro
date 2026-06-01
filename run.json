@@ -507,7 +507,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-06-01T19:59:41.668417Z",
-  "last_event_at": "2026-06-01T20:07:18.483799Z",
+  "last_event_at": "2026-06-01T20:07:24.032650Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -1066,9 +1066,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 219,
       "checkpoint": {
-        "timestamp": "2026-06-01T20:07:18.617950Z",
+        "timestamp": "2026-06-01T20:07:24.027655Z",
         "current_node": "simplify_gpt",
         "completed_nodes": [
           "start",
@@ -1081,6 +1081,181 @@
         ],
         "node_retries": {},
         "context_values": {
+          "last_stage": "simplify_opus",
+          "internal.node_visit_count": 1,
+          "thread.start.current_node": "toolchain",
+          "thread.implement.current_node": "simplify_opus",
+          "thread.simplify_opus.current_node": "simplify_gpt",
+          "internal.thread_id": "simplify_opus",
+          "failure_class": "deterministic",
+          "outcome": "failed",
+          "internal.fidelity": "compact",
+          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "last_response": "There are no code changes to review. The diff between `HEAD` and the merge base with origin (`59a4afa18`) is empty — all four pipeline commits on this branch (`toolchain`, `preflight_compile`, `pref",
+          "internal.retry_count.implement": 0,
+          "failure_signature": "simplify_gpt|deterministic|api_deterministic|openai|authentication",
+          "internal.retry_count.toolchain": 0,
+          "thread.preflight_compile.current_node": "preflight_lint",
+          "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
+          "internal.retry_count.simplify_gpt": 0,
+          "graph.goal": "# Remove Automation Master Enabled Gate Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Remove the top-level automation `enabled` field so trigger-level `enabled` is the only activation control.\n\n**Architecture:** Automations keep their existing file-backed TOML store and REST API, but the top-level master gate disappears from the Rust domain model, persisted TOML, OpenAPI schemas, generated clients, and web UI. API/manual run creation checks only for an enabled `api` trigger. No migration or legacy parser path is added because automations are brand new; TOML that still contains top-level `enabled` is obsolete input.\n\n**Tech Stack:** Rust, serde/TOML, Axum, OpenAPI/progenitor, TypeScript Axios client generation, React 19, SWR, Tailwind CSS.\n\n---\n\n## File Structure\n\n- Modify `lib/crates/fabro-automation/src/model.rs` for the core type and TOML shape.\n- Modify `lib/crates/fabro-automation/src/store.rs` for unit fixtures that create automation drafts/replacements.\n- Modify `lib/crates/fabro-server/src/server/handler/automations.rs` for API-trigger conflict wording.\n- Modify `lib/crates/fabro-server/tests/it/api/automations.rs` for HTTP fixtures and behavior tests.\n- Modify `docs/public/api-reference/fabro-api.yaml` and regenerate `lib/packages/fabro-api-client/src/**`.\n- Modify `lib/crates/fabro-api/tests/automation_round_trip.rs` for Rust/OpenAPI type parity.\n- Modify `apps/fabro-web/app/components/automation-form.tsx`, `apps/fabro-web/app/routes/automations-new.tsx`, `apps/fabro-web/app/routes/automations-edit.tsx`, `apps/fabro-web/app/routes/automation-detail.tsx`, and `apps/fabro-web/app/routes/automations.tsx` for UI state and trigger-derived run availability.\n\n## Task 1: Remove The Domain Master Gate\n\n**Files:**\n- Modify: `lib/crates/fabro-automation/src/model.rs`\n- Modify: `lib/crates/fabro-automation/src/store.rs`\n\n- [ ] Remove `pub enabled: bool` from `Automation`, `AutomationDraft`, `AutomationReplace`, and `PersistedAutomation`.\n- [ ] Remove `enabled` from every conversion between `AutomationDraft`, `AutomationReplace`, `PersistedAutomation`, and `Automation`.\n- [ ] Update `Automation::enabled_api_trigger()` to return an enabled API trigger without checking a top-level automation flag:\n\n```rust\n/// Returns the enabled API trigger if the automation has one.\n/// Returns `None` when the automation has no enabled API trigger.\n#[must_use]\npub fn enabled_api_trigger(&self) -> Option<&ApiTrigger> {\n    self.triggers.iter().find_map(|trigger| match trigger {\n        AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),\n        _ => None,\n    })\n}\n```\n\n- [ ] Remove the now-unused `default_true()` helper if no other code in the file still uses it.\n- [ ] Update `persisted_toml_applies_defaults_and_canonicalizes_without_id_or_revision` so the fixture has no top-level `enabled = true`, does not assert `automation.enabled`, and asserts the canonical TOML has no top-level `enabled` line:\n\n```rust\nassert!(!top_level_lines(&toml).any(|line| line.starts_with(\"enabled = \")));\n```\n\n- [ ] Add a focused no-compatibility test in `lib/crates/fabro-automation/src/model.rs`:\n\n```rust\n#[test]\nfn persisted_toml_rejects_legacy_top_level_enabled() {\n    let bytes = br#\"\nname = \"Legacy\"\nenabled = false\n\n[target]\nrepository = \"fabro-sh/fabro\"\nref = \"main\"\nworkflow = \"release\"\n\n[[triggers]]\ntype = \"api\"\nid = \"manual\"\nenabled = true\n\"#;\n\n    let result = Automation::from_toml_bytes(AutomationId::new(\"legacy\").unwrap(), bytes);\n\n    assert!(result.is_err());\n}\n```\n\n- [ ] Update `lib/crates/fabro-automation/src/store.rs` test helpers so `draft()` and `replacement()` no longer set top-level `enabled`.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-automation\n```\n\nExpected: all `fabro-automation` tests pass.\n\n## Task 2: Update Server Behavior And Tests\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server/handler/automations.rs`\n- Modify: `lib/crates/fabro-server/tests/it/api/automations.rs`\n\n- [ ] Change the `create_automation_run` conflict detail from:\n\n```rust\n\"automation is disabled or has no enabled API trigger\"\n```\n\nto:\n\n```rust\n\"automation has no enabled API trigger\"\n```\n\nKeep the existing code `\"automation_api_trigger_disabled\"` for compatibility with current clients and tests.\n\n- [ ] Remove top-level `\"enabled\": true` from `automation_body()`.\n- [ ] Remove top-level `\"enabled\": false` from `replacement_body()`.\n- [ ] Delete `disabled_automation_run_endpoint_returns_conflict_code`; the master gate no longer exists.\n- [ ] Keep `disabled_api_trigger_run_endpoint_returns_conflict_code` and `missing_api_trigger_run_endpoint_returns_conflict_code` as the authoritative inactive-run tests.\n- [ ] Update any test that mutates `body[\"enabled\"]` or expects top-level enabled in automation JSON/TOML.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-server automations\n```\n\nExpected: automation integration tests pass.\n\n## Task 3: Update OpenAPI And Generated API Types\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Modify: `lib/crates/fabro-api/tests/automation_round_trip.rs`\n- Regenerate: `lib/packages/fabro-api-client/src/**`\n\n- [ ] In the `Automation` schema, remove top-level `enabled` from `required` and `properties`.\n- [ ] In `CreateAutomationRequest`, remove top-level `enabled` from `properties`.\n- [ ] In `ReplaceAutomationRequest`, remove top-level `enabled` from `required` and `properties`.\n- [ ] Keep `enabled` on `AutomationApiTrigger` and `AutomationScheduleTrigger`.\n- [ ] Update the `POST /api/v1/automations/{id}/runs` `409` description from:\n\n```yaml\ndescription: Automation is disabled or has no enabled API trigger\n```\n\nto:\n\n```yaml\ndescription: Automation has no enabled API trigger\n```\n\n- [ ] Update `lib/crates/fabro-api/tests/automation_round_trip.rs` so the `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest` JSON fixtures no longer include top-level `\"enabled\"`.\n- [ ] Run:\n\n```bash\ncargo build -p fabro-api\n```\n\nExpected: progenitor type generation succeeds.\n\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-api automation_round_trip\n```\n\nExpected: automation type identity and JSON parity tests pass.\n\n- [ ] Regenerate the TypeScript client:\n\n```bash\ncd lib/packages/fabro-api-client && bun run generate\n```\n\nExpected: generated model files remove top-level `enabled` from `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest`.\n\n## Task 4: Remove The Web UI Master Toggle\n\n**Files:**\n- Modify: `apps/fabro-web/app/components/automation-form.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-new.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-edit.tsx`\n- Modify: `apps/fabro-web/app/routes/automation-detail.tsx`\n- Modify: `apps/fabro-web/app/routes/automations.tsx`\n\n- [ ] Remove `enabled` from `AutomationFormValues` and `EMPTY_AUTOMATION_FORM`.\n- [ ] Remove `enabled: automation.enabled` from `automationToFormValues`.\n- [ ] Delete the `Row title=\"Enabled\"` block from `AutomationFormFields`.\n- [ ] Remove `enabled: values.enabled` from the create payload in `automations-new.tsx`.\n- [ ] Remove `enabled: values.enabled` from the replace payload in `automations-edit.tsx`.\n- [ ] In `isFormValid`, remove the requirement that at least one trigger is enabled. The final return should only require non-empty ID, name, repository, ref, and workflow:\n\n```ts\nreturn (\n  values.id.trim() !== \"\" &&\n  values.name.trim() !== \"\" &&\n  values.repository.trim() !== \"\" &&\n  values.ref.trim() !== \"\" &&\n  values.workflow.trim() !== \"\"\n);\n```\n\n- [ ] In `automation-detail.tsx`, change run availability to:\n\n```ts\nconst canRun = apiTrigger?.enabled === true;\n```\n\n- [ ] In `automation-detail.tsx`, remove `StatusChip`, remove its use, and simplify the Run button `title` so only a missing/disabled API trigger explains the disabled state:\n\n```ts\ntitle={!apiTrigger?.enabled ? \"Enable the API trigger to run it\" : undefined}\n```\n\n- [ ] In `automations.tsx`, extend `AutomationRow` with `apiEnabled: boolean`, set it from the enabled API trigger in `mapAutomations`, and pass `disabled={deleting || !automation.apiEnabled || (runningId !== null && runningId !== automation.id)}` to the run button path.\n- [ ] In `AutomationCard`, make the run button title reflect trigger-disabled state:\n\n```tsx\ntitle={\n  running\n    ? \"Starting run...\"\n    : automation.apiEnabled\n      ? \"Run automation\"\n      : \"Enable the API trigger to run it\"\n}\n```\n\nUse exactly this title text for the disabled/run states; do not change visible button copy.\n\n- [ ] Run:\n\n```bash\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: TypeScript passes with no `automation.enabled` references.\n\n## Task 5: Final Verification\n\n**Files:**\n- No additional source edits expected.\n\n- [ ] Run the focused backend checks:\n\n```bash\ncargo nextest run -p fabro-automation\ncargo nextest run -p fabro-api automation_round_trip\ncargo nextest run -p fabro-server automations\n```\n\nExpected: all focused Rust checks pass.\n\n- [ ] Run the focused frontend checks:\n\n```bash\ncd lib/packages/fabro-api-client && bun run typecheck\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: generated client and web app typecheck.\n\n- [ ] Search for leftover master-gate references:\n\n```bash\nrg -n \"automation\\\\.enabled|enabled_api_trigger\\\\(\\\\).*automation|Automation is disabled|automation is disabled|\\\\\\\"enabled\\\\\\\": true\" \\\n  lib/crates/fabro-automation \\\n  lib/crates/fabro-server/tests/it/api/automations.rs \\\n  lib/crates/fabro-server/src/server/handler/automations.rs \\\n  lib/crates/fabro-api/tests/automation_round_trip.rs \\\n  apps/fabro-web/app/components/automation-form.tsx \\\n  apps/fabro-web/app/routes/automations-new.tsx \\\n  apps/fabro-web/app/routes/automations-edit.tsx \\\n  apps/fabro-web/app/routes/automation-detail.tsx \\\n  apps/fabro-web/app/routes/automations.tsx\n```\n\nExpected: no hits for the removed top-level automation enabled gate. Hits for trigger-level `enabled` are acceptable when they are clearly on `AutomationTrigger`, `ApiTrigger`, or `ScheduleTrigger`.\n\n- [ ] Optional formatting check:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\nExpected: Rust formatting passes. If it fails on touched Rust files, run `cargo +nightly-2026-04-14 fmt --all` and re-run the focused Rust checks.\n\n## Explicit Assumptions\n\n- No migration or compatibility parser is added for top-level automation `enabled`.\n- Existing automation TOML files that still contain top-level `enabled` are obsolete and may fail startup until manually edited.\n- Trigger-level `enabled` remains public API and persisted TOML.\n- API/manual run creation remains controlled by the enabled `api` trigger only.\n- Schedule execution, cron semantics, and schedule-trigger preservation are outside this cleanup.\n",
+          "internal.run_id": "01KT2CA2WX894YD2NF7CXGH1Z7",
+          "graph.rankdir": "LR",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "internal.retry_count.preflight_compile": 0,
+          "current_node": "simplify_gpt",
+          "thread.preflight_lint.current_node": "implement",
+          "internal.retry_count.start": 0,
+          "internal.retry_count.preflight_lint": 0,
+          "internal.retry_count.simplify_opus": 0,
+          "response.simplify_opus": "There are no code changes to review. The diff between `HEAD` and the merge base with origin (`59a4afa18`) is empty — all four pipeline commits on this branch (`toolchain`, `preflight_compile`, `preflight_lint`, `implement`) are empty marker commits, and the working tree is clean.\n\nThe plan's goal was already fully implemented upstream in commit `fe1d33c04` (\"Remove top-level automation `enabled` master gate (#456)\"), which is part of the merge base. Quick verification:\n\n- `lib/crates/fabro-automation/src/model.rs` — only trigger-level `enabled` remains on `ApiTrigger`/`ScheduleTrigger`; `Automation::enabled_api_trigger()` matches the plan's implementation; the legacy-TOML rejection test (`persisted_toml_rejects_legacy_top_level_enabled`) is in place.\n- No top-level `enabled` field exists on `Automation`/`AutomationDraft`/`AutomationReplace`/`PersistedAutomation`.\n\nThe \"implement\" stage's failure signature (`openai|authentication`) suggests an LLM/API auth failure rather than a code problem — there was simply nothing left to do because the change had already landed on `main`.\n\n**Nothing to clean up.** No code review agents were launched because there is no new code to review. If you want me to verify by running the focused tests anyway (Task 5), let me know.",
+          "thread.toolchain.current_node": "preflight_compile"
+        },
+        "node_outcomes": {
+          "simplify_gpt": {
+            "status": "failed",
+            "failure": {
+              "message": "LLM error: Authentication error for openai: Your authentication token has been invalidated. Please try signing in again.",
+              "category": "deterministic",
+              "signature": "api_deterministic|openai|authentication"
+            },
+            "usage": null
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "simplify_opus": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "simplify_opus",
+              "last_response": "There are no code changes to review. The diff between `HEAD` and the merge base with origin (`59a4afa18`) is empty — all four pipeline commits on this branch (`toolchain`, `preflight_compile`, `pref",
+              "response.simplify_opus": "There are no code changes to review. The diff between `HEAD` and the merge base with origin (`59a4afa18`) is empty — all four pipeline commits on this branch (`toolchain`, `preflight_compile`, `preflight_lint`, `implement`) are empty marker commits, and the working tree is clean.\n\nThe plan's goal was already fully implemented upstream in commit `fe1d33c04` (\"Remove top-level automation `enabled` master gate (#456)\"), which is part of the merge base. Quick verification:\n\n- `lib/crates/fabro-automation/src/model.rs` — only trigger-level `enabled` remains on `ApiTrigger`/`ScheduleTrigger`; `Automation::enabled_api_trigger()` matches the plan's implementation; the legacy-TOML rejection test (`persisted_toml_rejects_legacy_top_level_enabled`) is in place.\n- No top-level `enabled` field exists on `Automation`/`AutomationDraft`/`AutomationReplace`/`PersistedAutomation`.\n\nThe \"implement\" stage's failure signature (`openai|authentication`) suggests an LLM/API auth failure rather than a code problem — there was simply nothing left to do because the change had already landed on `main`.\n\n**Nothing to clean up.** No code review agents were launched because there is no new code to review. If you want me to verify by running the focused tests anyway (Task 5), let me know."
+            },
+            "notes": "Stage completed: simplify_opus",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "anthropic",
+                    "model_id": "claude-opus-4-7"
+                  },
+                  "tokens": {
+                    "input_tokens": 13726,
+                    "output_tokens": 3051,
+                    "reasoning_tokens": 0,
+                    "cache_read_tokens": 253566,
+                    "cache_write_tokens": 45934
+                  }
+                },
+                "facts": {
+                  "algorithm": "anthropic",
+                  "cache_write_5m_tokens": 45934,
+                  "cache_write_1h_tokens": 0
+                }
+              },
+              "total_usd_micros": 558775
+            },
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 65919,
+              "tool_time_ms": 4445,
+              "active_time_ms": 70364
+            }
+          },
+          "preflight_compile": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo check -q --workspace 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 140590,
+              "active_time_ms": 140590
+            }
+          },
+          "toolchain": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/fc14b2ba2d770e5cd3169df7a29525c962adfc4cfa3097b9098c63ebd61a748c"
+            },
+            "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 1465,
+              "active_time_ms": 1465
+            }
+          },
+          "implement": {
+            "status": "failed",
+            "failure": {
+              "message": "LLM error: Authentication error for openai: Encountered invalidated oauth token for user, failing request",
+              "category": "deterministic",
+              "signature": "api_deterministic|openai|authentication"
+            },
+            "usage": null
+          },
+          "preflight_lint": {
+            "status": "succeeded",
+            "context_updates": {
+              "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+            },
+            "notes": "Script completed: cargo +nightly-2026-04-14 clippy -q --workspace --all-targets -- -D warnings 2>&1",
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 154914,
+              "active_time_ms": 154914
+            }
+          }
+        },
+        "next_node_id": "verify",
+        "git_commit_sha": "1b1fb53bbef473b4a1f613a02d23a1bc98b3fcb0",
+        "loop_failure_signatures": {
+          "simplify_gpt|deterministic|api_deterministic|openai|authentication": 1,
+          "implement|deterministic|api_deterministic|openai|authentication": 1
+        },
+        "node_visits": {
+          "start": 1,
+          "simplify_gpt": 1,
+          "preflight_compile": 1,
+          "simplify_opus": 1,
+          "toolchain": 1,
+          "preflight_lint": 1,
+          "implement": 1
+        }
+      },
+      "diff": {
+        "summary": {
+          "files_changed": 0,
+          "additions": 0,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-06-01T20:07:26.150958Z",
+        "current_node": "verify",
+        "completed_nodes": [
+          "start",
+          "toolchain",
+          "preflight_compile",
+          "preflight_lint",
+          "implement",
+          "simplify_opus",
+          "simplify_gpt",
+          "verify"
+        ],
+        "node_retries": {},
+        "context_values": {
           "internal.retry_count.start": 0,
           "internal.run_id": "01KT2CA2WX894YD2NF7CXGH1Z7",
           "internal.work_dir": "/home/daytona/workspace/fabro",
@@ -1090,21 +1265,23 @@
           "last_stage": "simplify_opus",
           "thread.toolchain.current_node": "preflight_compile",
           "last_response": "There are no code changes to review. The diff between `HEAD` and the merge base with origin (`59a4afa18`) is empty — all four pipeline commits on this branch (`toolchain`, `preflight_compile`, `pref",
+          "thread.simplify_gpt.current_node": "verify",
           "thread.preflight_compile.current_node": "preflight_lint",
           "internal.retry_count.implement": 0,
           "response.simplify_opus": "There are no code changes to review. The diff between `HEAD` and the merge base with origin (`59a4afa18`) is empty — all four pipeline commits on this branch (`toolchain`, `preflight_compile`, `preflight_lint`, `implement`) are empty marker commits, and the working tree is clean.\n\nThe plan's goal was already fully implemented upstream in commit `fe1d33c04` (\"Remove top-level automation `enabled` master gate (#456)\"), which is part of the merge base. Quick verification:\n\n- `lib/crates/fabro-automation/src/model.rs` — only trigger-level `enabled` remains on `ApiTrigger`/`ScheduleTrigger`; `Automation::enabled_api_trigger()` matches the plan's implementation; the legacy-TOML rejection test (`persisted_toml_rejects_legacy_top_level_enabled`) is in place.\n- No top-level `enabled` field exists on `Automation`/`AutomationDraft`/`AutomationReplace`/`PersistedAutomation`.\n\nThe \"implement\" stage's failure signature (`openai|authentication`) suggests an LLM/API auth failure rather than a code problem — there was simply nothing left to do because the change had already landed on `main`.\n\n**Nothing to clean up.** No code review agents were launched because there is no new code to review. If you want me to verify by running the focused tests anyway (Task 5), let me know.",
           "internal.retry_count.toolchain": 0,
-          "current_node": "simplify_gpt",
-          "command.output": "blob://sha256/12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
-          "internal.thread_id": "simplify_opus",
+          "current_node": "verify",
+          "command.output": "blob://sha256/892028c98394b32e6bfcb04ebd4e24b953ae664fd34c494130103eea91b73118",
+          "internal.thread_id": "simplify_gpt",
           "graph.goal": "# Remove Automation Master Enabled Gate Implementation Plan\n\n> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.\n\n**Goal:** Remove the top-level automation `enabled` field so trigger-level `enabled` is the only activation control.\n\n**Architecture:** Automations keep their existing file-backed TOML store and REST API, but the top-level master gate disappears from the Rust domain model, persisted TOML, OpenAPI schemas, generated clients, and web UI. API/manual run creation checks only for an enabled `api` trigger. No migration or legacy parser path is added because automations are brand new; TOML that still contains top-level `enabled` is obsolete input.\n\n**Tech Stack:** Rust, serde/TOML, Axum, OpenAPI/progenitor, TypeScript Axios client generation, React 19, SWR, Tailwind CSS.\n\n---\n\n## File Structure\n\n- Modify `lib/crates/fabro-automation/src/model.rs` for the core type and TOML shape.\n- Modify `lib/crates/fabro-automation/src/store.rs` for unit fixtures that create automation drafts/replacements.\n- Modify `lib/crates/fabro-server/src/server/handler/automations.rs` for API-trigger conflict wording.\n- Modify `lib/crates/fabro-server/tests/it/api/automations.rs` for HTTP fixtures and behavior tests.\n- Modify `docs/public/api-reference/fabro-api.yaml` and regenerate `lib/packages/fabro-api-client/src/**`.\n- Modify `lib/crates/fabro-api/tests/automation_round_trip.rs` for Rust/OpenAPI type parity.\n- Modify `apps/fabro-web/app/components/automation-form.tsx`, `apps/fabro-web/app/routes/automations-new.tsx`, `apps/fabro-web/app/routes/automations-edit.tsx`, `apps/fabro-web/app/routes/automation-detail.tsx`, and `apps/fabro-web/app/routes/automations.tsx` for UI state and trigger-derived run availability.\n\n## Task 1: Remove The Domain Master Gate\n\n**Files:**\n- Modify: `lib/crates/fabro-automation/src/model.rs`\n- Modify: `lib/crates/fabro-automation/src/store.rs`\n\n- [ ] Remove `pub enabled: bool` from `Automation`, `AutomationDraft`, `AutomationReplace`, and `PersistedAutomation`.\n- [ ] Remove `enabled` from every conversion between `AutomationDraft`, `AutomationReplace`, `PersistedAutomation`, and `Automation`.\n- [ ] Update `Automation::enabled_api_trigger()` to return an enabled API trigger without checking a top-level automation flag:\n\n```rust\n/// Returns the enabled API trigger if the automation has one.\n/// Returns `None` when the automation has no enabled API trigger.\n#[must_use]\npub fn enabled_api_trigger(&self) -> Option<&ApiTrigger> {\n    self.triggers.iter().find_map(|trigger| match trigger {\n        AutomationTrigger::Api(trigger) if trigger.enabled => Some(trigger),\n        _ => None,\n    })\n}\n```\n\n- [ ] Remove the now-unused `default_true()` helper if no other code in the file still uses it.\n- [ ] Update `persisted_toml_applies_defaults_and_canonicalizes_without_id_or_revision` so the fixture has no top-level `enabled = true`, does not assert `automation.enabled`, and asserts the canonical TOML has no top-level `enabled` line:\n\n```rust\nassert!(!top_level_lines(&toml).any(|line| line.starts_with(\"enabled = \")));\n```\n\n- [ ] Add a focused no-compatibility test in `lib/crates/fabro-automation/src/model.rs`:\n\n```rust\n#[test]\nfn persisted_toml_rejects_legacy_top_level_enabled() {\n    let bytes = br#\"\nname = \"Legacy\"\nenabled = false\n\n[target]\nrepository = \"fabro-sh/fabro\"\nref = \"main\"\nworkflow = \"release\"\n\n[[triggers]]\ntype = \"api\"\nid = \"manual\"\nenabled = true\n\"#;\n\n    let result = Automation::from_toml_bytes(AutomationId::new(\"legacy\").unwrap(), bytes);\n\n    assert!(result.is_err());\n}\n```\n\n- [ ] Update `lib/crates/fabro-automation/src/store.rs` test helpers so `draft()` and `replacement()` no longer set top-level `enabled`.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-automation\n```\n\nExpected: all `fabro-automation` tests pass.\n\n## Task 2: Update Server Behavior And Tests\n\n**Files:**\n- Modify: `lib/crates/fabro-server/src/server/handler/automations.rs`\n- Modify: `lib/crates/fabro-server/tests/it/api/automations.rs`\n\n- [ ] Change the `create_automation_run` conflict detail from:\n\n```rust\n\"automation is disabled or has no enabled API trigger\"\n```\n\nto:\n\n```rust\n\"automation has no enabled API trigger\"\n```\n\nKeep the existing code `\"automation_api_trigger_disabled\"` for compatibility with current clients and tests.\n\n- [ ] Remove top-level `\"enabled\": true` from `automation_body()`.\n- [ ] Remove top-level `\"enabled\": false` from `replacement_body()`.\n- [ ] Delete `disabled_automation_run_endpoint_returns_conflict_code`; the master gate no longer exists.\n- [ ] Keep `disabled_api_trigger_run_endpoint_returns_conflict_code` and `missing_api_trigger_run_endpoint_returns_conflict_code` as the authoritative inactive-run tests.\n- [ ] Update any test that mutates `body[\"enabled\"]` or expects top-level enabled in automation JSON/TOML.\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-server automations\n```\n\nExpected: automation integration tests pass.\n\n## Task 3: Update OpenAPI And Generated API Types\n\n**Files:**\n- Modify: `docs/public/api-reference/fabro-api.yaml`\n- Modify: `lib/crates/fabro-api/tests/automation_round_trip.rs`\n- Regenerate: `lib/packages/fabro-api-client/src/**`\n\n- [ ] In the `Automation` schema, remove top-level `enabled` from `required` and `properties`.\n- [ ] In `CreateAutomationRequest`, remove top-level `enabled` from `properties`.\n- [ ] In `ReplaceAutomationRequest`, remove top-level `enabled` from `required` and `properties`.\n- [ ] Keep `enabled` on `AutomationApiTrigger` and `AutomationScheduleTrigger`.\n- [ ] Update the `POST /api/v1/automations/{id}/runs` `409` description from:\n\n```yaml\ndescription: Automation is disabled or has no enabled API trigger\n```\n\nto:\n\n```yaml\ndescription: Automation has no enabled API trigger\n```\n\n- [ ] Update `lib/crates/fabro-api/tests/automation_round_trip.rs` so the `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest` JSON fixtures no longer include top-level `\"enabled\"`.\n- [ ] Run:\n\n```bash\ncargo build -p fabro-api\n```\n\nExpected: progenitor type generation succeeds.\n\n- [ ] Run:\n\n```bash\ncargo nextest run -p fabro-api automation_round_trip\n```\n\nExpected: automation type identity and JSON parity tests pass.\n\n- [ ] Regenerate the TypeScript client:\n\n```bash\ncd lib/packages/fabro-api-client && bun run generate\n```\n\nExpected: generated model files remove top-level `enabled` from `Automation`, `CreateAutomationRequest`, and `ReplaceAutomationRequest`.\n\n## Task 4: Remove The Web UI Master Toggle\n\n**Files:**\n- Modify: `apps/fabro-web/app/components/automation-form.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-new.tsx`\n- Modify: `apps/fabro-web/app/routes/automations-edit.tsx`\n- Modify: `apps/fabro-web/app/routes/automation-detail.tsx`\n- Modify: `apps/fabro-web/app/routes/automations.tsx`\n\n- [ ] Remove `enabled` from `AutomationFormValues` and `EMPTY_AUTOMATION_FORM`.\n- [ ] Remove `enabled: automation.enabled` from `automationToFormValues`.\n- [ ] Delete the `Row title=\"Enabled\"` block from `AutomationFormFields`.\n- [ ] Remove `enabled: values.enabled` from the create payload in `automations-new.tsx`.\n- [ ] Remove `enabled: values.enabled` from the replace payload in `automations-edit.tsx`.\n- [ ] In `isFormValid`, remove the requirement that at least one trigger is enabled. The final return should only require non-empty ID, name, repository, ref, and workflow:\n\n```ts\nreturn (\n  values.id.trim() !== \"\" &&\n  values.name.trim() !== \"\" &&\n  values.repository.trim() !== \"\" &&\n  values.ref.trim() !== \"\" &&\n  values.workflow.trim() !== \"\"\n);\n```\n\n- [ ] In `automation-detail.tsx`, change run availability to:\n\n```ts\nconst canRun = apiTrigger?.enabled === true;\n```\n\n- [ ] In `automation-detail.tsx`, remove `StatusChip`, remove its use, and simplify the Run button `title` so only a missing/disabled API trigger explains the disabled state:\n\n```ts\ntitle={!apiTrigger?.enabled ? \"Enable the API trigger to run it\" : undefined}\n```\n\n- [ ] In `automations.tsx`, extend `AutomationRow` with `apiEnabled: boolean`, set it from the enabled API trigger in `mapAutomations`, and pass `disabled={deleting || !automation.apiEnabled || (runningId !== null && runningId !== automation.id)}` to the run button path.\n- [ ] In `AutomationCard`, make the run button title reflect trigger-disabled state:\n\n```tsx\ntitle={\n  running\n    ? \"Starting run...\"\n    : automation.apiEnabled\n      ? \"Run automation\"\n      : \"Enable the API trigger to run it\"\n}\n```\n\nUse exactly this title text for the disabled/run states; do not change visible button copy.\n\n- [ ] Run:\n\n```bash\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: TypeScript passes with no `automation.enabled` references.\n\n## Task 5: Final Verification\n\n**Files:**\n- No additional source edits expected.\n\n- [ ] Run the focused backend checks:\n\n```bash\ncargo nextest run -p fabro-automation\ncargo nextest run -p fabro-api automation_round_trip\ncargo nextest run -p fabro-server automations\n```\n\nExpected: all focused Rust checks pass.\n\n- [ ] Run the focused frontend checks:\n\n```bash\ncd lib/packages/fabro-api-client && bun run typecheck\ncd apps/fabro-web && bun run typecheck\n```\n\nExpected: generated client and web app typecheck.\n\n- [ ] Search for leftover master-gate references:\n\n```bash\nrg -n \"automation\\\\.enabled|enabled_api_trigger\\\\(\\\\).*automation|Automation is disabled|automation is disabled|\\\\\\\"enabled\\\\\\\": true\" \\\n  lib/crates/fabro-automation \\\n  lib/crates/fabro-server/tests/it/api/automations.rs \\\n  lib/crates/fabro-server/src/server/handler/automations.rs \\\n  lib/crates/fabro-api/tests/automation_round_trip.rs \\\n  apps/fabro-web/app/components/automation-form.tsx \\\n  apps/fabro-web/app/routes/automations-new.tsx \\\n  apps/fabro-web/app/routes/automations-edit.tsx \\\n  apps/fabro-web/app/routes/automation-detail.tsx \\\n  apps/fabro-web/app/routes/automations.tsx\n```\n\nExpected: no hits for the removed top-level automation enabled gate. Hits for trigger-level `enabled` are acceptable when they are clearly on `AutomationTrigger`, `ApiTrigger`, or `ScheduleTrigger`.\n\n- [ ] Optional formatting check:\n\n```bash\ncargo +nightly-2026-04-14 fmt --check --all\n```\n\nExpected: Rust formatting passes. If it fails on touched Rust files, run `cargo +nightly-2026-04-14 fmt --all` and re-run the focused Rust checks.\n\n## Explicit Assumptions\n\n- No migration or compatibility parser is added for top-level automation `enabled`.\n- Existing automation TOML files that still contain top-level `enabled` are obsolete and may fail startup until manually edited.\n- Trigger-level `enabled` remains public API and persisted TOML.\n- API/manual run creation remains controlled by the enabled `api` trigger only.\n- Schedule execution, cron semantics, and schedule-trigger preservation are outside this cleanup.\n",
           "thread.implement.current_node": "simplify_opus",
           "graph.rankdir": "LR",
           "graph.model_stylesheet": "\n            * { model: claude-opus-4-7; }\n        ",
           "thread.simplify_opus.current_node": "simplify_gpt",
+          "internal.retry_count.verify": 0,
           "internal.fidelity": "compact",
           "thread.start.current_node": "toolchain",
-          "failure_signature": "simplify_gpt|deterministic|api_deterministic|openai|authentication",
+          "failure_signature": "verify|deterministic|script failed with exit code: <n> ## output from https://github.com/fabro-sh/fabro * branch main -> fetch_head merge: origin/main - not something we can merge",
           "internal.node_visit_count": 1,
           "internal.retry_count.preflight_lint": 0,
           "thread.preflight_lint.current_node": "implement",
@@ -1205,6 +1382,23 @@
               "active_time_ms": 70364
             }
           },
+          "verify": {
+            "status": "failed",
+            "context_updates": {
+              "command.output": "blob://sha256/892028c98394b32e6bfcb04ebd4e24b953ae664fd34c494130103eea91b73118"
+            },
+            "failure": {
+              "message": "Script failed with exit code: 1\n\n## output\nFrom https://github.com/fabro-sh/fabro\n * branch                main       -> FETCH_HEAD\nmerge: origin/main - not something we can merge\n",
+              "category": "deterministic"
+            },
+            "usage": null,
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 0,
+              "tool_time_ms": 2101,
+              "active_time_ms": 2101
+            }
+          },
           "implement": {
             "status": "failed",
             "failure": {
@@ -1215,14 +1409,15 @@
             "usage": null
           }
         },
-        "next_node_id": "verify",
+        "next_node_id": "fixup",
         "node_visits": {
+          "verify": 1,
+          "implement": 1,
           "simplify_gpt": 1,
           "toolchain": 1,
           "preflight_compile": 1,
           "preflight_lint": 1,
           "start": 1,
-          "implement": 1,
           "simplify_opus": 1
         }
       },
@@ -1940,7 +2135,12 @@
       "first_event_seq": 205,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "failed",
+        "notes": null,
+        "failure_reason": "LLM error: Authentication error for openai: Your authentication token has been invalidated. Please try signing in again.",
+        "timestamp": "2026-06-01T20:07:18.616744Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "openai",
@@ -1953,6 +2153,12 @@
       "output": null,
       "started_at": "2026-06-01T20:07:17.127427Z",
       "handler": "agent",
+      "timing": {
+        "wall_time_ms": 1489,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -2090,6 +2296,33 @@
           "invoked": false
         }
       ],
+      "state": "failed"
+    },
+    "verify@1": {
+      "first_event_seq": 222,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": {
+        "script": "git fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+        "command": "exec 2>&1\ngit fetch origin main 2>&1 && git merge --no-edit --no-stat origin/main 2>&1 && cargo +nightly-2026-04-14 fmt --all 2>&1 && cargo dev docs refresh 2>&1 && cargo +nightly-2026-04-14 fmt --check --all 2>&1 && { command -v rg >/dev/null 2>&1 || { echo 'rg is required for verify'; exit 127; }; } && ! rg -n 'AuthMode::Disabled|RunAuthMethod|RunSubjectProvenance|\\bActorRef\\b|\\bActorKind\\b|AuthenticatedSubject|AuthenticatedService|AuthorizeRunScoped|AuthorizeRunBlob|AuthorizeStageArtifact|AuthorizeCommandLog|auth_method\\s*==\\s*\"disabled\"' lib/crates apps lib/packages docs/public/api-reference/fabro-api.yaml 2>&1 && cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings 2>&1 && cargo nextest run --workspace --status-level slow --profile ci 2>&1 && cargo dev docs check 2>&1 && bun install --frozen-lockfile 2>&1 && (cd apps/fabro-web && bun run typecheck) 2>&1 && (cd apps/fabro-web && bun run test) 2>&1 && (cd lib/packages/fabro-api-client && bun run typecheck) 2>&1 && cargo dev build -- -p fabro-cli --release 2>&1",
+        "language": "shell"
+      },
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-06-01T20:07:24.031809Z",
+      "handler": "command",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
       "state": "running"
     }
   }
