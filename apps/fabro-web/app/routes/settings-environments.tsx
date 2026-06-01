@@ -2,13 +2,14 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useSWRConfig } from "swr";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
-import { PlusIcon } from "@heroicons/react/16/solid";
+import { ChevronDownIcon, PlusIcon } from "@heroicons/react/16/solid";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import type { Environment } from "@qltysh/fabro-api-client";
 
 import { ApiError, apiData, environmentsApi } from "../lib/api-client";
-import { useEnvironments } from "../lib/queries";
+import { useEnvironments, useServerSettings } from "../lib/queries";
 import { queryKeys } from "../lib/query-keys";
+import { CREATABLE_PROVIDERS } from "../components/environment-form";
 import {
   Badge,
   Muted,
@@ -23,8 +24,9 @@ import { useToast } from "../components/toast";
 // in the UI instead of letting the delete fail with a 409.
 const PROTECTED_ID = "default";
 
-// `local` is a reserved, in-memory environment (present only when the local
-// sandbox provider is enabled). It cannot be edited or deleted.
+// `local` is a reserved, in-memory environment the server includes only when
+// the local sandbox provider is enabled. It has no configurable settings, so it
+// gets its own panel instead of a row in the managed environments list.
 const RESERVED_ID = "local";
 
 const MENU_ITEM_CLASS =
@@ -45,20 +47,9 @@ export default function SettingsEnvironments() {
 
   return (
     <div className="space-y-6">
-      <SettingsPageIntro
-        description={DESCRIPTION}
-        action={
-          <Link
-            to="/settings/environments/new"
-            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-2.5 py-1 text-sm font-medium text-fg-3 transition-colors hover:border-line-strong hover:bg-panel hover:text-fg"
-          >
-            <PlusIcon className="size-3.5" aria-hidden="true" />
-            New environment
-          </Link>
-        }
-      />
+      <SettingsPageIntro description={DESCRIPTION} action={<NewEnvironmentMenu />} />
       {query.data ? (
-        <EnvironmentsPanel environments={query.data.data} />
+        <EnvironmentsContent environments={query.data.data} />
       ) : query.error ? (
         <Panel title="Environments">
           <div className="px-4 py-6 text-sm text-fg-2">
@@ -69,6 +60,95 @@ export default function SettingsEnvironments() {
         <PanelSkeleton />
       )}
     </div>
+  );
+}
+
+const NEW_BUTTON_CLASS =
+  "inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-2.5 py-1 text-sm font-medium text-fg-3 transition-colors hover:border-line-strong hover:bg-panel hover:text-fg disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-line disabled:hover:bg-panel/80 disabled:hover:text-fg-3";
+
+function providerLabel(provider: string): string {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+// "New environment" is a provider picker: each enabled sandbox provider opens
+// the create form pre-set to that provider, which is then fixed for the
+// environment's lifetime. `local` is never offered (it's reserved/in-memory).
+function NewEnvironmentMenu() {
+  const { data } = useServerSettings();
+  const providers = data
+    ? CREATABLE_PROVIDERS.filter((provider) => data.server.sandbox.providers[provider].enabled)
+    : [];
+
+  if (providers.length === 0) {
+    return (
+      <button
+        type="button"
+        disabled
+        title={data ? "Enable a sandbox provider to create environments" : "Loading providers…"}
+        className={NEW_BUTTON_CLASS}
+      >
+        <PlusIcon className="size-3.5" aria-hidden="true" />
+        New environment
+      </button>
+    );
+  }
+
+  return (
+    <Menu as="div" className="relative inline-block">
+      <MenuButton className={NEW_BUTTON_CLASS}>
+        <PlusIcon className="size-3.5" aria-hidden="true" />
+        New environment
+        <ChevronDownIcon className="size-3.5" aria-hidden="true" />
+      </MenuButton>
+      <MenuItems
+        transition
+        anchor={{ to: "bottom end", gap: 4 }}
+        className="z-30 w-44 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
+      >
+        {providers.map((provider) => (
+          <MenuItem key={provider}>
+            <Link
+              to={`/settings/environments/new?provider=${encodeURIComponent(provider)}`}
+              className={MENU_ITEM_CLASS}
+            >
+              {providerLabel(provider)}
+            </Link>
+          </MenuItem>
+        ))}
+      </MenuItems>
+    </Menu>
+  );
+}
+
+function EnvironmentsContent({ environments }: { environments: Environment[] }) {
+  const local = environments.find((environment) => environment.id === RESERVED_ID);
+  const managed = environments.filter((environment) => environment.id !== RESERVED_ID);
+  return (
+    <>
+      <EnvironmentsPanel environments={managed} />
+      {local ? <LocalEnvironmentPanel environment={local} /> : null}
+    </>
+  );
+}
+
+function LocalEnvironmentPanel({ environment }: { environment: Environment }) {
+  return (
+    <Panel title="Local sandbox">
+      <div className="flex items-start justify-between gap-4 px-4 py-3.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm text-fg">{environment.id}</span>
+            <Badge>{environment.provider}</Badge>
+          </div>
+          <p className="mt-1 text-xs/5 text-fg-3 text-pretty">
+            Built-in environment that runs tools directly on the host. Available because the local
+            sandbox provider is enabled; it has no configurable settings and can&apos;t be edited or
+            deleted.
+          </p>
+        </div>
+        <StatusTag>reserved</StatusTag>
+      </div>
+    </Panel>
   );
 }
 
@@ -157,14 +237,10 @@ function EnvironmentRow({
             {environment.id}
           </span>
           <Badge>{environment.provider}</Badge>
-          {environment.id === RESERVED_ID ? (
-            <StatusTag>reserved</StatusTag>
-          ) : environment.id === PROTECTED_ID ? (
-            <StatusTag>protected</StatusTag>
-          ) : null}
+          {environment.id === PROTECTED_ID ? <StatusTag>protected</StatusTag> : null}
         </div>
         <div className="mt-0.5 truncate text-xs/5 text-fg-3">
-          {resourcesSummary(environment)} · network {environment.network.mode}
+          {resourcesSummary(environment)}
         </div>
       </div>
       <div
@@ -210,7 +286,6 @@ function RowMenu({
   disabled: boolean;
   onDelete: () => void;
 }) {
-  const reserved = environment.id === RESERVED_ID;
   const protectedFromDelete = environment.id === PROTECTED_ID;
   return (
     <Menu as="div" className="relative inline-block">
@@ -229,40 +304,23 @@ function RowMenu({
         className="z-30 w-36 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
       >
         <MenuItem>
-          {reserved ? (
-            <button
-              type="button"
-              disabled
-              title="The local environment is reserved and cannot be edited"
-              className={MENU_ITEM_CLASS}
-            >
-              Edit
-            </button>
-          ) : (
-            <Link
-              to={`/settings/environments/${encodeURIComponent(environment.id)}/edit`}
-              className={MENU_ITEM_CLASS}
-            >
-              Edit
-            </Link>
-          )}
+          <Link
+            to={`/settings/environments/${encodeURIComponent(environment.id)}/edit`}
+            className={MENU_ITEM_CLASS}
+          >
+            Edit
+          </Link>
         </MenuItem>
         <hr className="my-1 h-px border-0 bg-line" />
         <MenuItem>
           <button
             type="button"
             onClick={onDelete}
-            disabled={disabled || protectedFromDelete || reserved}
-            title={
-              reserved
-                ? "The local environment is reserved"
-                : protectedFromDelete
-                  ? "The default environment is protected"
-                  : undefined
-            }
+            disabled={disabled || protectedFromDelete}
+            title={protectedFromDelete ? "The default environment is protected" : undefined}
             className={MENU_ITEM_DANGER_CLASS}
           >
-            {reserved ? "Reserved" : protectedFromDelete ? "Protected" : "Delete"}
+            {protectedFromDelete ? "Protected" : "Delete"}
           </button>
         </MenuItem>
       </MenuItems>

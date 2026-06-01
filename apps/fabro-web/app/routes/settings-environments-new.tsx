@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { useSWRConfig } from "swr";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 
@@ -10,6 +10,7 @@ import {
   EnvironmentFormFields,
   createRequestFromForm,
   isEnvironmentFormValid,
+  parseCreatableProvider,
   type EnvironmentFormValues,
 } from "../components/environment-form";
 import {
@@ -48,7 +49,13 @@ function CreateEnvironmentForm() {
   const navigate = useNavigate();
   const { mutate } = useSWRConfig();
   const toast = useToast();
-  const [values, setValues] = useState<EnvironmentFormValues>(EMPTY_ENVIRONMENT_FORM);
+  const [searchParams] = useSearchParams();
+  // The provider is selected via the "New environment" dropdown and arrives as
+  // a query param; it's fixed for the lifetime of the environment.
+  const [values, setValues] = useState<EnvironmentFormValues>(() => ({
+    ...EMPTY_ENVIRONMENT_FORM,
+    provider: parseCreatableProvider(searchParams.get("provider")),
+  }));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

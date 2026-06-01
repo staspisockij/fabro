@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { Switch } from "@headlessui/react";
+import { Disclosure, DisclosureButton, DisclosurePanel, Switch } from "@headlessui/react";
 import { PlusIcon, XMarkIcon } from "@heroicons/react/16/solid";
+import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import {
   EnvironmentApiDockerfileSourceInlineTypeEnum,
   EnvironmentNetworkMode,
@@ -19,6 +20,22 @@ import type {
 import { Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
 
+// Providers a managed environment can be created with. `local` is a reserved,
+// in-memory environment, never a managed-environment provider, so it is never
+// offered. The provider is fixed at creation time and cannot be changed.
+export const CREATABLE_PROVIDERS = [
+  EnvironmentProvider.DOCKER,
+  EnvironmentProvider.DAYTONA,
+] as const;
+
+// Parse the `provider` query param used by the create flow into a creatable
+// provider, defaulting to Docker for anything unexpected.
+export function parseCreatableProvider(value: string | null): EnvironmentProvider {
+  return value === EnvironmentProvider.DAYTONA
+    ? EnvironmentProvider.DAYTONA
+    : EnvironmentProvider.DOCKER;
+}
+
 // Environment ids are server-managed file names: lowercase, digits, hyphens.
 const ENVIRONMENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -33,37 +50,46 @@ interface KeyValueEntry {
   value: string;
 }
 
+// An environment image comes from exactly one source: a prebuilt image
+// reference or an inline Dockerfile. The form keeps both field values around so
+// switching back and forth doesn't lose typed text, and this discriminator
+// decides which one is shown, required, and sent.
+type ImageSource = "image" | "dockerfile";
+
 export interface EnvironmentFormValues {
   id: string;
   provider: EnvironmentProvider;
+  imageSource: ImageSource;
   dockerRef: string;
   dockerfile: string;
   cpu: number;
   memory: number;
   disk: number;
-  networkMode: EnvironmentNetworkMode;
-  allow: string;
+  blockNetwork: boolean;
   preserve: boolean;
   stopOnTerminal: boolean;
   autoStop: string;
-  labels: KeyValueEntry[];
+  // Labels are not editable in the web UI — they're managed through the REST
+  // API only. The form carries the loaded value verbatim so saving an edited
+  // environment preserves any API-set labels instead of clearing them.
+  labels: { [key: string]: string };
   envVars: KeyValueEntry[];
 }
 
 export const EMPTY_ENVIRONMENT_FORM: EnvironmentFormValues = {
   id:             "",
   provider:       EnvironmentProvider.DOCKER,
+  imageSource:    "image",
   dockerRef:      "",
   dockerfile:     "",
   cpu:            CPU.default,
   memory:         MEMORY.default,
   disk:           DISK.default,
-  networkMode:    EnvironmentNetworkMode.ALLOW_ALL,
-  allow:          "",
+  blockNetwork:   false,
   preserve:       false,
   stopOnTerminal: true,
   autoStop:       "",
-  labels:         [],
+  labels:         {},
   envVars:        [],
 };
 
@@ -71,23 +97,42 @@ export function environmentToFormValues(environment: Environment): EnvironmentFo
   return {
     id:             environment.id,
     provider:       environment.provider,
+    imageSource:    environment.image.dockerfile ? "dockerfile" : "image",
     dockerRef:      environment.image.docker ?? "",
     dockerfile:     environment.image.dockerfile?.value ?? "",
     cpu:            clampGb(environment.resources.cpu, CPU),
     memory:         parseGb(environment.resources.memory, MEMORY),
     disk:           parseGb(environment.resources.disk, DISK),
-    networkMode:    environment.network.mode,
-    allow:          environment.network.allow.join("\n"),
+    blockNetwork:   environment.network.mode === EnvironmentNetworkMode.BLOCK,
     preserve:       environment.lifecycle.preserve,
     stopOnTerminal: environment.lifecycle.stop_on_terminal,
     autoStop:       environment.lifecycle.auto_stop ?? "",
-    labels:         entriesFromMap(environment.labels),
+    labels:         environment.labels,
     envVars:        entriesFromMap(environment.env),
   };
 }
 
 export function isEnvironmentFormValid(values: EnvironmentFormValues): boolean {
-  return ENVIRONMENT_ID_PATTERN.test(values.id.trim());
+  if (!ENVIRONMENT_ID_PATTERN.test(values.id.trim())) return false;
+  return imageSourceValue(values).trim() !== "";
+}
+
+// The currently selected image source's text, used both for validation and to
+// drive which field is rendered as required.
+function imageSourceValue(values: EnvironmentFormValues): string {
+  return values.imageSource === "dockerfile" ? values.dockerfile : values.dockerRef;
+}
+
+// The Advanced disclosure (Network + Lifecycle) starts open when any of its
+// values deviate from the defaults, so editing an environment never hides
+// settings the operator already configured.
+function hasNonDefaultAdvanced(values: EnvironmentFormValues): boolean {
+  return (
+    values.blockNetwork !== EMPTY_ENVIRONMENT_FORM.blockNetwork ||
+    values.preserve !== EMPTY_ENVIRONMENT_FORM.preserve ||
+    values.stopOnTerminal !== EMPTY_ENVIRONMENT_FORM.stopOnTerminal ||
+    values.autoStop.trim() !== ""
+  );
 }
 
 export function createRequestFromForm(values: EnvironmentFormValues): CreateEnvironmentRequest {
@@ -105,18 +150,24 @@ function settingsFromForm(values: EnvironmentFormValues): ReplaceEnvironmentRequ
     resources: resourcesFromForm(values),
     network:   networkFromForm(values),
     lifecycle: lifecycleFromForm(values),
-    labels:    mapFromEntries(values.labels),
+    labels:    values.labels,
     env:       mapFromEntries(values.envVars),
   };
 }
 
 function imageFromForm(values: EnvironmentFormValues): EnvironmentApiImageSettings {
-  const dockerfile = values.dockerfile.trim();
+  if (values.imageSource === "dockerfile") {
+    return {
+      docker: null,
+      dockerfile: {
+        type:  EnvironmentApiDockerfileSourceInlineTypeEnum.INLINE,
+        value: values.dockerfile,
+      },
+    };
+  }
   return {
-    docker: values.dockerRef.trim() || null,
-    dockerfile: dockerfile
-      ? { type: EnvironmentApiDockerfileSourceInlineTypeEnum.INLINE, value: values.dockerfile }
-      : null,
+    docker:     values.dockerRef.trim() || null,
+    dockerfile: null,
   };
 }
 
@@ -162,11 +213,8 @@ function parseGb(value: string | null, range: ResourceRange): number {
 
 function networkFromForm(values: EnvironmentFormValues): EnvironmentNetworkSettings {
   return {
-    mode: values.networkMode,
-    allow: values.allow
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== ""),
+    mode:  values.blockNetwork ? EnvironmentNetworkMode.BLOCK : EnvironmentNetworkMode.ALLOW_ALL,
+    allow: [],
   };
 }
 
@@ -190,26 +238,8 @@ function mapFromEntries(entries: KeyValueEntry[]): { [key: string]: string } {
   );
 }
 
-function parseProvider(value: string): EnvironmentProvider {
-  switch (value) {
-    case EnvironmentProvider.LOCAL:
-      return EnvironmentProvider.LOCAL;
-    case EnvironmentProvider.DAYTONA:
-      return EnvironmentProvider.DAYTONA;
-    default:
-      return EnvironmentProvider.DOCKER;
-  }
-}
-
-function parseNetworkMode(value: string): EnvironmentNetworkMode {
-  switch (value) {
-    case EnvironmentNetworkMode.BLOCK:
-      return EnvironmentNetworkMode.BLOCK;
-    case EnvironmentNetworkMode.CIDR_ALLOW_LIST:
-      return EnvironmentNetworkMode.CIDR_ALLOW_LIST;
-    default:
-      return EnvironmentNetworkMode.ALLOW_ALL;
-  }
+function parseImageSource(value: string): ImageSource {
+  return value === "dockerfile" ? "dockerfile" : "image";
 }
 
 interface EnvironmentFormFieldsProps {
@@ -231,7 +261,7 @@ export function EnvironmentFormFields({
 
   return (
     <>
-      <Panel title="Identity">
+      <Panel title="General">
         <Row
           title={<Label required>ID</Label>}
           help="Lowercase identifier (letters, digits, hyphens). Runs select this environment by id. Cannot be changed after creation."
@@ -252,58 +282,56 @@ export function EnvironmentFormFields({
             />
           )}
         </Row>
-        <Row title={<Label required>Provider</Label>} help="Where runs using this environment execute.">
+        <Row
+          title={<Label required>Source</Label>}
+          help="Whether this environment runs a prebuilt image reference or builds from an inline Dockerfile."
+        >
           <select
-            name="provider"
-            aria-label="Provider"
-            value={values.provider}
-            onChange={(e) => patch({ provider: parseProvider(e.target.value) })}
+            name="image_source"
+            aria-label="Image source"
+            value={values.imageSource}
+            onChange={(e) => patch({ imageSource: parseImageSource(e.target.value) })}
             className={INPUT_CLASS}
           >
-            {Object.values(EnvironmentProvider)
-              .filter((provider) => provider !== EnvironmentProvider.LOCAL)
-              .map((provider) => (
-                <option key={provider} value={provider}>
-                  {provider}
-                </option>
-              ))}
+            <option value="image">Image reference</option>
+            <option value="dockerfile">Dockerfile</option>
           </select>
         </Row>
-      </Panel>
-
-      <Panel title="Image">
-        <Row
-          title={<Label optional>Image reference</Label>}
-          help="Docker image or Daytona snapshot name (e.g. fabro-v11)."
-        >
-          <input
-            type="text"
-            name="docker_ref"
-            aria-label="Image reference"
-            value={values.dockerRef}
-            onChange={(e) => patch({ dockerRef: e.target.value })}
-            placeholder="ubuntu:24.04"
-            autoComplete="off"
-            spellCheck={false}
-            className={`${INPUT_CLASS} font-mono`}
-          />
-        </Row>
-        <Row
-          title={<Label optional>Dockerfile</Label>}
-          help="Inline Dockerfile contents. The REST API accepts inline Dockerfiles only — local paths are rejected."
-        >
-          <textarea
-            name="dockerfile"
-            aria-label="Dockerfile"
-            value={values.dockerfile}
-            onChange={(e) => patch({ dockerfile: e.target.value })}
-            rows={5}
-            placeholder={"FROM ubuntu:24.04\nRUN apt-get update && apt-get install -y git"}
-            autoComplete="off"
-            spellCheck={false}
-            className={`${INPUT_CLASS} resize-y font-mono`}
-          />
-        </Row>
+        {values.imageSource === "image" ? (
+          <Row
+            title={<Label required>Image reference</Label>}
+            help="Docker image or Daytona snapshot name (e.g. fabro-v11)."
+          >
+            <input
+              type="text"
+              name="docker_ref"
+              aria-label="Image reference"
+              value={values.dockerRef}
+              onChange={(e) => patch({ dockerRef: e.target.value })}
+              placeholder="ubuntu:24.04"
+              autoComplete="off"
+              spellCheck={false}
+              className={`${INPUT_CLASS} font-mono`}
+            />
+          </Row>
+        ) : (
+          <Row
+            title={<Label required>Dockerfile</Label>}
+            help="Inline Dockerfile contents. The REST API accepts inline Dockerfiles only — local paths are rejected."
+          >
+            <textarea
+              name="dockerfile"
+              aria-label="Dockerfile"
+              value={values.dockerfile}
+              onChange={(e) => patch({ dockerfile: e.target.value })}
+              rows={5}
+              placeholder={"FROM ubuntu:24.04\nRUN apt-get update && apt-get install -y git"}
+              autoComplete="off"
+              spellCheck={false}
+              className={`${INPUT_CLASS} resize-y font-mono`}
+            />
+          </Row>
+        )}
       </Panel>
 
       <Panel title="Resources">
@@ -336,87 +364,6 @@ export function EnvironmentFormFields({
         </Row>
       </Panel>
 
-      <Panel title="Network">
-        <Row title={<Label required>Mode</Label>} help="How network egress is restricted for runs in this environment.">
-          <select
-            name="network_mode"
-            aria-label="Network mode"
-            value={values.networkMode}
-            onChange={(e) => patch({ networkMode: parseNetworkMode(e.target.value) })}
-            className={INPUT_CLASS}
-          >
-            {Object.values(EnvironmentNetworkMode).map((mode) => (
-              <option key={mode} value={mode}>
-                {mode}
-              </option>
-            ))}
-          </select>
-        </Row>
-        {values.networkMode === EnvironmentNetworkMode.CIDR_ALLOW_LIST ? (
-          <Row
-            title={<Label optional>Allowed CIDRs</Label>}
-            help="One CIDR per line. Only egress to these ranges is permitted."
-          >
-            <textarea
-              name="allow"
-              aria-label="Allowed CIDRs"
-              value={values.allow}
-              onChange={(e) => patch({ allow: e.target.value })}
-              rows={3}
-              placeholder={"10.0.0.0/8\n192.168.0.0/16"}
-              autoComplete="off"
-              spellCheck={false}
-              className={`${INPUT_CLASS} resize-y font-mono`}
-            />
-          </Row>
-        ) : null}
-      </Panel>
-
-      <Panel title="Lifecycle">
-        <Row title="Preserve" help="Keep the sandbox after the run finishes instead of tearing it down.">
-          <ToggleSwitch
-            checked={values.preserve}
-            onChange={(preserve) => patch({ preserve })}
-            label="Preserve sandbox after run"
-          />
-        </Row>
-        <Row title="Stop on terminal" help="Stop the sandbox when the run reaches a terminal state.">
-          <ToggleSwitch
-            checked={values.stopOnTerminal}
-            onChange={(stopOnTerminal) => patch({ stopOnTerminal })}
-            label="Stop sandbox on terminal state"
-          />
-        </Row>
-        <Row title={<Label optional>Auto-stop</Label>} help="Idle duration before the sandbox is stopped (e.g. 30m). Leave blank to disable.">
-          <input
-            type="text"
-            name="auto_stop"
-            aria-label="Auto-stop"
-            value={values.autoStop}
-            onChange={(e) => patch({ autoStop: e.target.value })}
-            placeholder="30m"
-            autoComplete="off"
-            spellCheck={false}
-            className={`${INPUT_CLASS} font-mono`}
-          />
-        </Row>
-      </Panel>
-
-      <Panel title="Labels">
-        <div className="px-4 py-3.5">
-          <p className="mb-3 text-xs/5 text-fg-3">
-            Arbitrary key/value labels attached to the environment.
-          </p>
-          <KeyValueEditor
-            entries={values.labels}
-            onChange={(labels) => patch({ labels })}
-            keyPlaceholder="team"
-            valuePlaceholder="infra"
-            addLabel="Add label"
-          />
-        </div>
-      </Panel>
-
       <Panel title="Environment variables">
         <div className="px-4 py-3.5">
           <p className="mb-3 text-xs/5 text-fg-3">
@@ -431,6 +378,60 @@ export function EnvironmentFormFields({
           />
         </div>
       </Panel>
+
+      <Disclosure as="div" className="space-y-4" defaultOpen={hasNonDefaultAdvanced(values)}>
+        <DisclosureButton className="group flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-fg-muted transition-colors hover:text-fg-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500">
+          <ChevronRightIcon
+            className="size-3.5 transition-transform duration-150 group-data-open:rotate-90"
+            aria-hidden="true"
+          />
+          Advanced
+        </DisclosureButton>
+        <DisclosurePanel className="space-y-6">
+          <Panel title="Network">
+            <Row
+              title="Block all network access"
+              help="Block all outbound network access from the sandbox."
+            >
+              <ToggleSwitch
+                checked={values.blockNetwork}
+                onChange={(blockNetwork) => patch({ blockNetwork })}
+                label="Block all network access"
+              />
+            </Row>
+          </Panel>
+
+          <Panel title="Lifecycle">
+            <Row title="Preserve" help="Keep the sandbox after the run finishes instead of tearing it down.">
+              <ToggleSwitch
+                checked={values.preserve}
+                onChange={(preserve) => patch({ preserve })}
+                label="Preserve sandbox after run"
+              />
+            </Row>
+            <Row title="Stop on terminal" help="Stop the sandbox when the run reaches a terminal state.">
+              <ToggleSwitch
+                checked={values.stopOnTerminal}
+                onChange={(stopOnTerminal) => patch({ stopOnTerminal })}
+                label="Stop sandbox on terminal state"
+              />
+            </Row>
+            <Row title={<Label optional>Auto-stop</Label>} help="Idle duration before the sandbox is stopped (e.g. 30m). Leave blank to disable.">
+              <input
+                type="text"
+                name="auto_stop"
+                aria-label="Auto-stop"
+                value={values.autoStop}
+                onChange={(e) => patch({ autoStop: e.target.value })}
+                placeholder="30m"
+                autoComplete="off"
+                spellCheck={false}
+                className={`${INPUT_CLASS} font-mono`}
+              />
+            </Row>
+          </Panel>
+        </DisclosurePanel>
+      </Disclosure>
 
       {!lockId && values.id.trim() !== "" && !idValid ? (
         <p className="text-xs text-coral">
