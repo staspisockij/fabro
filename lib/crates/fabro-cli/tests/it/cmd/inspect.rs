@@ -183,7 +183,6 @@ fn inspect_resolves_selector_via_server_endpoint() {
                   "auto_stop": null
                 },
                 "labels": {},
-                "volumes": [],
                 "env": {}
               },
               "notifications": {},

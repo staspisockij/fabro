@@ -466,7 +466,6 @@ mod tests {
             network: EnvironmentNetworkSettings::default(),
             lifecycle: EnvironmentLifecycleSettings::default(),
             labels: HashMap::new(),
-            volumes: Vec::new(),
             env: HashMap::new(),
         }
     }

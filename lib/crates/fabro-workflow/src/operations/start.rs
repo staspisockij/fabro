@@ -1122,9 +1122,8 @@ mod tests {
 
     use chrono::Utc;
     use fabro_config::{
-        EnvironmentImageLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer,
-        EnvironmentVolumeLayer, RunCloneLayer, RunEnvironmentLayer, RunExecutionLayer, RunLayer,
-        StickyMap, WorkflowSettingsBuilder,
+        EnvironmentImageLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer, RunCloneLayer,
+        RunEnvironmentLayer, RunExecutionLayer, RunLayer, StickyMap, WorkflowSettingsBuilder,
     };
     use fabro_store::Database;
     use fabro_types::settings::run::RunMode;
@@ -1351,28 +1350,6 @@ reasoning = false
         assert_eq!(config.memory_limit, Some(2_000_000_000));
         assert_eq!(config.network_mode.as_deref(), Some("none"));
         assert_eq!(config.env_vars, vec!["NODE_ENV=test"]);
-    }
-
-    #[test]
-    fn runtime_daytona_config_preserves_volume_mounts() {
-        let settings = settings_from_run_layer(RunLayer {
-            environment: Some(RunEnvironmentLayer {
-                volumes: Some(vec![EnvironmentVolumeLayer {
-                    id:         "vol_auth".to_string(),
-                    mount_path: "/home/daytona/.config".to_string(),
-                    subpath:    Some("agents".to_string()),
-                }]),
-                ..RunEnvironmentLayer::default()
-            }),
-            ..RunLayer::default()
-        });
-
-        let config = resolve_daytona_config(&settings.run);
-
-        assert_eq!(config.volumes.len(), 1);
-        assert_eq!(config.volumes[0].volume_id, "vol_auth");
-        assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
-        assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
     }
 
     #[test]

@@ -131,7 +131,6 @@ models/environment-network-settings.ts
 models/environment-provider.ts
 models/environment-resources-settings.ts
 models/environment-settings.ts
-models/environment-volume-settings.ts
 models/environment.ts
 models/error-response-entry.ts
 models/error-response.ts

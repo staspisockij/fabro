@@ -105,7 +105,6 @@ export * from './environment-network-settings';
 export * from './environment-provider';
 export * from './environment-resources-settings';
 export * from './environment-settings';
-export * from './environment-volume-settings';
 export * from './error-response';
 export * from './error-response-entry';
 export * from './event-envelope';

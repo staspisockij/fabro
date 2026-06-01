@@ -6316,7 +6316,6 @@ components:
         - network
         - lifecycle
         - labels
-        - volumes
         - env
       properties:
         id:
@@ -6340,10 +6339,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -6361,7 +6356,6 @@ components:
         - network
         - lifecycle
         - labels
-        - volumes
         - env
       properties:
         id:
@@ -6380,10 +6374,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -6400,7 +6390,6 @@ components:
         - network
         - lifecycle
         - labels
-        - volumes
         - env
       properties:
         provider:
@@ -6415,10 +6404,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -13269,7 +13254,7 @@ components:
 
     RunEnvironmentSettings:
       type: object
-      required: [id, provider, image, resources, network, lifecycle, labels, volumes, env]
+      required: [id, provider, image, resources, network, lifecycle, labels, env]
       properties:
         id:
           type: string
@@ -13285,10 +13270,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -13296,7 +13277,7 @@ components:
 
     EnvironmentSettings:
       type: object
-      required: [provider, image, resources, network, lifecycle, labels, volumes, env]
+      required: [provider, image, resources, network, lifecycle, labels, env]
       properties:
         provider:
           $ref: "#/components/schemas/EnvironmentProvider"
@@ -13310,10 +13291,6 @@ components:
           $ref: "#/components/schemas/EnvironmentLifecycleSettings"
         labels:
           $ref: "#/components/schemas/StringMap"
-        volumes:
-          type: array
-          items:
-            $ref: "#/components/schemas/EnvironmentVolumeSettings"
         env:
           type: object
           additionalProperties:
@@ -13371,17 +13348,6 @@ components:
         stop_on_terminal:
           type: boolean
         auto_stop:
-          type: ["string", "null"]
-
-    EnvironmentVolumeSettings:
-      type: object
-      required: [id, mount_path, subpath]
-      properties:
-        id:
-          type: string
-        mount_path:
-          type: string
-        subpath:
           type: ["string", "null"]
 
     DockerfileSource:

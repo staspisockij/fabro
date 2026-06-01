@@ -34,7 +34,6 @@ fn environment_settings(provider: &str) -> Value {
             "auto_stop": null
         },
         "labels": {},
-        "volumes": [],
         "env": {}
     })
 }
