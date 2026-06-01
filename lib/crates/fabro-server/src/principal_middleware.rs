@@ -172,11 +172,27 @@ impl AuthContextSlot {
     pub(crate) fn log_snapshot(&self) -> RequestAuthLogContext {
         let context = self.0.lock().expect("auth context lock poisoned");
         RequestAuthLogContext {
-            principal:       context.principal.clone(),
+            principal:       context.principal.as_ref().map(principal_for_log),
             auth_status:     context.auth_status,
             auth_error_code: context.auth_error_code,
         }
     }
+}
+
+// HTTP logging never emits the avatar URL; strip it to avoid an owned String
+// allocation on every authenticated request.
+fn principal_for_log(principal: &Principal) -> Principal {
+    if let Principal::User(user) = principal {
+        if user.avatar_url.is_some() {
+            return Principal::User(UserPrincipal {
+                identity:    user.identity.clone(),
+                login:       user.login.clone(),
+                auth_method: user.auth_method,
+                avatar_url:  None,
+            });
+        }
+    }
+    principal.clone()
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for RequestAuth {

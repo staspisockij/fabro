@@ -11,9 +11,14 @@ pub fn test_principal() -> Principal {
 
 #[must_use]
 pub fn test_run_provenance() -> RunProvenance {
+    test_run_provenance_with(test_principal())
+}
+
+#[must_use]
+pub fn test_run_provenance_with(subject: Principal) -> RunProvenance {
     RunProvenance {
-        server:  None,
-        client:  None,
-        subject: test_principal(),
+        server: None,
+        client: None,
+        subject,
     }
 }
