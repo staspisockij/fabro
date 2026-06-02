@@ -29,7 +29,7 @@ use fabro_types::{
     SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
-    WorkflowSettings, fixtures,
+    WorkflowSettings, fixtures, test_support,
 };
 use fabro_util::check_report::CheckStatus;
 use fabro_workflow::records::CheckpointExt;
@@ -3980,7 +3980,7 @@ async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id
         workflow_slug: None,
         automation: None,
         db_prefix: None,
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
@@ -4034,7 +4034,7 @@ async fn create_slack_notification_run(
         workflow_slug: workflow_slug.map(str::to_string),
         automation: None,
         db_prefix: None,
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
@@ -5041,7 +5041,7 @@ async fn list_run_stages_distinguishes_visits() {
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
@@ -6098,7 +6098,7 @@ async fn create_completed_run_ready_for_pull_request(
         source_directory: Some("/tmp/project".to_string()),
         git: git.clone(),
         labels: HashMap::new(),
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         definition_blob: None,
         fork_source_ref: None,
@@ -9901,15 +9901,10 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
         .unwrap()
         .expect("created run should be cached");
     assert_eq!(
-        cached
-            .projection
-            .spec
-            .provenance
-            .as_ref()
-            .and_then(|provenance| provenance.subject.as_ref()),
-        Some(&Principal::Worker {
+        cached.projection.spec.provenance.subject,
+        Principal::Worker {
             run_id: parent_run_id,
-        }),
+        },
     );
 
     let response = app
@@ -12268,7 +12263,7 @@ async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
@@ -13020,7 +13015,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
@@ -13626,6 +13621,72 @@ async fn cancel_run_requests_worker_runtime_stop_when_control_unavailable() {
     assert_status!(response, StatusCode::OK).await;
 
     assert_eq!(runtime.requested_refs(), vec![worker_ref]);
+}
+
+#[tokio::test]
+async fn cancel_durably_blocked_in_process_run_cancels_pending_interview_without_abort_signal() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(Arc::clone(&state));
+    let run_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, run_id, &[
+        workflow_event::Event::RunRunning,
+        workflow_event::Event::RunBlocked {
+            blocked_reason: BlockedReason::HumanInputRequired,
+        },
+    ])
+    .await;
+
+    let interviewer = Arc::new(ControlInterviewer::new());
+    let mut question = Question::new("approve?", QuestionType::YesNo);
+    question.id = "q-1".to_string();
+    let ask_interviewer = Arc::clone(&interviewer);
+    let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
+    tokio::task::yield_now().await;
+
+    let (cancel_tx, mut cancel_rx) = oneshot::channel();
+    let cancel_token = CancellationToken::new();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut run = managed_run(
+        MINIMAL_DOT.to_string(),
+        RunStatus::Running,
+        Utc::now(),
+        temp_dir.path().join(run_id.to_string()),
+        RunExecutionMode::Start,
+    );
+    run.answer_transport = Some(RunAnswerTransport::InProcess {
+        interviewer,
+        steering_hub: Arc::new(fabro_workflow::SteeringHub::new(Arc::new(
+            fabro_workflow::event::Emitter::new(run_id),
+        ))),
+    });
+    run.cancel_token = Some(cancel_token);
+    run.cancel_tx = Some(cancel_tx);
+    state
+        .runs
+        .lock()
+        .expect("runs lock poisoned")
+        .insert(run_id, run);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/cancel")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let submission = tokio::time::timeout(std::time::Duration::from_millis(100), ask)
+        .await
+        .expect("cancel should resolve the pending in-process interview")
+        .expect("interview task should not panic");
+    assert_eq!(submission.answer.value, AnswerValue::Cancelled);
+    assert!(
+        matches!(
+            cancel_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ),
+        "blocked in-process cancellation should let the workflow unwind instead of aborting it"
+    );
 }
 
 #[tokio::test]
