@@ -32,6 +32,7 @@ use fabro_static::EnvVars;
 use fabro_store::ArtifactStore;
 use fabro_types::ServerSettings;
 use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::settings::server::ObjectStoreSettings;
 use fabro_types::settings::{is_wildcard_host, validate_public_url_with_label};
 use fabro_util::version::FABRO_VERSION;
@@ -451,6 +452,13 @@ impl InstallSandboxState {
         match self {
             Self::Docker => InstallSandboxSelection::Docker,
             Self::Daytona { .. } => InstallSandboxSelection::Daytona,
+        }
+    }
+
+    fn to_environment_provider(&self) -> EnvironmentProvider {
+        match self {
+            Self::Docker => EnvironmentProvider::Docker,
+            Self::Daytona { .. } => EnvironmentProvider::Daytona,
         }
     }
 }
@@ -1718,12 +1726,15 @@ async fn post_install_finish(
             .into_response();
     }
 
-    // Seed the built-in environments next to the settings file. The server does
-    // not seed on startup, so install is the only place built-ins are written;
+    // Seed the default environment next to the settings file. The server does
+    // not seed on startup, so install is the only place the default is written;
     // existing files are preserved, so re-running install never clobbers edits.
     let environment_dir = install_environment_dir(state.config_path.as_ref());
-    if let Err(err) = fabro_environment::seed_environments(&environment_dir) {
-        warn!(error = %err, "failed to seed built-in environments after install");
+    if let Err(err) = fabro_environment::seed_default_environment(
+        &environment_dir,
+        sandbox.to_environment_provider(),
+    ) {
+        warn!(error = %err, "failed to seed default environment after install");
     }
 
     if let Ok(settings) = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml) {

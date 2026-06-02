@@ -14,16 +14,13 @@ use crate::{
     Environment, EnvironmentDraft, EnvironmentId, EnvironmentRevision, EnvironmentStoreError,
 };
 
-/// Built-in environments written to disk by the installer (see
-/// [`seed_environments`]). The server itself never seeds: a Fabro instance that
-/// has not been installed has no managed environments, and a run that selects
-/// an absent environment fails explicitly. `local` is intentionally absent: it
-/// is a reserved, in-memory environment (see [`RESERVED_LOCAL_ID`]).
-const SEEDS: &[(&str, &str)] = &[
-    ("default", DEFAULT_ENVIRONMENT_TOML),
-    ("docker", DOCKER_ENVIRONMENT_TOML),
-    ("daytona", DAYTONA_ENVIRONMENT_TOML),
-];
+/// Built-in default environment written to disk by the installer (see
+/// [`seed_default_environment`]). The server itself never seeds: a Fabro
+/// instance that has not been installed has no managed environments, and a run
+/// that selects an absent environment fails explicitly. `local` is
+/// intentionally absent: it is a reserved, in-memory environment (see
+/// [`RESERVED_LOCAL_ID`]).
+const DEFAULT_ENVIRONMENT_ID: &str = "default";
 
 /// `local` is a reserved environment: it is synthesized in memory only when the
 /// local sandbox provider is enabled, is never persisted to disk, and cannot be
@@ -37,11 +34,9 @@ const RESERVED_LOCAL_ID: &str = "local";
 /// policy decides whether such a run may actually execute.
 pub fn seeded_catalog_layer() -> MergeMap<EnvironmentLayer> {
     let mut catalog: HashMap<String, EnvironmentLayer> = HashMap::new();
-    for (id, body) in SEEDS {
-        let layer: EnvironmentLayer =
-            toml::from_str(body).expect("built-in environment seed should parse");
-        catalog.insert((*id).to_string(), layer);
-    }
+    let default: EnvironmentLayer =
+        toml::from_str(DEFAULT_ENVIRONMENT_TOML).expect("built-in environment seed should parse");
+    catalog.insert(DEFAULT_ENVIRONMENT_ID.to_string(), default);
     let local: EnvironmentLayer = toml::from_str(LOCAL_ENVIRONMENT_TOML)
         .expect("built-in local environment seed should parse");
     catalog.insert(RESERVED_LOCAL_ID.to_string(), local);
@@ -65,10 +60,10 @@ stop_on_terminal = true
 const LOCAL_ENVIRONMENT_TOML: &str = r#"provider = "local"
 "#;
 
-const DOCKER_ENVIRONMENT_TOML: &str = r#"provider = "docker"
+const DAYTONA_DEFAULT_ENVIRONMENT_TOML: &str = r#"provider = "daytona"
 
 [image]
-docker = "buildpack-deps:noble"
+dockerfile = "FROM buildpack-deps:noble\n"
 
 [resources]
 cpu = 2
@@ -77,9 +72,6 @@ memory = "4GB"
 [lifecycle]
 preserve = false
 stop_on_terminal = true
-"#;
-
-const DAYTONA_ENVIRONMENT_TOML: &str = r#"provider = "daytona"
 "#;
 
 #[derive(Debug)]
@@ -136,8 +128,9 @@ impl EnvironmentStore {
     /// Synchronously load all persisted environments. The synchronous file
     /// access runs during server startup before request handling begins.
     ///
-    /// The server never seeds built-in environments; seeding is an install-time
-    /// action (see [`seed_environments`]). An uninstalled instance therefore
+    /// The server never seeds the default environment; seeding is an
+    /// install-time action (see [`seed_default_environment`]). An uninstalled
+    /// instance therefore
     /// has no managed environments on disk, and the reserved `local`
     /// environment is the only entry present (when the local provider is
     /// enabled).
@@ -274,34 +267,48 @@ fn check_revision(
     Ok(())
 }
 
-/// Writes the built-in environment seeds (`default`, `docker`, `daytona`) into
-/// `dir`, creating the directory if needed. Existing files are left untouched,
-/// so this is idempotent and never clobbers operator edits. Called by the
-/// installer; the running server does not seed.
+/// Writes the built-in Docker default environment into `dir`, creating the
+/// directory if needed. Existing files are left untouched, so this is
+/// idempotent and never clobbers operator edits. Called by legacy installer
+/// paths; the running server does not seed.
+pub fn seed_environments(dir: &Path) -> Result<(), EnvironmentStoreError> {
+    seed_default_environment(dir, EnvironmentProvider::Docker)
+}
+
+/// Writes the selected built-in `default` environment into `dir`, creating the
+/// directory if needed. Existing files are left untouched, so this is
+/// idempotent and never clobbers operator edits. Called by the installer; the
+/// running server does not seed.
 #[expect(
     clippy::disallowed_methods,
     clippy::disallowed_types,
     reason = "Install-time environment seeding runs synchronously from the installer before the server starts."
 )]
-pub fn seed_environments(dir: &Path) -> Result<(), EnvironmentStoreError> {
+pub fn seed_default_environment(
+    dir: &Path,
+    provider: EnvironmentProvider,
+) -> Result<(), EnvironmentStoreError> {
     std::fs::create_dir_all(dir).map_err(|err| EnvironmentStoreError::io(dir, err))?;
-    for (id, content) in SEEDS {
-        let path = dir.join(format!("{id}.toml"));
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                use std::io::Write as _;
-                file.write_all(content.as_bytes())
-                    .map_err(|err| EnvironmentStoreError::io(&path, err))?;
-                file.sync_all()
-                    .map_err(|err| EnvironmentStoreError::io(&path, err))?;
-            }
-            Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(EnvironmentStoreError::io(path, err)),
+    let content = match provider {
+        EnvironmentProvider::Docker => DEFAULT_ENVIRONMENT_TOML,
+        EnvironmentProvider::Daytona => DAYTONA_DEFAULT_ENVIRONMENT_TOML,
+        EnvironmentProvider::Local => LOCAL_ENVIRONMENT_TOML,
+    };
+    let path = dir.join(format!("{DEFAULT_ENVIRONMENT_ID}.toml"));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            use std::io::Write as _;
+            file.write_all(content.as_bytes())
+                .map_err(|err| EnvironmentStoreError::io(&path, err))?;
+            file.sync_all()
+                .map_err(|err| EnvironmentStoreError::io(&path, err))?;
         }
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
+        Err(err) => return Err(EnvironmentStoreError::io(path, err)),
     }
     Ok(())
 }
@@ -492,9 +499,11 @@ mod tests {
     fn seeded_catalog_layer_contains_built_ins() {
         let catalog = super::seeded_catalog_layer();
         let inner = catalog.into_inner();
-        for id in ["default", "local", "docker", "daytona"] {
+        for id in ["default", "local"] {
             assert!(inner.contains_key(id), "missing {id}");
         }
+        assert!(!inner.contains_key("docker"));
+        assert!(!inner.contains_key("daytona"));
     }
 
     #[tokio::test]
@@ -519,14 +528,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_environments_writes_built_ins_and_load_picks_them_up() {
+    async fn seed_environments_writes_default_only_and_load_picks_it_up() {
         let dir = tempfile::tempdir().unwrap();
         let environment_dir = dir.path().join("environments");
 
         super::seed_environments(&environment_dir).unwrap();
-        for id in ["default", "docker", "daytona"] {
-            assert!(environment_dir.join(format!("{id}.toml")).exists());
-        }
+        assert!(environment_dir.join("default.toml").exists());
+        assert!(!environment_dir.join("docker.toml").exists());
+        assert!(!environment_dir.join("daytona.toml").exists());
         // `local` is reserved and in-memory; it is never written to disk.
         assert!(!environment_dir.join("local.toml").exists());
 
@@ -537,7 +546,7 @@ mod tests {
                 .iter()
                 .map(|environment| environment.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["daytona", "default", "docker", "local"]
+            vec!["default", "local"]
         );
     }
 
