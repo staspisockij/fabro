@@ -2327,7 +2327,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         .local
         .enabled;
     let environment_store = Arc::new(
-        EnvironmentStore::load_or_seed(environment_dir, local_provider_enabled)
+        EnvironmentStore::load(environment_dir, local_provider_enabled)
             .map_err(anyhow::Error::new)
             .context("load environments")?,
     );

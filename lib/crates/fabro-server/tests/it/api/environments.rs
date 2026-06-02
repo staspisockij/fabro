@@ -573,7 +573,7 @@ async fn dockerfile_path_over_rest_is_rejected_without_persisting_or_exposing_co
 }
 
 #[tokio::test]
-async fn delete_environment_removes_non_default_and_default_is_protected() {
+async fn delete_environment_removes_non_default_and_default_is_deletable() {
     let (app, _temp_dir, environment_dir) = environment_app();
     let created = create_environment(&app, "delete-env", "local").await;
     let revision = revision_from(&created);
@@ -608,13 +608,16 @@ async fn delete_environment_removes_non_default_and_default_is_protected() {
     )
     .await;
 
+    // `default` is an ordinary environment: it can be deleted, which removes the
+    // run fallback. The server no longer protects it.
     let default = app
         .clone()
         .oneshot(empty_request(Method::GET, "/environments/default"))
         .await
         .expect("get default environment should respond");
     let default = response_json(default, StatusCode::OK, "GET /api/v1/environments/default").await;
-    let protected = app
+    let deleted = app
+        .clone()
         .oneshot(request_with_if_match(
             Method::DELETE,
             "/environments/default",
@@ -624,9 +627,21 @@ async fn delete_environment_removes_non_default_and_default_is_protected() {
         .await
         .expect("delete default environment should respond");
     response_status(
-        protected,
-        StatusCode::CONFLICT,
+        deleted,
+        StatusCode::NO_CONTENT,
         "DELETE /api/v1/environments/default",
+    )
+    .await;
+
+    assert!(!environment_dir.join("default.toml").exists());
+    let missing_default = app
+        .oneshot(empty_request(Method::GET, "/environments/default"))
+        .await
+        .expect("get deleted default environment should respond");
+    response_status(
+        missing_default,
+        StatusCode::NOT_FOUND,
+        "GET /api/v1/environments/default after delete",
     )
     .await;
 }

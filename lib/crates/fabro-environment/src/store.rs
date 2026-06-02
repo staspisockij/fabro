@@ -14,8 +14,11 @@ use crate::{
     Environment, EnvironmentDraft, EnvironmentId, EnvironmentRevision, EnvironmentStoreError,
 };
 
-/// Environments written to disk on first startup. `local` is intentionally
-/// absent: it is a reserved, in-memory environment (see [`RESERVED_LOCAL_ID`]).
+/// Built-in environments written to disk by the installer (see
+/// [`seed_environments`]). The server itself never seeds: a Fabro instance that
+/// has not been installed has no managed environments, and a run that selects
+/// an absent environment fails explicitly. `local` is intentionally absent: it
+/// is a reserved, in-memory environment (see [`RESERVED_LOCAL_ID`]).
 const SEEDS: &[(&str, &str)] = &[
     ("default", DEFAULT_ENVIRONMENT_TOML),
     ("docker", DOCKER_ENVIRONMENT_TOML),
@@ -130,15 +133,19 @@ fn build_catalog_layer(
 }
 
 impl EnvironmentStore {
-    /// Synchronously seed missing built-in environment files and load all
-    /// persisted environments. The synchronous file access runs during server
-    /// startup before request handling begins.
-    pub fn load_or_seed(
+    /// Synchronously load all persisted environments. The synchronous file
+    /// access runs during server startup before request handling begins.
+    ///
+    /// The server never seeds built-in environments; seeding is an install-time
+    /// action (see [`seed_environments`]). An uninstalled instance therefore
+    /// has no managed environments on disk, and the reserved `local`
+    /// environment is the only entry present (when the local provider is
+    /// enabled).
+    pub fn load(
         dir: impl Into<PathBuf>,
         local_enabled: bool,
     ) -> Result<Self, EnvironmentStoreError> {
         let dir = dir.into();
-        seed_missing_environments(&dir)?;
         let mut environments = load_environments(&dir)?;
         if local_enabled {
             let local = synthetic_local_environment()?;
@@ -224,9 +231,9 @@ impl EnvironmentStore {
         id: &EnvironmentId,
         expected: &EnvironmentRevision,
     ) -> Result<(), EnvironmentStoreError> {
-        if id.as_str() == "default" {
-            return Err(EnvironmentStoreError::Protected { id: id.clone() });
-        }
+        // `default` is an ordinary deletable environment. Deleting it removes the
+        // run fallback, which is intentional: a run that selects `default` after
+        // it is gone fails explicitly rather than silently using a built-in.
         if id.as_str() == RESERVED_LOCAL_ID {
             return Err(EnvironmentStoreError::Reserved { id: id.clone() });
         }
@@ -267,12 +274,16 @@ fn check_revision(
     Ok(())
 }
 
+/// Writes the built-in environment seeds (`default`, `docker`, `daytona`) into
+/// `dir`, creating the directory if needed. Existing files are left untouched,
+/// so this is idempotent and never clobbers operator edits. Called by the
+/// installer; the running server does not seed.
 #[expect(
     clippy::disallowed_methods,
     clippy::disallowed_types,
-    reason = "Environment directory seeding runs synchronously during startup before request handling."
+    reason = "Install-time environment seeding runs synchronously from the installer before the server starts."
 )]
-fn seed_missing_environments(dir: &Path) -> Result<(), EnvironmentStoreError> {
+pub fn seed_environments(dir: &Path) -> Result<(), EnvironmentStoreError> {
     std::fs::create_dir_all(dir).map_err(|err| EnvironmentStoreError::io(dir, err))?;
     for (id, content) in SEEDS {
         let path = dir.join(format!("{id}.toml"));
@@ -487,27 +498,68 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn absent_directory_loads_and_seeds_built_ins() {
+    async fn load_does_not_seed_built_ins() {
         let dir = tempfile::tempdir().unwrap();
         let environment_dir = dir.path().join("environments");
 
-        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
-        let environments = store.list();
-
-        // `local` is present in memory (local provider enabled) but the other
-        // three are the on-disk seeds.
+        // The server loads without seeding: an uninstalled instance has only the
+        // reserved in-memory `local` environment, and nothing is written to disk.
+        let store = EnvironmentStore::load(&environment_dir, true).unwrap();
         assert_eq!(
-            environments
+            store
+                .list()
                 .iter()
                 .map(|environment| environment.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["daytona", "default", "docker", "local"]
+            vec!["local"]
         );
+        for id in ["default", "docker", "daytona"] {
+            assert!(!environment_dir.join(format!("{id}.toml")).exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn seed_environments_writes_built_ins_and_load_picks_them_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let environment_dir = dir.path().join("environments");
+
+        super::seed_environments(&environment_dir).unwrap();
         for id in ["default", "docker", "daytona"] {
             assert!(environment_dir.join(format!("{id}.toml")).exists());
         }
         // `local` is reserved and in-memory; it is never written to disk.
         assert!(!environment_dir.join("local.toml").exists());
+
+        let store = EnvironmentStore::load(&environment_dir, true).unwrap();
+        assert_eq!(
+            store
+                .list()
+                .iter()
+                .map(|environment| environment.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["daytona", "default", "docker", "local"]
+        );
+    }
+
+    #[tokio::test]
+    async fn seed_environments_is_idempotent_and_preserves_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let environment_dir = dir.path().join("environments");
+
+        super::seed_environments(&environment_dir).unwrap();
+        // An operator edit to a seeded file must survive a re-seed.
+        fs::write(
+            environment_dir.join("default.toml"),
+            "provider = \"docker\"\n[resources]\ncpu = 7\n",
+        )
+        .await
+        .unwrap();
+
+        super::seed_environments(&environment_dir).unwrap();
+
+        let store = EnvironmentStore::load(&environment_dir, false).unwrap();
+        let default = store.get(&EnvironmentId::new("default").unwrap()).unwrap();
+        assert_eq!(default.settings.resources.cpu, Some(7));
     }
 
     #[tokio::test]
@@ -515,10 +567,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let environment_dir = dir.path().join("environments");
 
-        let enabled = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
+        let enabled = EnvironmentStore::load(&environment_dir, true).unwrap();
         assert!(enabled.get(&EnvironmentId::new("local").unwrap()).is_some());
 
-        let disabled = EnvironmentStore::load_or_seed(&environment_dir, false).unwrap();
+        let disabled = EnvironmentStore::load(&environment_dir, false).unwrap();
         assert!(
             disabled
                 .get(&EnvironmentId::new("local").unwrap())
@@ -539,7 +591,7 @@ mod tests {
         .await
         .unwrap();
 
-        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
+        let store = EnvironmentStore::load(&environment_dir, true).unwrap();
         let local = store.get(&EnvironmentId::new("local").unwrap()).unwrap();
 
         // The synthetic local carries no resources; the stale file was ignored.
@@ -549,7 +601,7 @@ mod tests {
     #[tokio::test]
     async fn local_mutations_are_reserved() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let store = EnvironmentStore::load(dir.path().join("environments"), true).unwrap();
         let local = EnvironmentId::new("local").unwrap();
         let revision = store.get(&local).unwrap().revision;
 
@@ -584,7 +636,7 @@ mod tests {
             .await
             .unwrap();
 
-        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
+        let store = EnvironmentStore::load(&environment_dir, true).unwrap();
 
         assert_eq!(
             store
@@ -592,7 +644,7 @@ mod tests {
                 .iter()
                 .map(|environment| environment.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["a", "daytona", "default", "docker", "local", "z"]
+            vec!["a", "local", "z"]
         );
     }
 
@@ -603,7 +655,7 @@ mod tests {
         std::fs::create_dir_all(&environment_dir).unwrap();
         std::fs::write(environment_dir.join("Bad.toml"), r#"provider = "local""#).unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
+        let err = EnvironmentStore::load(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::InvalidFilename { .. }));
     }
@@ -615,7 +667,7 @@ mod tests {
         std::fs::create_dir_all(&environment_dir).unwrap();
         std::fs::write(environment_dir.join("bad.toml"), r#"provider = "bogus""#).unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
+        let err = EnvironmentStore::load(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
         assert!(err.to_string().contains("unknown environment provider"));
@@ -637,7 +689,7 @@ mode = "cidr_allow_list"
         )
         .unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
+        let err = EnvironmentStore::load(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
         assert!(
@@ -662,7 +714,7 @@ path = "Dockerfile"
         )
         .unwrap();
 
-        let err = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap_err();
+        let err = EnvironmentStore::load(&environment_dir, true).unwrap_err();
 
         assert!(matches!(err, EnvironmentStoreError::Validation { .. }));
         assert!(err.to_string().contains("Dockerfile"));
@@ -671,7 +723,11 @@ path = "Dockerfile"
     #[tokio::test]
     async fn create_conflict_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let store = EnvironmentStore::load(dir.path().join("environments"), true).unwrap();
+        store
+            .create(draft("docker", EnvironmentProvider::Docker))
+            .await
+            .unwrap();
 
         let err = store
             .create(draft("docker", EnvironmentProvider::Docker))
@@ -684,7 +740,7 @@ path = "Dockerfile"
     #[tokio::test]
     async fn create_invalid_settings_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let store = EnvironmentStore::load(dir.path().join("environments"), true).unwrap();
         let mut settings = settings(EnvironmentProvider::Local);
         settings.network.mode = EnvironmentNetworkMode::Block;
 
@@ -706,8 +762,11 @@ path = "Dockerfile"
     #[tokio::test]
     async fn replace_stale_revision_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
-        let current = store.get(&EnvironmentId::new("docker").unwrap()).unwrap();
+        let store = EnvironmentStore::load(dir.path().join("environments"), true).unwrap();
+        let current = store
+            .create(draft("docker", EnvironmentProvider::Docker))
+            .await
+            .unwrap();
         let stale = EnvironmentRevision::from_bytes(b"stale");
 
         let err = store
@@ -719,24 +778,26 @@ path = "Dockerfile"
     }
 
     #[tokio::test]
-    async fn default_delete_is_rejected() {
+    async fn default_is_deletable() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let environment_dir = dir.path().join("environments");
+        super::seed_environments(&environment_dir).unwrap();
+        let store = EnvironmentStore::load(&environment_dir, true).unwrap();
         let default = store.get(&EnvironmentId::new("default").unwrap()).unwrap();
 
-        let err = store
-            .delete(&default.id, &default.revision)
-            .await
-            .unwrap_err();
+        // `default` is an ordinary environment: deleting it succeeds and removes
+        // the run fallback rather than being protected.
+        store.delete(&default.id, &default.revision).await.unwrap();
 
-        assert!(matches!(err, EnvironmentStoreError::Protected { .. }));
+        assert!(store.get(&default.id).is_none());
+        assert!(!environment_dir.join("default.toml").exists());
     }
 
     #[tokio::test]
     async fn delete_success_removes_file_and_memory_entry() {
         let dir = tempfile::tempdir().unwrap();
         let environment_dir = dir.path().join("environments");
-        let store = EnvironmentStore::load_or_seed(&environment_dir, true).unwrap();
+        let store = EnvironmentStore::load(&environment_dir, true).unwrap();
         let created = store
             .create(draft("tmp", EnvironmentProvider::Local))
             .await
@@ -751,7 +812,7 @@ path = "Dockerfile"
     #[tokio::test]
     async fn canonical_revision_changes_when_persisted_bytes_change() {
         let dir = tempfile::tempdir().unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let store = EnvironmentStore::load(dir.path().join("environments"), true).unwrap();
         let created = store
             .create(draft("rev", EnvironmentProvider::Local))
             .await
@@ -776,7 +837,7 @@ path = "Dockerfile"
         fs::write(dir.path().join("Dockerfile"), "FROM alpine\n")
             .await
             .unwrap();
-        let store = EnvironmentStore::load_or_seed(dir.path().join("environments"), true).unwrap();
+        let store = EnvironmentStore::load(dir.path().join("environments"), true).unwrap();
         let mut settings = settings(EnvironmentProvider::Docker);
         settings.image.dockerfile = Some(DockerfileSource::Path {
             path: "Dockerfile".to_string(),

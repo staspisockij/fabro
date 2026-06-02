@@ -1222,8 +1222,10 @@ id = "missing"
 #[test]
 fn system_sandbox_provider_uses_manifest_defaults() {
     let temp = tempfile::tempdir().unwrap();
-    let environment_store = EnvironmentStore::load_or_seed(temp.path().join("environments"), true)
-        .expect("environment store should seed");
+    let environment_dir = temp.path().join("environments");
+    fabro_environment::seed_environments(&environment_dir).expect("seed built-in environments");
+    let environment_store =
+        EnvironmentStore::load(&environment_dir, true).expect("environment store should load");
     let source = r#"
 _version = 1
 
@@ -1241,8 +1243,8 @@ id = "daytona"
 #[test]
 fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() {
     let temp = tempfile::tempdir().unwrap();
-    let environment_store = EnvironmentStore::load_or_seed(temp.path().join("environments"), true)
-        .expect("environment store should seed");
+    let environment_store = EnvironmentStore::load(temp.path().join("environments"), true)
+        .expect("environment store should load");
     let source = r#"
 _version = 1
 

@@ -731,6 +731,15 @@ fn install_listen_config(bind: &Bind) -> InstallListenConfig {
     }
 }
 
+/// The environments directory sits next to the active settings file, matching
+/// the server's own `environment_dir_for_active_config` derivation.
+fn install_environment_dir(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("environments")
+}
+
 async fn health() -> Response {
     Json(serde_json::json!({
         "status": "ok",
@@ -1707,6 +1716,14 @@ async fn post_install_finish(
             })),
         )
             .into_response();
+    }
+
+    // Seed the built-in environments next to the settings file. The server does
+    // not seed on startup, so install is the only place built-ins are written;
+    // existing files are preserved, so re-running install never clobbers edits.
+    let environment_dir = install_environment_dir(state.config_path.as_ref());
+    if let Err(err) = fabro_environment::seed_environments(&environment_dir) {
+        warn!(error = %err, "failed to seed built-in environments after install");
     }
 
     if let Ok(settings) = fabro_config::ServerSettingsBuilder::from_toml(&settings_toml) {

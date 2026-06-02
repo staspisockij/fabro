@@ -31,8 +31,6 @@ pub enum EnvironmentStoreError {
         expected: EnvironmentRevision,
         actual:   EnvironmentRevision,
     },
-    #[error("environment is protected and cannot be deleted: {id}")]
-    Protected { id: EnvironmentId },
     #[error("environment is reserved and cannot be modified: {id}")]
     Reserved { id: EnvironmentId },
     #[error("environment validation failed: {source}")]
@@ -95,7 +93,6 @@ impl EnvironmentStoreError {
             Self::NotFound { .. } => "not_found",
             Self::AlreadyExists { .. } => "already_exists",
             Self::StaleRevision { .. } => "stale_revision",
-            Self::Protected { .. } => "protected",
             Self::Reserved { .. } => "reserved",
             Self::Validation { .. } => "validation",
             Self::InvalidFilename { .. } => "invalid_filename",

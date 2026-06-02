@@ -2012,6 +2012,22 @@ async fn run_install_inner(args: &InstallArgs, ctx: &CommandContext) -> Result<(
         dev_token_for_auth_store.as_deref(),
     )
     .await?;
+
+    // Seed the built-in environments next to the settings file. The server never
+    // seeds on startup, so install is the only place built-ins are written;
+    // existing files are preserved, so re-running install never clobbers edits.
+    let environment_dir = config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("environments");
+    if let Err(err) = fabro_environment::seed_environments(&environment_dir) {
+        fabro_util::printerr!(
+            printer,
+            "  {} Failed to seed built-in environments: {err}",
+            s.yellow.apply_to("Warning:")
+        );
+    }
+
     if let Some(token) = dev_token_for_auth_store {
         let user_settings = UserSettingsBuilder::from_toml(&settings_toml)?;
         let target = match user_config::resolve_nondefault_server_target(

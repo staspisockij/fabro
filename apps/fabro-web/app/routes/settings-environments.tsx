@@ -20,10 +20,6 @@ import {
 import { ConfirmDialog } from "../components/ui";
 import { useToast } from "../components/toast";
 
-// `default` is seeded and protected from deletion by the server; reflect that
-// in the UI instead of letting the delete fail with a 409.
-const PROTECTED_ID = "default";
-
 // `local` is a reserved, in-memory environment the server includes only when
 // the local sandbox provider is enabled. It has no configurable settings, so it
 // gets its own panel instead of a row in the managed environments list.
@@ -237,7 +233,6 @@ function EnvironmentRow({
             {environment.id}
           </span>
           <Badge>{environment.provider}</Badge>
-          {environment.id === PROTECTED_ID ? <StatusTag>protected</StatusTag> : null}
         </div>
         <div className="mt-0.5 truncate text-xs/5 text-fg-3">
           {resourcesSummary(environment)}
@@ -286,7 +281,6 @@ function RowMenu({
   disabled: boolean;
   onDelete: () => void;
 }) {
-  const protectedFromDelete = environment.id === PROTECTED_ID;
   return (
     <Menu as="div" className="relative inline-block">
       <MenuButton
@@ -316,11 +310,10 @@ function RowMenu({
           <button
             type="button"
             onClick={onDelete}
-            disabled={disabled || protectedFromDelete}
-            title={protectedFromDelete ? "The default environment is protected" : undefined}
+            disabled={disabled}
             className={MENU_ITEM_DANGER_CLASS}
           >
-            {protectedFromDelete ? "Protected" : "Delete"}
+            Delete
           </button>
         </MenuItem>
       </MenuItems>
