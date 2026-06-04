@@ -126,5 +126,61 @@ class TestSolitaireGame(unittest.TestCase):
 
         self.assertTrue(self.game.check_win())
 
+    def test_card_color_and_helpers(self):
+        # Card should have color property and display_str helper
+        red_card = Card(suit='H', rank=1, is_face_up=True)
+        black_card = Card(suit='S', rank=13, is_face_up=True)
+        face_down_card = Card(suit='D', rank=10, is_face_up=False)
+
+        self.assertEqual(red_card.color, "red")
+        self.assertEqual(black_card.color, "black")
+        self.assertTrue(red_card.is_red)
+        self.assertFalse(black_card.is_red)
+
+        self.assertEqual(red_card.display_str(), "A♥")
+        self.assertEqual(black_card.display_str(), "K♠")
+        self.assertEqual(face_down_card.display_str(), "##")
+
+        # Repr check
+        self.assertEqual(repr(red_card), "[A♥]")
+        self.assertEqual(repr(face_down_card), "[##]")
+
+    def test_deck_creation_and_shuffling(self):
+        from solitaire_tui.game import Deck
+        deck = Deck(seed=42)
+        self.assertEqual(len(deck), 52)
+
+        # Deck cards should be face-down
+        for card in deck.cards:
+            self.assertFalse(card.is_face_up)
+
+        # Drawing a card
+        top_card = deck.cards[-1]
+        drawn = deck.draw()
+        self.assertEqual(drawn, top_card)
+        self.assertEqual(len(deck), 51)
+
+        # Shuffle
+        deck2 = Deck(seed=42)
+        deck2.shuffle()
+        # Verify that the deck order has changed from unshuffled
+        unshuffled_deck = Deck()
+        self.assertNotEqual([c.suit + str(c.rank) for c in deck2.cards], [c.suit + str(c.rank) for c in unshuffled_deck.cards])
+
+    def test_pile_abstractions(self):
+        from solitaire_tui.game import StockPile, WastePile, FoundationPile, TableauPile
+        stock = StockPile([Card('H', 1), Card('D', 2)])
+        self.assertIsInstance(stock, list)
+        self.assertEqual(stock.top_card.rank, 2)
+
+        waste = WastePile()
+        self.assertIsNone(waste.top_card)
+
+        # Check types in GameState
+        self.assertIsInstance(self.game.stock, StockPile)
+        self.assertIsInstance(self.game.waste, WastePile)
+        self.assertIsInstance(self.game.foundations[0], FoundationPile)
+        self.assertIsInstance(self.game.tableau[0], TableauPile)
+
 if __name__ == '__main__':
     unittest.main()

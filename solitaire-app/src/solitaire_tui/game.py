@@ -1,5 +1,5 @@
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 import copy
 
@@ -14,23 +14,91 @@ class Card:
         return self.suit in ('H', 'D')
 
     @property
+    def color(self) -> str:
+        return "red" if self.is_red else "black"
+
+    @property
     def label(self) -> str:
         ranks = {1: "A", 11: "J", 12: "Q", 13: "K"}
         return ranks.get(self.rank, str(self.rank))
 
+    def display_str(self) -> str:
+        """Returns string representation of card depending on whether it is face up."""
+        if self.is_face_up:
+            suit_syms = {'H': '♥', 'D': '♦', 'C': '♣', 'S': '♠'}
+            sym = suit_syms.get(self.suit, self.suit)
+            return f"{self.label}{sym}"
+        else:
+            return "##"
+
     def __repr__(self) -> str:
-        suit_syms = {'H': '♥', 'D': '♦', 'C': '♣', 'S': '♠'}
-        sym = suit_syms.get(self.suit, self.suit)
-        face = self.label + sym if self.is_face_up else "##"
+        face = self.display_str()
         return f"[{face}]"
+
+
+class Deck:
+    def __init__(self, seed: Optional[int] = None) -> None:
+        self.cards: List[Card] = []
+        self.seed = seed
+        self.reset()
+
+    def reset(self) -> None:
+        """Creates standard 52-card deck, face down."""
+        self.cards = [
+            Card(suit=s, rank=r, is_face_up=False)
+            for s in ['H', 'D', 'C', 'S']
+            for r in range(1, 14)
+        ]
+
+    def shuffle(self) -> None:
+        """Shuffles the deck using random or seed."""
+        if self.seed is not None:
+            random.seed(self.seed)
+        else:
+            random.seed()
+        random.shuffle(self.cards)
+
+    def draw(self) -> Card:
+        """Draws/pops a card from the deck."""
+        return self.cards.pop()
+
+    def __len__(self) -> int:
+        return len(self.cards)
+
+
+class Pile(list):
+    """Base pile representation."""
+    @property
+    def top_card(self) -> Optional[Card]:
+        return self[-1] if self else None
+
+
+class StockPile(Pile):
+    """Stock pile representation (face-down draw pile)."""
+    pass
+
+
+class WastePile(Pile):
+    """Waste pile representation (face-up drawn cards)."""
+    pass
+
+
+class FoundationPile(Pile):
+    """Foundation pile representation (builds up from Ace to King by suit)."""
+    pass
+
+
+class TableauPile(Pile):
+    """Tableau pile representation (7 columns of cards)."""
+    pass
 
 
 class GameState:
     def __init__(self, seed: Optional[int] = None) -> None:
-        self.stock: List[Card] = []
-        self.waste: List[Card] = []
-        self.foundations: List[List[Card]] = [[] for _ in range(4)]
-        self.tableau: List[List[Card]] = [[] for _ in range(7)]
+        self.stock: StockPile = StockPile()
+        self.waste: WastePile = WastePile()
+        self.foundations: List[FoundationPile] = [FoundationPile() for _ in range(4)]
+        self.tableau: List[TableauPile] = [TableauPile() for _ in range(7)]
         self.history: List[Dict[str, Any]] = []
         self.seed = seed
         self.deal()
@@ -65,32 +133,26 @@ class GameState:
 
     def deal(self) -> None:
         """Creates a standard 52-card deck, shuffles, and deals a new game."""
-        suits = ['H', 'D', 'C', 'S']
-        deck = [Card(suit=s, rank=r, is_face_up=False) for s in suits for r in range(1, 14)]
-        
-        if self.seed is not None:
-            random.seed(self.seed)
-        else:
-            random.seed()
-        random.shuffle(deck)
+        deck = Deck(seed=self.seed)
+        deck.shuffle()
 
-        self.stock = []
-        self.waste = []
-        self.foundations = [[] for _ in range(4)]
-        self.tableau = [[] for _ in range(7)]
+        self.stock = StockPile()
+        self.waste = WastePile()
+        self.foundations = [FoundationPile() for _ in range(4)]
+        self.tableau = [TableauPile() for _ in range(7)]
         self.history = []
 
         # Deal to Tableau
         # Col 0 gets 1 card, Col 1 gets 2 cards, ..., Col 6 gets 7 cards
         for i in range(7):
             for j in range(i + 1):
-                card = deck.pop()
+                card = deck.draw()
                 if j == i:
                     card.is_face_up = True
                 self.tableau[i].append(card)
 
         # Remaining cards go to Stock (face-down)
-        self.stock = deck
+        self.stock = StockPile(deck.cards)
 
     def draw(self) -> bool:
         """Draws one card from Stock to Waste. Recycles Waste to Stock if Stock is empty."""
@@ -103,10 +165,10 @@ class GameState:
                 return False
             # Recycle Waste back to Stock
             # When we flip waste back to stock, we preserve order by reversing
-            self.stock = list(reversed(self.waste))
+            self.stock = StockPile(reversed(self.waste))
             for card in self.stock:
                 card.is_face_up = False
-            self.waste = []
+            self.waste = WastePile()
             return True
 
         card = self.stock.pop()
@@ -219,7 +281,7 @@ class GameState:
         dest_pile = self.tableau[dest_col]
         
         moving_stack = src_pile[card_idx:]
-        self.tableau[src_col] = src_pile[:card_idx]
+        self.tableau[src_col] = TableauPile(src_pile[:card_idx])
         dest_pile.extend(moving_stack)
         
         self.auto_reveal(src_col)
