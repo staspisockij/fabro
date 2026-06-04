@@ -1,0 +1,325 @@
+diff --git a/card-game-app/README.md b/card-game-app/README.md
+new file mode 100644
+index 000000000..e12418971
+--- /dev/null
++++ b/card-game-app/README.md
+@@ -0,0 +1,32 @@
++# FreeCell Solitaire TUI
++
++A terminal-based FreeCell Solitaire game built in Python using the `curses` standard library.
++
++## Project Structure
++
++- `main.py`: CLI entrypoint.
++- `src/card_game_tui/`: Core package.
++  - `domain.py`: Game rules, logic, state, and card representations (fully decoupled from UI).
++  - `tui.py`: Curses-based TUI and interface logic.
++- `tests/`: Automated unit and integration tests.
++
++## Installation & Running
++
++This project requires Python 3.10+ and no external dependencies for core play.
++
++To run:
++```bash
++python3 main.py
++```
++
++For smoke-test mode:
++```bash
++python3 main.py --smoke
++```
++
++## Running Tests
++
++To run tests:
++```bash
++pytest
++```
+diff --git a/card-game-app/main.py b/card-game-app/main.py
+new file mode 100644
+index 000000000..2fe159c3a
+--- /dev/null
++++ b/card-game-app/main.py
+@@ -0,0 +1,57 @@
++#!/usr/bin/env python3
++import sys
++import os
++
++# Add src to python path to make importing easier
++sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
++
++from card_game_tui.domain import GameState, Position, LocationType
++
++def run_smoke_test() -> int:
++    print("Running non-interactive smoke test probe...")
++    try:
++        # 1. Initialize GameState with a deterministic seed
++        seed = 42
++        state = GameState(seed=seed)
++        print(f"Initialized GameState with seed {seed}")
++
++        # 2. Basic assertions to verify components compile and behave as expected
++        # Let's verify we have 8 tableau columns
++        if len(state.tableaus) != 8:
++            print(f"Error: Expected 8 tableaus, found {len(state.tableaus)}", file=sys.stderr)
++            return 1
++        
++        # 3. Validate a mock move
++        from_pos = Position(LocationType.TABLEAU, 0)
++        to_pos = Position(LocationType.FREECELL, 0)
++        
++        is_valid = state.validate_move(from_pos, to_pos)
++        print(f"Validating move from Tableau 0 to FreeCell 0: {is_valid}")
++        
++        success = state.execute_move(from_pos, to_pos)
++        print(f"Executed move from Tableau 0 to FreeCell 0: {success}")
++        
++        # Check win state
++        is_win = state.check_win()
++        print(f"Win checked: {is_win}")
++
++        print("SMOKE TEST SUCCESSFUL")
++        return 0
++    except Exception as e:
++        print(f"Smoke test failed with error: {e}", file=sys.stderr)
++        return 1
++
++def main():
++    if "--smoke" in sys.argv:
++        sys.exit(run_smoke_test())
++    else:
++        print("FreeCell Solitaire TUI")
++        print("To run the smoke test, execute with --smoke")
++        print("Starting interactive UI (Placeholder)...")
++        # In future milestones, this will invoke the curses UI
++        from card_game_tui.tui import TUIApp
++        app = TUIApp()
++        app.run()
++
++if __name__ == "__main__":
++    main()
+diff --git a/card-game-app/pyproject.toml b/card-game-app/pyproject.toml
+new file mode 100644
+index 000000000..132e2172b
+--- /dev/null
++++ b/card-game-app/pyproject.toml
+@@ -0,0 +1,19 @@
++[project]
++name = "card-game-tui"
++version = "0.1.0"
++description = "A terminal-based FreeCell solitaire game in Python"
++readme = "README.md"
++requires-python = ">=3.10"
++dependencies = []
++
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[tool.pytest.ini_options]
++minversion = "6.0"
++addopts = "-ra -q"
++testpaths = [
++    "tests",
++]
++pythonpath = ["src"]
+diff --git a/card-game-app/src/card_game_tui/__init__.py b/card-game-app/src/card_game_tui/__init__.py
+new file mode 100644
+index 000000000..6b01371db
+--- /dev/null
++++ b/card-game-app/src/card_game_tui/__init__.py
+@@ -0,0 +1 @@
++# Card Game TUI Package
+diff --git a/card-game-app/src/card_game_tui/domain.py b/card-game-app/src/card_game_tui/domain.py
+new file mode 100644
+index 000000000..db4a2fa8f
+--- /dev/null
++++ b/card-game-app/src/card_game_tui/domain.py
+@@ -0,0 +1,129 @@
++import random
++from dataclasses import dataclass
++from enum import Enum, auto
++from typing import List, Union, Dict
++
++class Suit(Enum):
++    HEARTS = "H"
++    DIAMONDS = "D"
++    CLUBS = "C"
++    SPADES = "S"
++
++    @property
++    def color(self) -> str:
++        return "RED" if self in (Suit.HEARTS, Suit.DIAMONDS) else "BLACK"
++
++    @property
++    def symbol(self) -> str:
++        return {
++            Suit.HEARTS: "♥",
++            Suit.DIAMONDS: "♦",
++            Suit.CLUBS: "♣",
++            Suit.SPADES: "♠"
++        }[self]
++
++class Rank(Enum):
++    ACE = 1
++    TWO = 2
++    THREE = 3
++    FOUR = 4
++    FIVE = 5
++    SIX = 6
++    SEVEN = 7
++    EIGHT = 8
++    NINE = 9
++    TEN = 10
++    JACK = 11
++    QUEEN = 12
++    KING = 13
++
++    @property
++    def label(self) -> str:
++        if self.value == 1: return "A"
++        if self.value == 11: return "J"
++        if self.value == 12: return "Q"
++        if self.value == 13: return "K"
++        return str(self.value)
++
++@dataclass(frozen=True)
++class Card:
++    suit: Suit
++    rank: Rank
++
++    def __repr__(self) -> str:
++        return f"{self.rank.label}{self.suit.symbol}"
++
++class Deck:
++    def __init__(self, seed: int = None):
++        self.cards = [Card(suit, rank) for suit in Suit for rank in Rank]
++        if seed is not None:
++            random.seed(seed)
++        random.shuffle(self.cards)
++
++    def deal(self) -> List[List[Card]]:
++        """Deals 52 cards into 8 columns."""
++        tableaus: List[List[Card]] = [[] for _ in range(8)]
++        for i, card in enumerate(self.cards):
++            tableaus[i % 8].append(card)
++        return tableaus
++
++class LocationType(Enum):
++    TABLEAU = auto()
++    FREECELL = auto()
++    FOUNDATION = auto()
++
++@dataclass(frozen=True)
++class Position:
++    type: LocationType
++    index: int  # 0-7 for Tableau, 0-3 for FreeCell, 0-3 for Foundation
++
++@dataclass
++class MoveRecord:
++    from_pos: Position
++    to_pos: Position
++    cards: List[Card]  # Captured for single or sequence moves
++    auto_moves: List['MoveRecord'] = None  # Nested moves triggered by auto-homing
++
++class GameState:
++    def __init__(self, seed: int = None):
++        self.tableaus: List[List[Card]] = Deck(seed).deal()
++        self.freecells: List[Union[Card, None]] = [None] * 4
++        self.foundations: Dict[Suit, List[Card]] = {suit: [] for suit in Suit}
++        self.undo_stack: List[MoveRecord] = []
++        self.redo_stack: List[MoveRecord] = []
++
++    def get_card_at(self, position: Position) -> Union[Card, None]:
++        if position.type == LocationType.FREECELL:
++            return self.freecells[position.index]
++        elif position.type == LocationType.FOUNDATION:
++            pile = self.foundations[list(Suit)[position.index]]
++            return pile[-1] if pile else None
++        elif position.type == LocationType.TABLEAU:
++            col = self.tableaus[position.index]
++            return col[-1] if col else None
++        return None
++
++    def validate_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:
++        """
++        Calculates whether moving 'count' cards from from_pos to to_pos is legal.
++        """
++        # Placeholder for validation
++        return True
++
++    def execute_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:
++        """
++        Executes a move, saves it to the undo stack, runs auto-homing, and clears the redo stack.
++        """
++        if not self.validate_move(from_pos, to_pos, count):
++            return False
++        return True
++
++    def undo(self) -> bool:
++        """Reverts the last move, including nested auto-homing steps."""
++        if not self.undo_stack:
++            return False
++        return True
++
++    def check_win(self) -> bool:
++        """Returns True if all 52 cards are in the Foundations."""
++        return all(len(self.foundations[suit]) == 13 for suit in Suit)
+diff --git a/card-game-app/src/card_game_tui/tui.py b/card-game-app/src/card_game_tui/tui.py
+new file mode 100644
+index 000000000..5bb460b18
+--- /dev/null
++++ b/card-game-app/src/card_game_tui/tui.py
+@@ -0,0 +1,8 @@
++# TUI module placeholder for FreeCell Solitaire TUI
++
++class TUIApp:
++    def __init__(self):
++        pass
++
++    def run(self) -> None:
++        print("TUI App placeholder running.")
+diff --git a/card-game-app/tests/__init__.py b/card-game-app/tests/__init__.py
+new file mode 100644
+index 000000000..d4839a6b1
+--- /dev/null
++++ b/card-game-app/tests/__init__.py
+@@ -0,0 +1 @@
++# Tests package
+diff --git a/card-game-app/tests/test_domain.py b/card-game-app/tests/test_domain.py
+new file mode 100644
+index 000000000..3ddb4344b
+--- /dev/null
++++ b/card-game-app/tests/test_domain.py
+@@ -0,0 +1,20 @@
++from card_game_tui.domain import GameState, Suit, Rank, Card, Deck, LocationType, Position
++
++def test_deck_deals_52_cards():
++    deck = Deck()
++    assert len(deck.cards) == 52
++
++def test_game_state_initialization():
++    state = GameState()
++    assert len(state.tableaus) == 8
++    # 4 columns should have 7 cards, 4 should have 6 cards
++    lengths = [len(col) for col in state.tableaus]
++    assert sorted(lengths) == [6, 6, 6, 6, 7, 7, 7, 7]
++
++def test_get_card_at():
++    state = GameState(seed=123)
++    # Check if we can get cards correctly
++    pos = Position(LocationType.TABLEAU, 0)
++    card = state.get_card_at(pos)
++    assert card is not None
++    assert isinstance(card, Card)
+diff --git a/status.json b/status.json
+index ee6907d7f..905fb370f 100644
+--- a/status.json
++++ b/status.json
+@@ -1,3 +1,3 @@
+ {
+   "outcome": "succeeded"
+-}
+\ No newline at end of file
++}
