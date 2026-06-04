@@ -760,7 +760,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-06-04T18:07:12.456704Z",
-  "last_event_at": "2026-06-04T18:29:32.611014Z",
+  "last_event_at": "2026-06-04T18:29:41.678835Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -2675,8 +2675,8 @@
     {
       "seq": 0,
       "checkpoint": {
-        "timestamp": "2026-06-04T18:29:38.316384Z",
-        "current_node": "verify_logic",
+        "timestamp": "2026-06-04T18:29:44.982519Z",
+        "current_node": "check_logic",
         "completed_nodes": [
           "start",
           "expand_spec",
@@ -2687,11 +2687,12 @@
           "verify_data",
           "check_data",
           "impl_logic",
-          "verify_logic"
+          "verify_logic",
+          "check_logic"
         ],
         "node_retries": {},
         "context_values": {
-          "internal.thread_id": "verify",
+          "internal.thread_id": "verify_logic",
           "graph.default_max_retries": "3",
           "internal.retry_count.verify_data": 0,
           "graph.fallback_retry_target": "impl_logic",
@@ -2705,16 +2706,18 @@
           "last_stage": "verify_logic",
           "internal.retry_count.impl_setup": 0,
           "internal.retry_count.verify_logic": 0,
+          "thread.verify_logic.current_node": "check_logic",
           "last_response": "I have successfully verified the Klondike game logic of the terminal-based Python Solitaire application.\n\n### Key Verification Steps & Findings:\n1. **Existing Test Suite Execution**: Ran all `pytest` ",
           "internal.run_id": "01KT9X0N42W6PRBVH2N5914EQJ",
           "thread.expand_spec.current_node": "impl_setup",
+          "internal.retry_count.check_logic": 0,
           "response.verify_logic": "I have successfully verified the Klondike game logic of the terminal-based Python Solitaire application.\n\n### Key Verification Steps & Findings:\n1. **Existing Test Suite Execution**: Ran all `pytest` unit tests within the virtual environment (`solitaire-app/.venv/bin/pytest tests/ -v`). All 15 tests passed successfully.\n2. **Logic and Rule Coverage**:\n   - **Deal Invariants**: Confirmed 7 tableau columns setup (heights 1 to 7), with only the top card face-up. Verified the remaining 24 face-down cards are placed into the Stock.\n   - **Tableau Move Legality**: Verified alternating-color, descending-rank sequence moves, multi-card run moves (only valid alternating/descending face-up segments), and empty column King-only rules.\n   - **Foundation Move Legality**: Verified building up from Ace to King by matching suit on foundations, plus legal moves back from foundations to the tableau.\n   - **Stock/Waste Draw & Recycle**: Verified correct draw execution and proper reversed-order recycling when the stock is exhausted.\n   - **Undo Logic**: Verified deep-copied history serialization and restoration across all actions.\n   - **Win Detection**: Verified correct victory checking when all foundations are fully built up to Kings.\n3. **Syntax and Compilation Validation**: Checked Python syntax correctness using `py_compile`, which returned successful zero exit codes.\n\n### Artifacts Written:\n* **`.ai/verify_logic.md`**: Contains the full verification write-up, checklist, test logs, and detailed rule checks.\n* **`status.json`**: Written with `{\"outcome\": \"succeeded\"}` to signal successful verification.",
           "internal.fidelity": "compact",
           "outcome": "succeeded",
           "internal.retry_count.expand_spec": 0,
           "internal.retry_count.impl_data": 0,
           "graph.retry_target": "impl_setup",
-          "current_node": "verify_logic",
+          "current_node": "check_logic",
           "failure_class": "",
           "response.verify_setup": "I have verified the setup for the Solitaire application. All checks have passed successfully.\n\n### Completed Checklist\n1. **`solitaire-app/pyproject.toml` exists** - Confirmed and verified.\n2. **`solitaire-app/main.py` exists** - Confirmed and verified.\n3. **`solitaire-app/src/solitaire_tui` exists** - Confirmed and verified.\n4. **Python files compile** - Confirmed. Running `python3 -m py_compile main.py src/solitaire_tui/*.py` completes with an exit code of `0`.\n\nFurthermore, running the integrated smoke test suite with `python3 main.py --smoke` confirms that all core logic and game state rules pass without issue.\n\nI have:\n1. Written the detailed findings and verification log to `.ai/verify_setup.md`.\n2. Updated the workspace root `status.json` with `{\"outcome\": \"succeeded\"}`.",
           "graph.goal": "Build a terminal-based Klondike solitaire game in Python with a curses TUI",
@@ -2774,6 +2777,11 @@
               "tool_time_ms": 30821,
               "active_time_ms": 185304
             }
+          },
+          "check_logic": {
+            "status": "succeeded",
+            "notes": "Conditional node evaluated: check_logic",
+            "usage": null
           },
           "start": {
             "status": "succeeded",
@@ -3048,7 +3056,7 @@
             "usage": null
           }
         },
-        "next_node_id": "check_logic",
+        "next_node_id": "impl_ui",
         "node_visits": {
           "verify_logic": 1,
           "impl_data": 1,
@@ -3057,6 +3065,7 @@
           "impl_setup": 1,
           "verify_setup": 1,
           "impl_logic": 1,
+          "check_logic": 1,
           "start": 1,
           "verify_data": 1,
           "check_setup": 1
@@ -3973,7 +3982,12 @@
       "first_event_seq": 604,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: verify_logic",
+        "failure_reason": null,
+        "timestamp": "2026-06-04T18:29:38.316299Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "gemini",
@@ -3986,13 +4000,20 @@
       "output": null,
       "started_at": "2026-06-04T18:28:03.510896Z",
       "handler": "agent",
+      "timing": {
+        "wall_time_ms": 94805,
+        "inference_time_ms": 60134,
+        "tool_time_ms": 22523,
+        "active_time_ms": 82657
+      },
       "usage": {
-        "input_tokens": 182619,
-        "output_tokens": 2033,
-        "total_tokens": 325793,
-        "reasoning_tokens": 3328,
-        "cache_read_tokens": 137813,
-        "cache_write_tokens": 0
+        "input_tokens": 185627,
+        "output_tokens": 2396,
+        "total_tokens": 353498,
+        "reasoning_tokens": 3345,
+        "cache_read_tokens": 162130,
+        "cache_write_tokens": 0,
+        "total_usd_micros": 354428
       },
       "model": {
         "provider": "gemini",
@@ -4131,42 +4152,42 @@
         "provider": "gemini",
         "model": "gemini-3.5-flash",
         "context_window_tokens": 1048576,
-        "input_tokens": 27170,
-        "usage_percent": 2.5911331176757812,
+        "input_tokens": 27325,
+        "usage_percent": 2.605915069580078,
         "count_method": "response_usage_scaled_breakdown",
         "staleness": "live",
-        "generated_at": "2026-06-04T18:29:32.410573Z",
-        "event_seq": 668,
+        "generated_at": "2026-06-04T18:29:38.315984Z",
+        "event_seq": 672,
         "breakdown": [
           {
             "category": "system_prompt",
-            "tokens": 1638,
-            "usage_percent": 0.15621185302734375
+            "tokens": 1632,
+            "usage_percent": 0.1556396484375
           },
           {
             "category": "tools",
-            "tokens": 1672,
-            "usage_percent": 0.159454345703125
+            "tokens": 1666,
+            "usage_percent": 0.15888214111328125
           },
           {
             "category": "memory",
-            "tokens": 4528,
-            "usage_percent": 0.43182373046875
+            "tokens": 4511,
+            "usage_percent": 0.4302024841308594
           },
           {
             "category": "conversation",
-            "tokens": 19325,
-            "usage_percent": 1.8429756164550781
+            "tokens": 19510,
+            "usage_percent": 1.8606185913085938
           },
           {
             "category": "other",
-            "tokens": 7,
-            "usage_percent": 0.000667572021484375
+            "tokens": 6,
+            "usage_percent": 0.00057220458984375
           }
         ],
         "warnings": []
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "check_data@1": {
       "first_event_seq": 458,
