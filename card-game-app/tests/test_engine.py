@@ -1,5 +1,5 @@
 import unittest
-from engine import GameState, Card, RANK_NAMES, SUIT_SYMBOLS
+from card_game_tui.engine import GameState, Card, RANK_NAMES, SUIT_SYMBOLS
 
 class TestSpiderSolitaireEngine(unittest.TestCase):
     def test_initialization_1_suit(self):
