@@ -131,6 +131,190 @@ class GameState:
         self.restore_state(self.redo_history.pop())
         return True
 
+    def execute_move(self, move: Move) -> Tuple[bool, str]:
+        """
+        Validates and executes a move.
+        Automatically saves state to history before execution and clears redo history.
+        Runs auto-home after a successful move.
+        Returns (True, "") if successful, or (False, reason) if invalid.
+        """
+        valid, reason = validate_move(self, move)
+        if not valid:
+            return False, reason
+
+        # Save state to history for undo
+        self.push_history()
+
+        # Retrieve source cards
+        src_cards = get_source_cards(self, move.src_type, move.src_idx, move.card_count)
+
+        # Remove card(s) from source
+        if move.src_type == 'C':
+            for _ in range(move.card_count):
+                self.tableau[move.src_idx].pop()
+        elif move.src_type == 'F':
+            self.free_cells[move.src_idx] = None
+
+        # Add card(s) to destination
+        if move.dst_type == 'C':
+            self.tableau[move.dst_idx].extend(src_cards)
+        elif move.dst_type == 'F':
+            self.free_cells[move.dst_idx] = src_cards[0]
+        elif move.dst_type == 'A':
+            card = src_cards[0]
+            self.foundations[card.suit].append(card)
+
+        # Automatically run auto-homing
+        self.auto_home()
+
+        return True, ""
+
+    def is_safe_to_auto_home(self, card: Card) -> bool:
+        """
+        A card of rank R and suit S can be safely moved to its foundation if:
+        1. It is a legal foundation move.
+        2. All cards of rank R-1 of the opposite color are already in the foundation piles.
+        3. All cards of rank R-2 of the same color are already in the foundation piles.
+        """
+        # 1. Must be a legal foundation move
+        f_pile = self.foundations[card.suit]
+        if not f_pile:
+            if card.rank != Rank.ACE:
+                return False
+        else:
+            top_card = f_pile[-1]
+            if card.rank.value != top_card.rank.value + 1:
+                return False
+
+        # 2. Opposite color suits must have reached at least rank R - 1
+        opp_suits = [s for s in Suit if s.color != card.suit.color]
+        for os in opp_suits:
+            os_pile = self.foundations[os]
+            os_rank = os_pile[-1].rank.value if os_pile else 0
+            if os_rank < card.rank.value - 1:
+                return False
+
+        # 3. Same color other suit must have reached at least rank R - 2
+        same_suits = [s for s in Suit if s.color == card.suit.color and s != card.suit]
+        for ss in same_suits:
+            ss_pile = self.foundations[ss]
+            ss_rank = ss_pile[-1].rank.value if ss_pile else 0
+            if ss_rank < card.rank.value - 2:
+                return False
+
+        return True
+
+    def auto_home(self) -> bool:
+        """
+        Automatically moves safe cards to foundations.
+        Returns True if at least one card was auto-homed.
+        """
+        homed_any = False
+        while True:
+            moved_this_pass = False
+            # Check FreeCells
+            for i, card in enumerate(self.free_cells):
+                if card is not None and self.is_safe_to_auto_home(card):
+                    self.foundations[card.suit].append(card)
+                    self.free_cells[i] = None
+                    moved_this_pass = True
+                    homed_any = True
+                    break
+            if moved_this_pass:
+                continue
+
+            # Check Tableau columns
+            for i, col in enumerate(self.tableau):
+                if col:
+                    card = col[-1]
+                    if self.is_safe_to_auto_home(card):
+                        col.pop()
+                        self.foundations[card.suit].append(card)
+                        moved_this_pass = True
+                        homed_any = True
+                        break
+            if not moved_this_pass:
+                break
+        return homed_any
+
+    def is_won(self) -> bool:
+        """
+        Returns True if the game is won (all 52 cards are in the foundations).
+        """
+        return all(len(self.foundations[suit]) == 13 for suit in Suit)
+
+    def is_lost(self) -> bool:
+        """
+        Returns True if no legal moves are possible and the game is not won.
+        """
+        if self.is_won():
+            return False
+
+        # We need to check if there is ANY legal move possible.
+        # Sources from Tableau
+        for src_idx in range(8):
+            col = self.tableau[src_idx]
+            if not col:
+                continue
+            
+            # We can try moving sequences of length 1 up to len(col)
+            for card_count in range(1, len(col) + 1):
+                src_cards = col[-card_count:]
+                if len(src_cards) > 1 and not is_valid_sequence(src_cards):
+                    break  # Sequence gets increasingly invalid, so no longer sequences can be valid
+                
+                # Try destination: other Tableau columns
+                for dst_idx in range(8):
+                    if src_idx == dst_idx:
+                        continue
+                    move = Move('C', src_idx, 'C', dst_idx, card_count)
+                    valid, _ = validate_move(self, move)
+                    if valid:
+                        return False
+                
+                # FreeCells (only valid for card_count == 1)
+                if card_count == 1:
+                    for dst_idx in range(4):
+                        move = Move('C', src_idx, 'F', dst_idx, 1)
+                        valid, _ = validate_move(self, move)
+                        if valid:
+                            return False
+                            
+                # Foundations (only valid for card_count == 1)
+                if card_count == 1:
+                    for dst_idx in range(4):
+                        move = Move('C', src_idx, 'A', dst_idx, 1)
+                        valid, _ = validate_move(self, move)
+                        if valid:
+                            return False
+                            
+        # Sources from FreeCells
+        for src_idx in range(4):
+            if self.free_cells[src_idx] is None:
+                continue
+            # Try destination: Tableau
+            for dst_idx in range(8):
+                move = Move('F', src_idx, 'C', dst_idx, 1)
+                valid, _ = validate_move(self, move)
+                if valid:
+                    return False
+            # Try destination: other FreeCells
+            for dst_idx in range(4):
+                if src_idx == dst_idx:
+                    continue
+                move = Move('F', src_idx, 'F', dst_idx, 1)
+                valid, _ = validate_move(self, move)
+                if valid:
+                    return False
+            # Try destination: Foundations
+            for dst_idx in range(4):
+                move = Move('F', src_idx, 'A', dst_idx, 1)
+                valid, _ = validate_move(self, move)
+                if valid:
+                    return False
+                     
+        return True
+
 def get_source_cards(state: GameState, src_type: str, src_idx: int, card_count: int) -> List[Card]:
     if src_type == 'C':
         col = state.tableau[src_idx]
