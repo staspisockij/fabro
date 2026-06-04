@@ -1,0 +1,117 @@
+diff --git a/.ai/verify_data.md b/.ai/verify_data.md
+new file mode 100644
+index 000000000..4e7a2099a
+--- /dev/null
++++ b/.ai/verify_data.md
+@@ -0,0 +1,111 @@
++# Verification of Card Game Data Structures
++
++## Executive Summary
++This document verifies the Python-based FreeCell solitaire card game's core data structures, state representation, rules validation engine, and testing framework. All modules compile successfully, all 13 unit tests pass, and the headless smoke tests execute flawlessly.
++
++---
++
++## Core Data Structures and Design Patterns
++
++The game core is implemented under `card-game-app/src/card_game_tui/engine.py`. It leverages robust, idiomatic Python types and patterns:
++
++### 1. Enums
++- **`Suit`**: Maps standard card suits (SPADES, HEARTS, DIAMONDS, CLUBS) to their Unicode representations (`♠`, `♥`, `♦`, `♣`) and identifies color (`RED` vs `BLACK`).
++- **`Rank`**: Defines standard standard card values (1-13). It supports face-card translation (`A`, `J`, `Q`, `K`) through the `@property def symbol()`.
++
++### 2. Classes and NamedTuples
++- **`Card`**: Unites `Rank` and `Suit`. It provides helper methods like `is_opposite_color()` and `can_be_placed_on_tableau()`.
++- **`Move`**: A `NamedTuple` specifying source/destination types (`'C'`, `'F'`, `'A'`), indices, and card counts (supporting FreeCell multi-card "supermoves").
++
++### 3. State Management (`GameState`)
++- **Tableau**: Represented as a list of 8 lists of `Card` objects.
++- **Free Cells**: Represented as a list of 4 `Optional[Card]` objects.
++- **Foundations**: Represented as a `Dict[Suit, List[Card]]`.
++- **History and Redo Stacks**: Maintains state snapshots to support complete multi-level **Undo** and **Redo** capabilities.
++- **Key Methods**:
++  - `deal(seed)`: Fully shuffles and deals 52 cards deterministic (via seed) or non-deterministic.
++  - `execute_move(move)`: Checks legality of moves, commits changes, registers undo history, and performs **auto-homing**.
++  - `is_safe_to_auto_home(card)`: Evaluates whether a card can be safely moved to its foundation without blocking other potential moves.
++  - `auto_home()`: Iteratively pushes eligible cards from columns and free cells to foundations.
++  - `is_won()`: Detects if all 52 cards reside in the foundations.
++  - `is_lost()`: Scans all possible sources and destinations to determine if any legal moves remain.
++  - `get_max_movable_cards(state, target_is_empty_col)`: Automatically calculates supermove capacity dynamically based on empty FreeCells and Tableau columns:
++    $$\text{Max Movable} = (1 + F) \times 2^T$$
++
++---
++
++## Test Execution Results
++
++The entire unit test suite was executed using `pytest`. 13 separate integration and unit tests successfully passed:
++
++```bash
++cd card-game-app && python3 -m pytest tests/ -v
++```
++
++### Output:
++```text
++============================= test session starts ==============================
++platform linux -- Python 3.12.3, pytest-7.4.4, pluggy-1.4.0
++rootdir: /home/daytona/repos/fabro-sh/fabro/card-game-app
++configfile: pyproject.toml
++collected 13 items
++
++tests/test_card.py ...                                                   [ 23%]
++tests/test_integration.py .                                              [ 30%]
++tests/test_rules.py ...                                                  [ 53%]
++tests/test_state.py ......                                               [100%]
++
++============================== 13 passed in 0.01s ==============================
++```
++
++### Breakdown of Tests:
++1. **`test_card.py`**:
++   - `test_card_properties`: Validates card representations, rank/suit bindings, and color identification.
++   - `test_card_opposite_color`: Validates color parity checks.
++   - `test_can_be_placed_on_tableau`: Verifies placement rules (alternating colors and descending order).
++2. **`test_state.py`**:
++   - `test_deal`: Validates correct card distribution and seed determinism.
++   - `test_undo_redo`: Checks state preservation, historical stack push/pop, and recovery.
++   - `test_execute_move`: Ensures cards are correctly repositioned, and validation checks trigger before execution.
++   - `test_auto_home`: Assures automatic homing strictly follows the safety criteria.
++   - `test_is_won`: Verifies win condition triggers only when foundations are fully saturated.
++   - `test_is_lost`: Validates end-game deadlocks.
++3. **`test_rules.py`**:
++   - `test_validate_move_initial_illegal`: Assures invalid initial moves are rejected.
++   - `test_get_max_movable_cards`: Verifies the supermove size calculations.
++   - `test_validate_move_sequence`: Tests multi-card sequence move rules under various capacity limits.
++4. **`test_integration.py`**:
++   - `test_integration_setup`: Assures integration sanity.
++
++---
++
++## Code Compilation Sanity
++
++The syntax and compilation integrity were checked using `py_compile`:
++
++```bash
++python3 -m py_compile main.py src/card_game_tui/*.py
++```
++**Result**: Compiled successfully with no syntax or format errors.
++
++---
++
++## Smoke Test Verification
++
++We executed `main.py` with its `--smoke` flag to verify headless game configuration and validation logic:
++
++```bash
++python3 main.py --smoke
++```
++
++### Output:
++```text
++Running headless smoke tests...
++Smoke tests passed successfully.
++```
++
++---
++
++## Verdict
++
++The core data structures of the FreeCell solitaire card game are robustly defined, functionally validated, and thoroughly tested. The platform is ready for full TUI presentation layer integration.
