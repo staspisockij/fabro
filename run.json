@@ -345,15 +345,97 @@
     }
   },
   "web_url": "http://127.0.0.1:32276/runs/01KTA9N66V5211QHYR1RJ6KR76",
-  "start": null,
-  "status": {
-    "kind": "starting"
+  "start": {
+    "start_time": "2026-06-04T21:47:33.827948Z",
+    "run_branch": "fabro/run/01KTA9N66V5211QHYR1RJ6KR76",
+    "base_sha": "497aaba6f20c1fac052346c39f52e08fabadb179"
   },
-  "status_updated_at": "2026-06-04T21:47:00.244329Z",
-  "last_event_at": "2026-06-04T21:47:28.325376Z",
+  "status": {
+    "kind": "running"
+  },
+  "status_updated_at": "2026-06-04T21:47:33.827987Z",
+  "last_event_at": "2026-06-04T21:50:27.989291Z",
   "pending_control": null,
-  "checkpoints": [],
-  "conclusion": null,
+  "checkpoints": [
+    {
+      "seq": 21,
+      "checkpoint": {
+        "timestamp": "2026-06-04T21:47:35.809532Z",
+        "current_node": "start",
+        "completed_nodes": [
+          "start"
+        ],
+        "node_retries": {},
+        "context_values": {
+          "internal.run_id": "01KTA9N66V5211QHYR1RJ6KR76",
+          "internal.retry_count.start": 0,
+          "current_node": "start",
+          "failure_class": "",
+          "failure_signature": "",
+          "graph.default_max_retries": "2",
+          "internal.node_visit_count": 1,
+          "outcome": "succeeded",
+          "internal.thread_id": null,
+          "internal.fidelity": "compact",
+          "graph.goal": "Build a terminal-based FreeCell solitaire game in Python",
+          "graph.rankdir": "LR",
+          "graph.retry_target": "implement_app",
+          "internal.work_dir": "/home/daytona/workspace/fabro"
+        },
+        "node_outcomes": {
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          }
+        },
+        "next_node_id": "plan_app",
+        "node_visits": {
+          "start": 1
+        }
+      },
+      "diff": {}
+    }
+  ],
+  "conclusion": {
+    "timestamp": "2026-06-04T21:50:27.996090Z",
+    "status": "failed",
+    "timing": {
+      "wall_time_ms": 174163,
+      "inference_time_ms": 0,
+      "tool_time_ms": 0,
+      "active_time_ms": 0
+    },
+    "failure": {
+      "reason": "cancelled",
+      "detail": {
+        "message": "Pipeline cancelled",
+        "category": "canceled"
+      }
+    },
+    "stages": [
+      {
+        "stage_id": "start",
+        "stage_label": "start",
+        "timing": {
+          "wall_time_ms": 0,
+          "inference_time_ms": 0,
+          "tool_time_ms": 0,
+          "active_time_ms": 0
+        },
+        "retries": 0
+      }
+    ],
+    "billing": {
+      "input_tokens": 116054,
+      "output_tokens": 8972,
+      "total_tokens": 365882,
+      "reasoning_tokens": 12959,
+      "cache_read_tokens": 227897,
+      "cache_write_tokens": 0
+    },
+    "total_retries": 0,
+    "diff": {}
+  },
   "sandbox": {
     "kind": "ready",
     "plan": {
@@ -378,5 +460,239 @@
   "pull_request": null,
   "superseded_by": null,
   "pending_interviews": {},
-  "stages": {}
+  "stages": {
+    "start@1": {
+      "first_event_seq": 18,
+      "prompt": null,
+      "response": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": null,
+        "failure_reason": null,
+        "timestamp": "2026-06-04T21:47:35.809437Z"
+      },
+      "provider_used": null,
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-06-04T21:47:35.809352Z",
+      "handler": "start",
+      "timing": {
+        "wall_time_ms": 0,
+        "inference_time_ms": 0,
+        "tool_time_ms": 0,
+        "active_time_ms": 0
+      },
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "state": "succeeded"
+    },
+    "plan_app@1": {
+      "first_event_seq": 22,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "gemini",
+        "model": "gemini-3.5-flash"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-06-04T21:47:35.809593Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 116054,
+        "output_tokens": 8972,
+        "total_tokens": 365882,
+        "reasoning_tokens": 12959,
+        "cache_read_tokens": 227897,
+        "cache_write_tokens": 0
+      },
+      "model": {
+        "provider": "gemini",
+        "model_id": "gemini-3.5-flash"
+      },
+      "permission_level": "full",
+      "agent_tools": [
+        {
+          "name": "close_agent",
+          "description": "Close a running subagent that is no longer needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "edit_file",
+          "description": "Edit a file by replacing an exact string. The old_string must be an exact match and unique unless replace_all is true; include surrounding context when needed. Read the file first and preserve existing indentation.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        },
+        {
+          "name": "glob",
+          "description": "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": false
+        },
+        {
+          "name": "grep",
+          "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": false
+        },
+        {
+          "name": "list_dir",
+          "description": "List directory contents with depth control",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "read_file",
+          "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "read_many_files",
+          "description": "Read multiple files at once",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": false
+        },
+        {
+          "name": "send_input",
+          "description": "Send a follow-up message to a running subagent when new information or corrected instructions are needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "shell",
+          "description": "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "shell",
+          "invoked": true
+        },
+        {
+          "name": "spawn_agent",
+          "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "wait",
+          "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "web_fetch",
+          "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "web_search",
+          "description": "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "write_file",
+          "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        }
+      ],
+      "context_window": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash",
+        "context_window_tokens": 1048576,
+        "input_tokens": 33344,
+        "usage_percent": 3.179931640625,
+        "count_method": "response_usage_scaled_breakdown",
+        "staleness": "live",
+        "generated_at": "2026-06-04T21:50:24.093195Z",
+        "event_seq": 72,
+        "breakdown": [
+          {
+            "category": "system_prompt",
+            "tokens": 1303,
+            "usage_percent": 0.12426376342773438
+          },
+          {
+            "category": "tools",
+            "tokens": 1378,
+            "usage_percent": 0.13141632080078125
+          },
+          {
+            "category": "memory",
+            "tokens": 3732,
+            "usage_percent": 0.3559112548828125
+          },
+          {
+            "category": "conversation",
+            "tokens": 26924,
+            "usage_percent": 2.5676727294921875
+          },
+          {
+            "category": "other",
+            "tokens": 7,
+            "usage_percent": 0.000667572021484375
+          }
+        ],
+        "warnings": []
+      },
+      "state": "running"
+    }
+  }
 }
