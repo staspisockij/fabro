@@ -1,0 +1,42 @@
+diff --git a/solitaire-app/tests/test_game.py b/solitaire-app/tests/test_game.py
+index eb4468761..68501bfb0 100644
+--- a/solitaire-app/tests/test_game.py
++++ b/solitaire-app/tests/test_game.py
+@@ -414,6 +414,37 @@ class TestSolitaireUI(unittest.TestCase):
+             stdscr.addstr.assert_any_call(0, 2, "KLONDIKE SOLITAIRE", unittest.mock.ANY)
+             stdscr.addstr.assert_any_call(3, 2, "STOCK", unittest.mock.ANY)
+ 
++    def test_ui_auto_move(self):
++        # 1. No valid moves available initially
++        self.tui.cursor_zone = 'top'
++        self.tui.cursor_col = 1
++        self.game.waste.clear()
++        self.tui.handle_auto_move()
++        self.assertEqual(self.tui.status_msg, "No valid Foundation move available.")
++
++        # 2. Waste has Ace of Hearts, should auto-move to first foundation
++        self.game.waste.append(Card('H', 1, is_face_up=True))
++        for f in self.game.foundations:
++            f.clear()
++        self.tui.handle_auto_move()
++        self.assertEqual(len(self.game.foundations[0]), 1)
++        self.assertEqual(self.game.foundations[0][-1].suit, 'H')
++        self.assertEqual(self.game.foundations[0][-1].rank, 1)
++        self.assertEqual(self.tui.status_msg, "Auto-moved card to Foundation 1.")
++
++        # 3. Tableau column 0 has Ace of Spades, cursor is on column 0
++        self.game.tableau[0] = [Card('S', 1, is_face_up=True)]
++        self.tui.cursor_zone = 'bottom'
++        self.tui.cursor_col = 0
++        self.tui.cursor_card_idx = 0
++        self.tui.handle_auto_move()
++        self.assertEqual(len(self.game.tableau[0]), 0)
++        self.assertEqual(len(self.game.foundations[1]), 1)  # moves to next empty foundation
++        self.assertEqual(self.game.foundations[1][-1].suit, 'S')
++        self.assertEqual(self.game.foundations[1][-1].rank, 1)
++        self.assertEqual(self.tui.status_msg, "Auto-moved card to Foundation 2.")
++
++
+ 
+ if __name__ == '__main__':
+     unittest.main()
