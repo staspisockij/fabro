@@ -1,0 +1,50 @@
+# Solitaire App Setup Verification
+
+This document verifies the setup of the terminal-based Klondike solitaire game in Python with a curses TUI.
+
+## Verification Checklist
+
+- [x] **Check 1: `solitaire-app/pyproject.toml` exists**
+- [x] **Check 2: `solitaire-app/main.py` exists**
+- [x] **Check 3: `solitaire-app/src/solitaire_tui` exists**
+- [x] **Check 4: Python files compile successfully**
+
+## Compilation Results
+
+Running the requested command:
+```bash
+cd solitaire-app && python3 -m py_compile main.py src/solitaire_tui/*.py
+```
+**Output:**
+The command completed with exit code `0` and no compilation errors.
+
+Additionally, compiling the test suite:
+```bash
+cd solitaire-app && python3 -m py_compile tests/*.py
+```
+**Output:**
+The command completed with exit code `0` and no errors.
+
+## Smoke Test Results
+
+Running the automated smoke test with `python3 main.py --smoke` succeeded perfectly:
+```
+Running Solitaire smoke tests...
+✓ Successfully imported core modules (game, ui).
+✓ GameState instantiated. Stock size: 24 cards.
+✓ SolitaireTUI instantiated.
+Running automated unit tests...
+✓ All automated rules unit tests passed successfully!
+Smoke mode passed successfully.
+```
+
+The unit tests verified:
+- Correct deck initialization and dealing.
+- Drawing from stock / recycling waste.
+- Moving cards between stock, waste, foundations, and tableau columns.
+- Correct win condition verification.
+- History tracking and complete undo functionality.
+
+## Conclusion
+
+The solitaire application setup is verified to be clean, syntactically correct, compile perfectly, and pass the logic and rule automated unit/smoke tests.
