@@ -760,7 +760,7 @@
     "kind": "running"
   },
   "status_updated_at": "2026-06-04T19:37:42.485663Z",
-  "last_event_at": "2026-06-04T19:49:58.072795Z",
+  "last_event_at": "2026-06-04T19:51:30.332772Z",
   "pending_control": null,
   "checkpoints": [
     {
@@ -3441,9 +3441,9 @@
       }
     },
     {
-      "seq": 0,
+      "seq": 780,
       "checkpoint": {
-        "timestamp": "2026-06-04T19:49:58.464936Z",
+        "timestamp": "2026-06-04T19:50:24.898398Z",
         "current_node": "impl_ui",
         "completed_nodes": [
           "start",
@@ -3461,6 +3461,461 @@
         ],
         "node_retries": {},
         "context_values": {
+          "internal.retry_count.impl_logic": 0,
+          "internal.thread_id": "hard",
+          "internal.retry_count.verify_setup": 0,
+          "last_stage": "impl_ui",
+          "internal.retry_count.verify_logic": 0,
+          "response.impl_setup": "I have successfully built the Python project skeleton for the terminal-based FreeCell solitaire game.\n\nHere is a summary of the steps completed:\n1. **Created `card-game-app/` Project Structure**:\n   - `pyproject.toml` with pytest configured and `pythonpath = [\"src\"]`.\n   - `main.py` entrypoint supporting `--smoke` test mode (without curses dependency) and regular mode.\n   - `src/card_game_tui/` package containing `__init__.py`, `domain.py` (decoupled core game logic: `Suit`, `Rank`, `Card`, `Deck`, `LocationType`, `Position`, `MoveRecord`, and `GameState` class stubs), and `tui.py` (TUI layer placeholder).\n   - `tests/` directory with `__init__.py` and `test_domain.py` containing initial unit tests.\n   - `README.md` stub explaining structure and usage.\n2. **Verified Code Compilation**:\n   - Executed: `cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py` which compiled cleanly with exit code 0.\n3. **Smoke Tested the CLI**:\n   - Executed: `cd card-game-app && python3 main.py --smoke` which ran successfully, verifying the integrity of the domain model layout and assertions.\n4. **Wrote `status.json`**:\n   - Created `status.json` at the workspace root containing `{\"outcome\": \"succeeded\"}` as the project skeleton exists and compiles perfectly.",
+          "response.impl_ui": "I have successfully built and verified the terminal-based FreeCell Solitaire game in Python!\n\n### Summary of Completed Work\n1. **ASCII Art Card Rendering (`render.py` & `test_render.py`)**:\n   - Implemented high-fidelity ASCII card representation, rendering individual card ranks and suit symbols (`A♥`, `10♠`, etc.).\n   - Handled empty foundation and free cell slot representation cleanly, maintaining accurate alignment.\n   - Fully covered and verified these rendering helpers with robust unit tests.\n\n2. **Clean Curses TUI Layout & Interactivity (`tui.py` & `test_tui.py`)**:\n   - Designed a symmetrical visual layout in an 80x24 space where every top slot (4 free cells and 4 foundations) maps perfectly to a Tableau column beneath it, making movement navigation extremely intuitive.\n   - Handled color mappings dynamically for red (Hearts/Diamonds) and black (Spades/Clubs) cards.\n   - Built an interactive selection system (`Space`/`Enter` to pick up/drop cards, `Escape` to cancel, and visual highlights using reverse video).\n   - Supported multi-card selection/sequence moves, automatically checking and executing the maximum valid count under FreeCell rules by default, while allowing manual count adjustments using `[` and `]` or `-` and `+` keys.\n   - Standardized hotkeys for **Undo** (`u`), **Redo** (`y`), **Restart** (`r` with same seed), **New Game** (`n` with new seed), and **Quit** (`q` with confirm dialog).\n   - Abstracted screen logic from terminal sizes to prevent crashes or overflow and support terminal resizing safely.\n   - Added robust headless unit tests validating the TUI controller's helpers (`find_longest_sequence`, `find_max_valid_count`, `get_current_pos`) without needing a live curses initialization.\n\n3. **Smoke Test Probe (`main.py`)**:\n   - Enabled a non-interactive setup probe via `python3 main.py --smoke` that instantiates `GameState` with a deterministic seed, performs a series of mock movements, checks validations/win-states, and cleanly prints the status to stdout.\n\n4. **Validation Outcome**:\n   - Compiled all Python files with zero syntax or static errors.\n   - Ran the complete test suite (24 unit tests) successfully with zero failures.\n   - Updated `status.json` with `\"outcome\": \"succeeded\"`.",
+          "internal.work_dir": "/home/daytona/workspace/fabro",
+          "graph.fallback_retry_target": "impl_logic",
+          "internal.retry_count.impl_data": 0,
+          "internal.run_id": "01KT9YT14FHDYA4VTV9DSFG0FY",
+          "internal.retry_count.start": 0,
+          "response.verify_data": "I have completed the verification process for the card game data structures in FreeCell Solitaire. \n\n### Summary of Actions Taken:\n1. **Compilation & Tests Executed:** Ran tests and compiled python files successfully.\n   - `python3 -m pytest tests/ -v` -> All 13 tests passed.\n   - `python3 -m py_compile main.py src/card_game_tui/*.py` -> Compiled cleanly with zero syntax/import warnings.\n2. **Analysis of Core Types:** Inspected the data structures and validated:\n   - **Enums:** `Suit`, `Rank`, and `LocationType`.\n   - **Entities:** `Card` (frozen/immutable), `Position` (frozen), and `MoveRecord`.\n   - **State Manager:** `GameState` containing Tableaus, FreeCells, Foundations, and full validation/execution of standard FreeCell logic.\n3. **Advanced Mechanics Verified:**\n   - Alternate-color and descending-rank move validations.\n   - Multi-card sequential moves with correct capacity limits based on empty free cells and empty tableaus.\n   - Smart, cascading auto-homing that avoids locking cards required for lower ranks of opposing colors.\n   - Linear undo/redo stack managing primary moves alongside automatic cascades.\n4. **Output Generation:**\n   - Detailed findings recorded in `.ai/verify_data.md`.\n   - `status.json` updated with `\"outcome\": \"succeeded\"`.",
+          "last_response": "I have successfully built and verified the terminal-based FreeCell Solitaire game in Python!\n\n### Summary of Completed Work\n1. **ASCII Art Card Rendering (`render.py` & `test_render.py`)**:\n   - Imple",
+          "internal.retry_count.check_data": 0,
+          "internal.node_visit_count": 1,
+          "internal.retry_count.impl_setup": 0,
+          "graph.default_max_retries": "3",
+          "outcome": "succeeded",
+          "current_node": "impl_ui",
+          "internal.retry_count.check_logic": 0,
+          "internal.retry_count.expand_spec": 0,
+          "graph.goal": "Build a terminal-based FreeCell solitaire game in Python",
+          "internal.retry_count.verify_data": 0,
+          "response.verify_logic": "I have verified the FreeCell card game logic and documented the findings.\n\n### Summary of Actions Taken:\n1. **Analyzed Code & Rules Implementation**:\n   - Inspected `src/card_game_tui/domain.py` to confirm proper validation of moves, descending alternating builds, foundation sequencing, and accurate multi-card capacity constraint calculation.\n   - Evaluated the recursive cascade auto-homing logic and confirmed it adheres to standard, safe auto-homing rules (only homing cards when no needed lower cards of opposite color are buried).\n   - Confirmed the dual implementation of `check_win()` and `check_loss()` works perfectly to detect when the game is won or if it is fully locked.\n   - Verified the undo/redo system and its correct handling of nested auto-homing steps rolled back in reverse order.\n2. **Executed Verification Tests**:\n   - Ran `cd card-game-app && python3 -m pytest tests/ -v` and confirmed all 16 tests passed.\n   - Ran a compilation check: `python3 -m py_compile main.py src/card_game_tui/*.py` to verify error-free imports and compilation.\n   - Ran the main game smoke test: `python3 main.py --smoke` to confirm execution of initial moves and win check.\n3. **Wrote Documentation and Status**:\n   - Created the report in `.ai/verify_logic.md`.\n   - Updated `status.json` with `\"outcome\": \"succeeded\"`.",
+          "response.impl_data": "I have successfully completed the implementation of the FreeCell solitaire game data models and state engine according to the technical specification, added a comprehensive focused unit test suite, and verified that all tests pass perfectly.\n\n### Summary of Changes\n\n1. **Pure Domain Data Model & State Engine (`card-game-app/src/card_game_tui/domain.py`)**:\n   - Implemented `Suit`, `Rank`, and `Card` representations.\n   - Built the `Deck` class supporting deterministic seeding and standard 52-card dealing.\n   - Designed the `Position` representation, covering tableau columns (0–7), free cells (0–3), and foundations (0–3).\n   - Designed `MoveRecord` with full support for tracking regular moves and recursive `auto_moves` (auto-homing).\n   - Implemented `GameState` managing all piles, validations (`validate_move`), executions (`execute_move`), full asymmetric/nested undo/redo, and win-state detection.\n   - Implemented **Auto-Homing** rules exactly as specified: cards are moved automatically to foundations if and only if they are legal moves and all cards of the opposite color of lower ranks have already been homed.\n\n2. **Comprehensive Headless Unit Tests (`card-game-app/tests/test_domain.py`)**:\n   - Built a comprehensive unit test suite covering:\n     - Standard 52-card deck deal correctness.\n     - Deterministic seeding verification.\n     - Moves to and validations of Free Cells.\n     - Moves to and validations of Foundations.\n     - Single card move rules on the Tableau (descending rank, alternating colors).\n     - Sequence/multi-card moves Tableau-to-Tableau obeying the rules & formula: `(1 + Empty Free Cells) * 2^(Empty Tableau Columns)` with destination empty-column exception.\n     - Core Auto-Homing logic.\n     - Perfect full undo/redo capabilities, including reverting auto-homing sequences.\n     - Winning state detection.\n\n3. **Status Validation**:\n   - All 13 unit tests passed flawlessly inside the Python testing framework.\n   - The CLI non-interactive `--smoke` mode executes perfectly.\n   - Wrote `status.json` with `outcome=succeeded`.",
+          "internal.retry_count.impl_ui": 0,
+          "thread.check_setup.current_node": "impl_data",
+          "thread.verify.current_node": "verify_logic",
+          "internal.retry_count.check_setup": 0,
+          "thread.expand_spec.current_node": "impl_setup",
+          "graph.retry_target": "impl_setup",
+          "thread.verify_data.current_node": "check_data",
+          "thread.hard.current_node": "impl_ui",
+          "response.impl_logic": "I have successfully completed the tasks:\n\n1. **Reviewed Specifications & Game Rules:** Read `.ai/card-game-spec.md` and verified the domain models (`Card`, `Deck`, `LocationType`, `Position`, `MoveRecord`, and `GameState`).\n2. **Implemented/Enhanced Game Rules:**\n   - **Initial setup/deal:** Fully handled inside `Deck` and `GameState` constructor, dealing 52 unique cards deterministically.\n   - **Move/action validation:** Fully covered for tableau, free cell, and foundation moves, including proper transit and capacity calculations based on empty free cells/tableaus.\n   - **Auto-complete helper actions:** Standard auto-homing behavior is implemented, moving eligible cards to foundations automatically and cleanly nesting them in `MoveRecord` so they are fully undoable/redoable.\n   - **Win/loss condition:** Implemented and tested both `check_win()` and `check_loss()`. `check_loss()` correctly detects when the game has no legal moves remaining and is not yet won.\n   - **Undo/Redo:** Reverts and reapplies both the primary action and any nested auto-homing steps.\n3. **Tests:** Added comprehensive test cases to `tests/test_domain.py` to cover `check_loss` under various conditions (not lost, won, and fully locked/lost).\n4. **Validation:** Ran all tests with `pytest` successfully, and confirmed that the `--smoke` test successfully initializes and validates the game.\n5. **Status File:** Wrote `status.json` with `\"outcome\": \"succeeded\"`.",
+          "thread.start.current_node": "expand_spec",
+          "failure_signature": "",
+          "graph.rankdir": "LR",
+          "response.verify_setup": "I have successfully verified the setup for the card game app.\n\n### Verified Checklist:\n1. **`card-game-app/pyproject.toml` exists:** Verified.\n2. **`card-game-app/main.py` exists:** Verified.\n3. **`card-game-app/src/card_game_tui` exists:** Verified.\n4. **Python files compile:** Verified by executing `cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py` (which completed with exit code `0`).\n\nFindings have been written to `.ai/verify_setup.md` and `status.json` has been updated with `\"outcome\": \"succeeded\"` at the workspace root.",
+          "thread.verify_logic.current_node": "check_logic",
+          "response.expand_spec": "I have successfully written a comprehensive, detailed implementation specification for building a terminal-based FreeCell Solitaire game in Python.\n\nThe spec has been written to:\n- **Specification Document**: `.ai/card-game-spec.md`\n- **Execution Status**: `status.json` with `\"outcome\": \"succeeded\"`\n\n### Key Specification Highlights:\n1. **Core Domain Model & Game Logic**: Complete decoupling from the curses framework. Classes like `Card`, `Suit`, `Rank`, `Deck`, `Position`, and `GameState` manage state transitions, move constraints, and game rules natively and cleanly, making them fully testable in headless CI environments.\n2. **Move Validation & Rule Logic**: Enforces all FreeCell moves, empty pile behavior, card stacking (alternating colors and descending ranks), and includes the mathematical sequence-movement rule constraint formula: \n   $$\\text{Max Cards} = (1 + \\text{Empty Free Cells}) \\times 2^{\\text{Empty Tableau Columns}}$$\n3. **Auto-Homing Mechanics**: An optional, safe automated helper that automatically moves cards to the foundations once they can no longer act as sequence-building stepping stones.\n4. **Interactive Curses UI/TUI**: A detailed layout conforming to $80 \\times 24$ terminal dimensions using memory-efficient double-buffered updates via curses, rich color pair rendering for Red vs Black suits, and a versatile keyboard cursor-based layout navigation system.\n5. **Non-Interactive Smoke Mode**: Specifies the exact behavior of `python3 main.py --smoke` for fast automated integration checks without launching interactive screens.\n6. **Robust Testing Strategy**: Details unit tests covering edge cases for game rules, deterministic seed validation, and UI input mocking scenarios.",
+          "internal.fidelity": "compact",
+          "thread.verify_setup.current_node": "check_setup",
+          "failure_class": ""
+        },
+        "node_outcomes": {
+          "check_setup": {
+            "status": "succeeded",
+            "notes": "Conditional node evaluated: check_setup",
+            "usage": null
+          },
+          "verify_logic": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "verify_logic",
+              "last_response": "I have verified the FreeCell card game logic and documented the findings.\n\n### Summary of Actions Taken:\n1. **Analyzed Code & Rules Implementation**:\n   - Inspected `src/card_game_tui/domain.py` to co",
+              "response.verify_logic": "I have verified the FreeCell card game logic and documented the findings.\n\n### Summary of Actions Taken:\n1. **Analyzed Code & Rules Implementation**:\n   - Inspected `src/card_game_tui/domain.py` to confirm proper validation of moves, descending alternating builds, foundation sequencing, and accurate multi-card capacity constraint calculation.\n   - Evaluated the recursive cascade auto-homing logic and confirmed it adheres to standard, safe auto-homing rules (only homing cards when no needed lower cards of opposite color are buried).\n   - Confirmed the dual implementation of `check_win()` and `check_loss()` works perfectly to detect when the game is won or if it is fully locked.\n   - Verified the undo/redo system and its correct handling of nested auto-homing steps rolled back in reverse order.\n2. **Executed Verification Tests**:\n   - Ran `cd card-game-app && python3 -m pytest tests/ -v` and confirmed all 16 tests passed.\n   - Ran a compilation check: `python3 -m py_compile main.py src/card_game_tui/*.py` to verify error-free imports and compilation.\n   - Ran the main game smoke test: `python3 main.py --smoke` to confirm execution of initial moves and win check.\n3. **Wrote Documentation and Status**:\n   - Created the report in `.ai/verify_logic.md`.\n   - Updated `status.json` with `\"outcome\": \"succeeded\"`."
+            },
+            "notes": "Stage completed: verify_logic",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 151048,
+                    "output_tokens": 3002,
+                    "reasoning_tokens": 6993,
+                    "cache_read_tokens": 325468,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 365347
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/.ai/verify_logic.md",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 86292,
+              "tool_time_ms": 12373,
+              "active_time_ms": 98665
+            }
+          },
+          "check_logic": {
+            "status": "succeeded",
+            "notes": "Conditional node evaluated: check_logic",
+            "usage": null
+          },
+          "impl_data": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "I have successfully completed the implementation of the FreeCell solitaire game data models and state engine according to the technical specification, added a comprehensive focused unit test suite, an",
+              "last_stage": "impl_data",
+              "response.impl_data": "I have successfully completed the implementation of the FreeCell solitaire game data models and state engine according to the technical specification, added a comprehensive focused unit test suite, and verified that all tests pass perfectly.\n\n### Summary of Changes\n\n1. **Pure Domain Data Model & State Engine (`card-game-app/src/card_game_tui/domain.py`)**:\n   - Implemented `Suit`, `Rank`, and `Card` representations.\n   - Built the `Deck` class supporting deterministic seeding and standard 52-card dealing.\n   - Designed the `Position` representation, covering tableau columns (0–7), free cells (0–3), and foundations (0–3).\n   - Designed `MoveRecord` with full support for tracking regular moves and recursive `auto_moves` (auto-homing).\n   - Implemented `GameState` managing all piles, validations (`validate_move`), executions (`execute_move`), full asymmetric/nested undo/redo, and win-state detection.\n   - Implemented **Auto-Homing** rules exactly as specified: cards are moved automatically to foundations if and only if they are legal moves and all cards of the opposite color of lower ranks have already been homed.\n\n2. **Comprehensive Headless Unit Tests (`card-game-app/tests/test_domain.py`)**:\n   - Built a comprehensive unit test suite covering:\n     - Standard 52-card deck deal correctness.\n     - Deterministic seeding verification.\n     - Moves to and validations of Free Cells.\n     - Moves to and validations of Foundations.\n     - Single card move rules on the Tableau (descending rank, alternating colors).\n     - Sequence/multi-card moves Tableau-to-Tableau obeying the rules & formula: `(1 + Empty Free Cells) * 2^(Empty Tableau Columns)` with destination empty-column exception.\n     - Core Auto-Homing logic.\n     - Perfect full undo/redo capabilities, including reverting auto-homing sequences.\n     - Winning state detection.\n\n3. **Status Validation**:\n   - All 13 unit tests passed flawlessly inside the Python testing framework.\n   - The CLI non-interactive `--smoke` mode executes perfectly.\n   - Wrote `status.json` with `outcome=succeeded`."
+            },
+            "notes": "Stage completed: impl_data",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 179865,
+                    "output_tokens": 10451,
+                    "reasoning_tokens": 21516,
+                    "cache_read_tokens": 641688,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 653753
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/card-game-app/src/card_game_tui/domain.py",
+              "/home/daytona/workspace/fabro/card-game-app/tests/test_domain.py",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 193731,
+              "tool_time_ms": 20404,
+              "active_time_ms": 214135
+            }
+          },
+          "verify_setup": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_response": "I have successfully verified the setup for the card game app.\n\n### Verified Checklist:\n1. **`card-game-app/pyproject.toml` exists:** Verified.\n2. **`card-game-app/main.py` exists:** Verified.\n3. **`ca",
+              "response.verify_setup": "I have successfully verified the setup for the card game app.\n\n### Verified Checklist:\n1. **`card-game-app/pyproject.toml` exists:** Verified.\n2. **`card-game-app/main.py` exists:** Verified.\n3. **`card-game-app/src/card_game_tui` exists:** Verified.\n4. **Python files compile:** Verified by executing `cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py` (which completed with exit code `0`).\n\nFindings have been written to `.ai/verify_setup.md` and `status.json` has been updated with `\"outcome\": \"succeeded\"` at the workspace root.",
+              "last_stage": "verify_setup"
+            },
+            "notes": "Stage completed: verify_setup",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 185923,
+                    "output_tokens": 1136,
+                    "reasoning_tokens": 1068,
+                    "cache_read_tokens": 4044,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 299326
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/.ai/verify_setup.md",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 33160,
+              "tool_time_ms": 20341,
+              "active_time_ms": 53501
+            }
+          },
+          "impl_setup": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "impl_setup",
+              "response.impl_setup": "I have successfully built the Python project skeleton for the terminal-based FreeCell solitaire game.\n\nHere is a summary of the steps completed:\n1. **Created `card-game-app/` Project Structure**:\n   - `pyproject.toml` with pytest configured and `pythonpath = [\"src\"]`.\n   - `main.py` entrypoint supporting `--smoke` test mode (without curses dependency) and regular mode.\n   - `src/card_game_tui/` package containing `__init__.py`, `domain.py` (decoupled core game logic: `Suit`, `Rank`, `Card`, `Deck`, `LocationType`, `Position`, `MoveRecord`, and `GameState` class stubs), and `tui.py` (TUI layer placeholder).\n   - `tests/` directory with `__init__.py` and `test_domain.py` containing initial unit tests.\n   - `README.md` stub explaining structure and usage.\n2. **Verified Code Compilation**:\n   - Executed: `cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py` which compiled cleanly with exit code 0.\n3. **Smoke Tested the CLI**:\n   - Executed: `cd card-game-app && python3 main.py --smoke` which ran successfully, verifying the integrity of the domain model layout and assertions.\n4. **Wrote `status.json`**:\n   - Created `status.json` at the workspace root containing `{\"outcome\": \"succeeded\"}` as the project skeleton exists and compiles perfectly.",
+              "last_response": "I have successfully built the Python project skeleton for the terminal-based FreeCell solitaire game.\n\nHere is a summary of the steps completed:\n1. **Created `card-game-app/` Project Structure**:\n   -"
+            },
+            "notes": "Stage completed: impl_setup",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 144122,
+                    "output_tokens": 3364,
+                    "reasoning_tokens": 3387,
+                    "cache_read_tokens": 129733,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 296401
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/card-game-app/README.md",
+              "/home/daytona/workspace/fabro/card-game-app/main.py",
+              "/home/daytona/workspace/fabro/card-game-app/pyproject.toml",
+              "/home/daytona/workspace/fabro/card-game-app/src/card_game_tui/__init__.py",
+              "/home/daytona/workspace/fabro/card-game-app/src/card_game_tui/domain.py",
+              "/home/daytona/workspace/fabro/card-game-app/src/card_game_tui/tui.py",
+              "/home/daytona/workspace/fabro/card-game-app/tests/__init__.py",
+              "/home/daytona/workspace/fabro/card-game-app/tests/test_domain.py",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 54533,
+              "tool_time_ms": 18730,
+              "active_time_ms": 73263
+            }
+          },
+          "impl_logic": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.impl_logic": "I have successfully completed the tasks:\n\n1. **Reviewed Specifications & Game Rules:** Read `.ai/card-game-spec.md` and verified the domain models (`Card`, `Deck`, `LocationType`, `Position`, `MoveRecord`, and `GameState`).\n2. **Implemented/Enhanced Game Rules:**\n   - **Initial setup/deal:** Fully handled inside `Deck` and `GameState` constructor, dealing 52 unique cards deterministically.\n   - **Move/action validation:** Fully covered for tableau, free cell, and foundation moves, including proper transit and capacity calculations based on empty free cells/tableaus.\n   - **Auto-complete helper actions:** Standard auto-homing behavior is implemented, moving eligible cards to foundations automatically and cleanly nesting them in `MoveRecord` so they are fully undoable/redoable.\n   - **Win/loss condition:** Implemented and tested both `check_win()` and `check_loss()`. `check_loss()` correctly detects when the game has no legal moves remaining and is not yet won.\n   - **Undo/Redo:** Reverts and reapplies both the primary action and any nested auto-homing steps.\n3. **Tests:** Added comprehensive test cases to `tests/test_domain.py` to cover `check_loss` under various conditions (not lost, won, and fully locked/lost).\n4. **Validation:** Ran all tests with `pytest` successfully, and confirmed that the `--smoke` test successfully initializes and validates the game.\n5. **Status File:** Wrote `status.json` with `\"outcome\": \"succeeded\"`.",
+              "last_stage": "impl_logic",
+              "last_response": "I have successfully completed the tasks:\n\n1. **Reviewed Specifications & Game Rules:** Read `.ai/card-game-spec.md` and verified the domain models (`Card`, `Deck`, `LocationType`, `Position`, `MoveRec"
+            },
+            "notes": "Stage completed: impl_logic",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 177020,
+                    "output_tokens": 3075,
+                    "reasoning_tokens": 5079,
+                    "cache_read_tokens": 382131,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 396235
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/card-game-app/src/card_game_tui/domain.py",
+              "/home/daytona/workspace/fabro/card-game-app/tests/test_domain.py",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 75101,
+              "tool_time_ms": 19151,
+              "active_time_ms": 94252
+            }
+          },
+          "impl_ui": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.impl_ui": "I have successfully built and verified the terminal-based FreeCell Solitaire game in Python!\n\n### Summary of Completed Work\n1. **ASCII Art Card Rendering (`render.py` & `test_render.py`)**:\n   - Implemented high-fidelity ASCII card representation, rendering individual card ranks and suit symbols (`A♥`, `10♠`, etc.).\n   - Handled empty foundation and free cell slot representation cleanly, maintaining accurate alignment.\n   - Fully covered and verified these rendering helpers with robust unit tests.\n\n2. **Clean Curses TUI Layout & Interactivity (`tui.py` & `test_tui.py`)**:\n   - Designed a symmetrical visual layout in an 80x24 space where every top slot (4 free cells and 4 foundations) maps perfectly to a Tableau column beneath it, making movement navigation extremely intuitive.\n   - Handled color mappings dynamically for red (Hearts/Diamonds) and black (Spades/Clubs) cards.\n   - Built an interactive selection system (`Space`/`Enter` to pick up/drop cards, `Escape` to cancel, and visual highlights using reverse video).\n   - Supported multi-card selection/sequence moves, automatically checking and executing the maximum valid count under FreeCell rules by default, while allowing manual count adjustments using `[` and `]` or `-` and `+` keys.\n   - Standardized hotkeys for **Undo** (`u`), **Redo** (`y`), **Restart** (`r` with same seed), **New Game** (`n` with new seed), and **Quit** (`q` with confirm dialog).\n   - Abstracted screen logic from terminal sizes to prevent crashes or overflow and support terminal resizing safely.\n   - Added robust headless unit tests validating the TUI controller's helpers (`find_longest_sequence`, `find_max_valid_count`, `get_current_pos`) without needing a live curses initialization.\n\n3. **Smoke Test Probe (`main.py`)**:\n   - Enabled a non-interactive setup probe via `python3 main.py --smoke` that instantiates `GameState` with a deterministic seed, performs a series of mock movements, checks validations/win-states, and cleanly prints the status to stdout.\n\n4. **Validation Outcome**:\n   - Compiled all Python files with zero syntax or static errors.\n   - Ran the complete test suite (24 unit tests) successfully with zero failures.\n   - Updated `status.json` with `\"outcome\": \"succeeded\"`.",
+              "last_stage": "impl_ui",
+              "last_response": "I have successfully built and verified the terminal-based FreeCell Solitaire game in Python!\n\n### Summary of Completed Work\n1. **ASCII Art Card Rendering (`render.py` & `test_render.py`)**:\n   - Imple"
+            },
+            "notes": "Stage completed: impl_ui",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 263629,
+                    "output_tokens": 9504,
+                    "reasoning_tokens": 17509,
+                    "cache_read_tokens": 911885,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 775342
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/card-game-app/main.py",
+              "/home/daytona/workspace/fabro/card-game-app/src/card_game_tui/render.py",
+              "/home/daytona/workspace/fabro/card-game-app/src/card_game_tui/tui.py",
+              "/home/daytona/workspace/fabro/card-game-app/tests/test_render.py",
+              "/home/daytona/workspace/fabro/card-game-app/tests/test_tui.py",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 246971,
+              "tool_time_ms": 20444,
+              "active_time_ms": 267415
+            }
+          },
+          "check_data": {
+            "status": "succeeded",
+            "notes": "Conditional node evaluated: check_data",
+            "usage": null
+          },
+          "expand_spec": {
+            "status": "succeeded",
+            "context_updates": {
+              "response.expand_spec": "I have successfully written a comprehensive, detailed implementation specification for building a terminal-based FreeCell Solitaire game in Python.\n\nThe spec has been written to:\n- **Specification Document**: `.ai/card-game-spec.md`\n- **Execution Status**: `status.json` with `\"outcome\": \"succeeded\"`\n\n### Key Specification Highlights:\n1. **Core Domain Model & Game Logic**: Complete decoupling from the curses framework. Classes like `Card`, `Suit`, `Rank`, `Deck`, `Position`, and `GameState` manage state transitions, move constraints, and game rules natively and cleanly, making them fully testable in headless CI environments.\n2. **Move Validation & Rule Logic**: Enforces all FreeCell moves, empty pile behavior, card stacking (alternating colors and descending ranks), and includes the mathematical sequence-movement rule constraint formula: \n   $$\\text{Max Cards} = (1 + \\text{Empty Free Cells}) \\times 2^{\\text{Empty Tableau Columns}}$$\n3. **Auto-Homing Mechanics**: An optional, safe automated helper that automatically moves cards to the foundations once they can no longer act as sequence-building stepping stones.\n4. **Interactive Curses UI/TUI**: A detailed layout conforming to $80 \\times 24$ terminal dimensions using memory-efficient double-buffered updates via curses, rich color pair rendering for Red vs Black suits, and a versatile keyboard cursor-based layout navigation system.\n5. **Non-Interactive Smoke Mode**: Specifies the exact behavior of `python3 main.py --smoke` for fast automated integration checks without launching interactive screens.\n6. **Robust Testing Strategy**: Details unit tests covering edge cases for game rules, deterministic seed validation, and UI input mocking scenarios.",
+              "last_response": "I have successfully written a comprehensive, detailed implementation specification for building a terminal-based FreeCell Solitaire game in Python.\n\nThe spec has been written to:\n- **Specification Doc",
+              "last_stage": "expand_spec"
+            },
+            "notes": "Stage completed: expand_spec",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 85925,
+                    "output_tokens": 4840,
+                    "reasoning_tokens": 3421,
+                    "cache_read_tokens": 20271,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 206276
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/.ai/card-game-spec.md",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 111896,
+              "tool_time_ms": 4207,
+              "active_time_ms": 116103
+            }
+          },
+          "start": {
+            "status": "succeeded",
+            "usage": null
+          },
+          "verify_data": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "verify_data",
+              "last_response": "I have completed the verification process for the card game data structures in FreeCell Solitaire. \n\n### Summary of Actions Taken:\n1. **Compilation & Tests Executed:** Ran tests and compiled python fi",
+              "response.verify_data": "I have completed the verification process for the card game data structures in FreeCell Solitaire. \n\n### Summary of Actions Taken:\n1. **Compilation & Tests Executed:** Ran tests and compiled python files successfully.\n   - `python3 -m pytest tests/ -v` -> All 13 tests passed.\n   - `python3 -m py_compile main.py src/card_game_tui/*.py` -> Compiled cleanly with zero syntax/import warnings.\n2. **Analysis of Core Types:** Inspected the data structures and validated:\n   - **Enums:** `Suit`, `Rank`, and `LocationType`.\n   - **Entities:** `Card` (frozen/immutable), `Position` (frozen), and `MoveRecord`.\n   - **State Manager:** `GameState` containing Tableaus, FreeCells, Foundations, and full validation/execution of standard FreeCell logic.\n3. **Advanced Mechanics Verified:**\n   - Alternate-color and descending-rank move validations.\n   - Multi-card sequential moves with correct capacity limits based on empty free cells and empty tableaus.\n   - Smart, cascading auto-homing that avoids locking cards required for lower ranks of opposing colors.\n   - Linear undo/redo stack managing primary moves alongside automatic cascades.\n4. **Output Generation:**\n   - Detailed findings recorded in `.ai/verify_data.md`.\n   - `status.json` updated with `\"outcome\": \"succeeded\"`."
+            },
+            "notes": "Stage completed: verify_data",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 140156,
+                    "output_tokens": 1930,
+                    "reasoning_tokens": 1275,
+                    "cache_read_tokens": 64902,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 248814
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/.ai/verify_data.md",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 42429,
+              "tool_time_ms": 1927,
+              "active_time_ms": 44356
+            }
+          }
+        },
+        "next_node_id": "verify_ui",
+        "git_commit_sha": "c60c9ef013589c84f6a0f7601aa37f2da48e9de5",
+        "node_visits": {
+          "check_data": 1,
+          "expand_spec": 1,
+          "impl_data": 1,
+          "impl_setup": 1,
+          "impl_ui": 1,
+          "start": 1,
+          "verify_data": 1,
+          "verify_setup": 1,
+          "check_setup": 1,
+          "check_logic": 1,
+          "impl_logic": 1,
+          "verify_logic": 1
+        }
+      },
+      "diff": {
+        "patch": "diff --git a/.ai/card-game-spec.md b/.ai/card-game-spec.md\nnew file mode 100644\nindex 000000000..ccc4bc1b0\n--- /dev/null\n+++ b/.ai/card-game-spec.md\n@@ -0,0 +1,362 @@\n+# Technical Specification: Terminal-Based FreeCell Solitaire in Python\n+\n+This document specifies the architecture, domain logic, user interface, and testing strategy for a terminal-based FreeCell Solitaire game built with Python. \n+\n+The application is split into two completely decoupled layers:\n+1. **Core Domain Model / Game Engine**: Fully testable, framework-independent, pure-Python representations of cards, piles, moves, validation, and game state.\n+2. **Curses-based Terminal UI (TUI)**: A visual presentation layer built on the standard-library `curses` module, handling input polling, terminal events (like resizing), and colorized rendering.\n+\n+---\n+\n+## 1. Game Rules & Mechanics\n+\n+FreeCell is a solitaire card game played with a single standard 52-card deck. All cards are dealt face-up at the start.\n+\n+### 1.1 Table Layout\n+The game screen consists of three main areas:\n+- **Free Cells (4 cells)**: Temporary holding spaces. Each cell can hold at most one card of any suit and rank.\n+- **Foundations (4 piles)**: Destination piles built up by suit from Ace (rank 1) through King (rank 13). Winning the game requires placing all 52 cards here.\n+- **Tableau (8 columns)**: The main play area. Columns 1–4 are dealt 7 cards each; columns 5–8 are dealt 6 cards each.\n+\n+### 1.2 Movement Rules\n+- **Moving to a Free Cell**: Any single card can be moved to an empty Free Cell.\n+- **Moving to a Foundation**:\n+  - An **Ace** can be moved to an empty Foundation pile.\n+  - A card of rank $R$ and suit $S$ can be placed on a Foundation pile if the current top card of that pile is of suit $S$ and rank $R - 1$.\n+- **Moving to a Tableau Column**:\n+  - A single card of rank $R$ and color $C$ can be placed on top of a tableau card of rank $R+1$ and the *opposite* color (e.g., a Black 7 on a Red 8).\n+  - An empty tableau column can accept any single card.\n+- **Sequence Moves (Multiple Cards)**:\n+  - A sequence of cards that is properly ordered (descending ranks and alternating colors) can be moved together from one tableau column to another.\n+  - The maximum size of a sequence that can be moved depends on the number of empty Free Cells and empty Tableau columns available as temporary landing zones.\n+  - **Formula for Max Move Size**:\n+    $$\\text{Max Cards} = (1 + \\text{Empty Free Cells}) \\times 2^{\\text{Empty Tableau Columns}}$$\n+    *Exception*: If the destination column is an empty tableau column, that empty column does not count as \"empty\" in the exponent of the formula (as it is the final destination, not a temporary transit zone).\n+\n+### 1.3 Automatic Moves (\"Auto-Homing\")\n+To reduce tedious manual moves, the engine should automatically move cards to the Foundations if they can no longer be used as transition cards for lower-ranked cards. A card of rank $R$ and suit $S$ can safely be \"auto-homed\" to its Foundation if:\n+1. It is a legal move (it is on top of a tableau/freecell and matches $R-1$ of its foundation).\n+2. All cards of the *opposite color* with rank $R-1$ or lower have already been placed in the foundations. This ensures that no card still needs to be built on top of this card in the tableaus.\n+\n+---\n+\n+## 2. Core Domain Architecture (Non-UI)\n+\n+All domain logic must reside in classes that do not import or assume a `curses` environment. This ensures unit tests can run in headless CI environments.\n+\n+```\n++-------------------------------------------------------------+\n+|                        Domain Model                         |\n+|                                                             |\n+|   +----------------+     +---------------+                  |\n+|   |      Card      |---> |     Deck      |                  |\n+|   +----------------+     +---------------+                  |\n+|            |                                                |\n+|            v                                                |\n+|   +----------------+                                        |\n+|   |   GameState    | <--- Handles validation, moves, undo   |\n+|   +----------------+                                        |\n++-------------------------------------------------------------+\n+```\n+\n+### 2.1 Domain Types & Data Structures\n+\n+#### Card Representation\n+```python\n+from dataclasses import dataclass\n+from enum import Enum, auto\n+\n+class Suit(Enum):\n+    HEARTS = \"H\"\n+    DIAMONDS = \"D\"\n+    CLUBS = \"C\"\n+    SPADES = \"S\"\n+\n+    @property\n+    def color(self) -> str:\n+        return \"RED\" if self in (Suit.HEARTS, Suit.DIAMONDS) else \"BLACK\"\n+\n+    @property\n+    def symbol(self) -> str:\n+        # Unicode symbols for attractive rendering\n+        return {\n+            Suit.HEARTS: \"♥\",\n+            Suit.DIAMONDS: \"♦\",\n+            Suit.CLUBS: \"♣\",\n+            Suit.SPADES: \"♠\"\n+        }[self]\n+\n+class Rank(Enum):\n+    ACE = 1\n+    TWO = 2\n+    THREE = 3\n+    FOUR = 4\n+    FIVE = 5\n+    SIX = 6\n+    SEVEN = 7\n+    EIGHT = 8\n+    NINE = 9\n+    TEN = 10\n+    JACK = 11\n+    QUEEN = 12\n+    KING = 13\n+\n+    @property\n+    def label(self) -> str:\n+        if self.value == 1: return \"A\"\n+        if self.value == 11: return \"J\"\n+        if self.value == 12: return \"Q\"\n+        if self.value == 13: return \"K\"\n+        return str(self.value)\n+\n+@dataclass(frozen=True)\n+class Card:\n+    suit: Suit\n+    rank: Rank\n+\n+    def __repr__(self) -> str:\n+        return f\"{self.rank.label}{self.suit.symbol}\"\n+```\n+\n+#### Deck & Setup\n+```python\n+import random\n+from typing import List\n+\n+class Deck:\n+    def __init__(self, seed: int = None):\n+        self.cards = [Card(suit, rank) for suit in Suit for rank in Rank]\n+        if seed is not None:\n+            random.seed(seed)\n+        random.shuffle(self.cards)\n+\n+    def deal(self) -> List[List[Card]]:\n+        \"\"\"Deals 52 cards into 8 columns.\"\"\"\n+        tableaus: List[List[Card]] = [[] for _ in range(8)]\n+        for i, card in enumerate(self.cards):\n+            tableaus[i % 8].append(card)\n+        return tableaus\n+```\n+\n+#### Move Representation\n+To support an robust Undo/Redo stack, each move is captured as a detailed state transition:\n+```python\n+from typing import Union\n+\n+class LocationType(Enum):\n+    TABLEAU = auto()\n+    FREECELL = auto()\n+    FOUNDATION = auto()\n+\n+@dataclass(frozen=True)\n+class Position:\n+    type: LocationType\n+    index: int  # 0-7 for Tableau, 0-3 for FreeCell, 0-3 for Foundation\n+\n+@dataclass\n+class MoveRecord:\n+    from_pos: Position\n+    to_pos: Position\n+    cards: List[Card]  # Captured for single or sequence moves\n+    auto_moves: List['MoveRecord'] = None  # Nested moves triggered by auto-homing\n+```\n+\n+### 2.2 Core Engine (`GameState`)\n+The state engine encapsulates all state, mutations, validation, and history.\n+\n+```python\n+class GameState:\n+    def __init__(self, seed: int = None):\n+        self.tableaus: List[List[Card]] = Deck(seed).deal()\n+        self.freecells: List[Union[Card, None]] = [None] * 4\n+        self.foundations: dict[Suit, List[Card]] = {suit: [] for suit in Suit}\n+        self.undo_stack: List[MoveRecord] = []\n+        self.redo_stack: List[MoveRecord] = []\n+\n+    def get_card_at(self, position: Position) -> Union[Card, None]:\n+        if position.type == LocationType.FREECELL:\n+            return self.freecells[position.index]\n+        elif position.type == LocationType.FOUNDATION:\n+            pile = self.foundations[list(Suit)[position.index]]\n+            return pile[-1] if pile else None\n+        elif position.type == LocationType.TABLEAU:\n+            col = self.tableaus[position.index]\n+            return col[-1] if col else None\n+        return None\n+\n+    def validate_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:\n+        \"\"\"\n+        Calculates whether moving 'count' cards from from_pos to to_pos is legal.\n+        \"\"\"\n+        # 1. Basic boundary and type validations...\n+        # 2. Extract card(s) to be moved...\n+        # 3. Check target constraints (descending rank, alternate color for tableaus; suit-match ascending for foundation)\n+        # 4. Check capacity constraints if sequence move (using the formula)\n+        pass\n+\n+    def execute_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:\n+        \"\"\"\n+        Executes a move, saves it to the undo stack, runs auto-homing, and clears the redo stack.\n+        \"\"\"\n+        if not self.validate_move(from_pos, to_pos, count):\n+            return False\n+        # Perform move logic, handle nested auto-moves, append to undo_stack...\n+        return True\n+\n+    def undo(self) -> bool:\n+        \"\"\"Reverts the last move, including nested auto-homing steps.\"\"\"\n+        if not self.undo_stack:\n+            return False\n+        # Revert changes using move records and push to redo stack...\n+        return True\n+\n+    def check_win(self) -> bool:\n+        \"\"\"Returns True if all 52 cards are in the Foundations.\"\"\"\n+        return all(len(self.foundations[suit]) == 13 for suit in Suit)\n+```\n+\n+---\n+\n+## 3. UI Layout & Visual Design\n+\n+The UI will be formatted to fit standard $80 \\times 24$ terminal windows, but will dynamically adapt if larger screen space is available.\n+\n+### 3.1 Terminal ASCII / Unicode Grid Layout\n+\n+```\n++-----------------------------------------------------------------------------+\n+| FREECELL SOLITAIRE                                           [SEED: 49281]  |\n+|                                                                             |\n+| Free Cells                      Foundations                                 |\n+| [A]  [B]  [C]  [D]              [♥]     [♦]     [♣]     [♠]                 |\n+| +---+ +---+ +---+ +---+         +---+   +---+   +---+   +---+               |\n+| | 5♣| |   | |   | |   |         | A♥|   |   |   |   |   |   |               |\n+| +---+ +---+ +---+ +---+         +---+   +---+   +---+   +---+               |\n+|                                                                             |\n+| Tableau Columns                                                             |\n+|  [1]     [2]     [3]     [4]     [5]     [6]     [7]     [8]                |\n+| +---+   +---+   +---+   +---+   +---+   +---+   +---+   +---+               |\n+| | K♠|   | J♦|   | Q♣|   | 9♦|   | 8♣|   | 6♥|   | 10♦|  | A♠|               |\n+| | Q♦|   | 10♣|  | 3♦|   | 8♥|   | 7♦|   | 5♦|   | 9♠|   |   |               |\n+| | J♣|   |   |   | 2♠|   |   |   | 6♠|   |   |   |   |   |   |               |\n+| | 10♦|  |   |   |   |   |   |   | 5♥|   |   |   |   |   |   |               |\n+| +---+   +---+   +---+   +---+   +---+   +---+   +---+   +---+               |\n+|                                                                             |\n+|-----------------------------------------------------------------------------|\n+| MSG: Selected [1] K♠. Choose destination column or cell.                    |\n+| KEYS: [Arrows] Navigate  [Space] Select/Drop  [U] Undo  [R] Restart  [Q] Quit|\n++-----------------------------------------------------------------------------+\n+```\n+\n+### 3.2 Visual Components and Curses Rendering Strategy\n+\n+1. **Card Rendering**:\n+   - Empty slots (cells, tableaus, foundations) are rendered with dashed borders `· · ·` or generic outlines `[ ]`.\n+   - Cards are rendered with a white background/colored foreground using curses color pairs:\n+     - **Red Cards (Hearts, Diamonds)**: Red text on a white or black background.\n+     - **Black Cards (Clubs, Spades)**: Bold white or cyan text on a black background (or black text on a white background).\n+2. **Double-Buffered Screen**:\n+   - Use `curses.newwin()` for distinct sub-regions (Top panel, Main game table, Status bar) to organize layout.\n+   - Run calculations and render elements using memory-efficient double-buffering via `stdscr.noutrefresh()` and a final `curses.doupdate()`.\n+3. **Cursor Navigation & Selection**:\n+   - **Keyboard Cursor**: An active selection box/cursor highlighting a single pile/cell is moved via the **Arrow Keys** (or WASD).\n+   - **Selection State**: \n+     - First press of `Space` or `Enter` on a non-empty slot highlights the card(s) to move (visual \"lift\" state).\n+     - Moving the cursor to another column and pressing `Space` / `Enter` attempts the move.\n+     - Pressing `Escape` cancels the active selection.\n+\n+---\n+\n+## 4. Input Handling & UI Interaction\n+\n+### 4.1 Curses Main Loop & Input States\n+\n+```\n+                 +----------------------+\n+                 |      Game Loop       |\n+                 +----------------------+\n+                            |\n+                            v\n+                     [ Wait for Key ]\n+                            |\n+             +--------------+--------------+\n+             |                             |\n+             v                             v\n+     [ Action Key ]                [ Navigation Key ]\n+   (Q, U, R, ESC, etc.)             (Arrows, Tab, WASD)\n+             |                             |\n+             v                             v\n+      Handle Command               Move Cursor Highlight\n+             |                             |\n+             +--------------+--------------+\n+                            |\n+                            v\n+                     [ Update State ]\n+                            |\n+                            v\n+                      [ Redraw UI ]\n+```\n+\n+### 4.2 Keybindings Map\n+\n+| Key | Action |\n+| --- | --- |\n+| `Left / Right / Up / Down` | Navigate cursor across cells, foundations, and tableaus |\n+| `Space / Enter` | Select card at cursor / Move selected card to cursor target |\n+| `Escape` | Clear active card selection |\n+| `u / U` | Undo last move (supports infinite undo back to the start) |\n+| `r / R` | Restart current game (with same seed/shuffling) |\n+| `n / N` | Start a completely new game with a random seed |\n+| `q / Q` | Exit the game gracefully (presents confirm dialog) |\n+\n+---\n+\n+## 5. Non-Interactive Smoke Mode\n+\n+To ensure the CLI can be verified programmatically without invoking an interactive full-screen curses environment, the application must support a non-interactive setup probe via `--smoke`:\n+\n+```bash\n+python3 main.py --smoke\n+```\n+\n+### 5.1 Smoke Mode Requirements:\n+- Must not call `curses.initscr()`, `curses.wrapper()`, or perform terminal modifications.\n+- Must initialize the domain engine (`GameState`) with a deterministic test seed.\n+- Must execute a tiny mock transaction sequence (e.g., attempt 2 valid moves and 1 invalid move, validating assertion outcomes).\n+- Must print a plain-text confirmation of the test result to stdout.\n+- Must exit with status code `0` on success, or a non-zero exit code if an import or validation error occurs.\n+\n+---\n+\n+## 6. Testing Strategy\n+\n+Maintaining 100% testability on rules guarantees that bugs are never hidden behind UI refresh issues.\n+\n+### 6.1 Unit Tests (Headless)\n+All game rule constraints must be tested inside a robust suite of unit tests (e.g. using `unittest` or `pytest`):\n+\n+- **Deck Verification**: Ensure 52 unique cards are present; verify that deterministic seeding generates identical layouts.\n+- **Move Validations**:\n+  - Valid and invalid moves to empty and occupied free cells.\n+  - Valid sequence building on Tableau (alternating color, consecutive ranks).\n+  - Multi-card tableau-to-tableau sequence validation obeying the formula: $(1 + \\text{empty cells}) \\times 2^{\\text{empty tableaus}}$.\n+  - Valid and invalid foundation building (Aces first, ordered ascending by suit).\n+- **Auto-Homing Logic**: Verify that cards are only auto-homed when all cards of the opposite color of smaller rank have already been homed.\n+- **Undo/Redo System**: Run a multi-step sequence, trigger undo, verify state completely matches initial configuration.\n+- **Win Detection**: Construct a state where all but 1 card is homed, verify final homing triggers winning state flag.\n+\n+### 6.2 Curses Integration Tests\n+For the UI layer, tests can mock the terminal dimensions and standard input keys using Python's `unittest.mock`:\n+- Mock `curses.getch` and verify the cursor coordinates state shifts correctly.\n+- Verify screen boundary logic prevents cursor overflow out of valid coordinates (e.g. going left of FreeCell column 0 or below the lowest card in a Tableau).\n+\n+---\n+\n+## 7. Implementation Milestones\n+\n+1. **Milestone 1**: Implement pure-domain `Card`, `Deck`, `Position`, and `GameState` engines.\n+2. **Milestone 2**: Write unit tests proving full game validation logic and automated auto-homing.\n+3. **Milestone 3**: Implement `--smoke` mode in CLI entrypoint and verify CI execution.\n+4. **Milestone 4**: Setup curses framework window structure, color palettes, and draw static cards.\n+5. **Milestone 5**: Implement interactive keyboard cursor, card selection mechanics, and execution hook.\n+6. **Milestone 6**: Complete Undo-stack integration and terminal resize layout adjustment handler.\ndiff --git a/.ai/verify_data.md b/.ai/verify_data.md\nnew file mode 100644\nindex 000000000..aa6dfcaf0\n--- /dev/null\n+++ b/.ai/verify_data.md\n@@ -0,0 +1,59 @@\n+# Data Structures and Core Game State Verification Findings\n+\n+## 1. Overview and Command Execution\n+We verified the core card game data structures, domain model classes, and test suite. The compilation and automated test run executed successfully:\n+\n+```bash\n+cd card-game-app && python3 -m pytest tests/ -v && python3 -m py_compile main.py src/card_game_tui/*.py\n+```\n+\n+**Results:**\n+- **Pytest:** 13/13 tests passed successfully.\n+- **Python Compilation:** All files compiled cleanly without syntax or import errors.\n+\n+---\n+\n+## 2. Core Game-State Types Defined\n+\n+The following models and enum types are defined in `src/card_game_tui/domain.py`:\n+\n+### Enums\n+- **`Suit`**: Enum representing the four suits: `HEARTS` (\"H\"), `DIAMONDS` (\"D\"), `CLUBS` (\"C\"), and `SPADES` (\"S\"). Includes color classification (`RED` or `BLACK`) and UTF-8 symbols (`♥`, `♦`, `♣`, `♠`).\n+- **`Rank`**: Enum representing ranks `ACE` (1) to `KING` (13) with appropriate alphanumeric labels (`A`, `J`, `Q`, `K`, or numeric string).\n+- **`LocationType`**: Enum classifying board areas: `TABLEAU`, `FREECELL`, and `FOUNDATION`.\n+\n+### Core Data Classes & Entities\n+- **`Card`**: Frozen dataclass containing `suit` and `rank`, with custom representation `[Rank][Suit]` (e.g., `A♥`, `10♠`).\n+- **`Position`**: Frozen dataclass packaging `LocationType` and `index` for explicit target and source identification during gameplay.\n+- **`MoveRecord`**: Stores move history containing `from_pos`, `to_pos`, moving cards list (`cards`), and a list of nested, cascaded `auto_moves` resulting from auto-homing.\n+- **`Deck`**: Builds a standard 52-card deck, supports deterministic random seeding, and deals cards into the 8 Tableau columns (four columns of 7 cards, four columns of 6 cards).\n+- **`GameState`**: Main orchestrator of the board. Holds state for:\n+  - 8 Tableau columns\n+  - 4 Free cells\n+  - Foundations mapped by Suit\n+  - Undo/Redo history stacks\n+\n+---\n+\n+## 3. Basic & Advanced Operations Verified\n+\n+### Move Validation and Rules Execution\n+- **Single Card Moves:** Correctly validates moving a card to free cells (if empty) and to foundations (Aces first, then sequential cards of the matching suit).\n+- **Tableau Placement rules:** Strictly enforces alternating colors and descending ranks (e.g., moving a Red 8 onto a Black 9).\n+- **Sequence/Multi-Card Moves:** Computes valid transit capacities based on the exact FreeCell Solitaire formula:\n+  $$\\text{Max Cards} = (1 + \\text{empty\\_freecells}) \\times 2^{\\text{transit\\_empty\\_tableaus}}$$\n+  Tested and verified that moves exceeding this threshold or violating sequential alternating order are rejected.\n+\n+### Cascade Auto-Homing\n+- Safely moves cards to foundations automatically after a successful player move.\n+- Avoids preemptive/unsafe auto-homing: a card is only auto-homed if its rank does not exceed $N+1$, where $N$ is the rank of the highest cards of the *opposite* color already placed in foundations. This prevents burying cards that might still be needed as Tableau anchors.\n+- Cascades until no further eligible cards can be home-bound.\n+\n+### Command History (Undo / Redo)\n+- Seamlessly reverts and reapplies moves.\n+- Accurately tracks nested auto-homed moves so that undoing a player's move rolls back the cascading auto-homing moves in precise reverse order.\n+\n+---\n+\n+## 4. Conclusion\n+The data model is fully complete, mathematically sound, robustly tested, and perfectly ready for consumption by the TUI layer.\ndiff --git a/.ai/verify_logic.md b/.ai/verify_logic.md\nnew file mode 100644\nindex 000000000..8ff2d891a\n--- /dev/null\n+++ b/.ai/verify_logic.md\n@@ -0,0 +1,81 @@\n+# Game Logic Verification Findings\n+\n+## 1. Overview and Command Execution\n+We have successfully run and verified the entire FreeCell Solitaire card game logic, move validation engine, win/loss detection, and undo/redo systems.\n+\n+The test suite was executed via the following command:\n+```bash\n+cd card-game-app && python3 -m pytest tests/ -v\n+```\n+\n+**Results:**\n+- **Pytest:** 16/16 tests passed successfully (100% pass rate).\n+- **Compilation Check:** Checked with `python3 -m py_compile main.py src/card_game_tui/*.py` – compiled with zero errors or warnings.\n+- **Smoke Test Check:** Checked with `python3 main.py --smoke` – completed successfully.\n+\n+---\n+\n+## 2. Core Game Logic Areas Verified\n+\n+### A. Move & Action Validation\n+The move validation engine in `GameState.validate_move` has been verified for all game scenarios:\n+- **Index boundaries:** Prevents invalid indices (e.g., tableaus outside 0-7, freecells/foundations outside 0-3).\n+- **Invalid sources:** Moving from a foundation is forbidden.\n+- **Single-card move constraints:**\n+  - **Free Cells:** Permits placement only if empty; prevents moves when already occupied.\n+  - **Foundations:** Enforces starting with an **Ace** and building up sequentially in ascending rank order (`Ace -> 2 -> ... -> King`) of the identical suit.\n+  - **Tableaus:** Validates build-down rules. A card can only be placed on a tableau column top card if it has the **opposite color** and is **one rank lower** (e.g., Red 8 onto Black 9).\n+- **Sequence/Multi-card moves:** \n+  - Validates sequence integrity of moving cards (alternating color, descending ranks).\n+  - Enforces the capacity constraint formula to calculate the maximum size of a legal sequence move:\n+    $$\\text{Max Cards} = (1 + \\text{empty\\_freecells}) \\times 2^{\\text{transit\\_empty\\_tableaus}}$$\n+  - Correctly adjusts `transit_empty_tableaus` when moving to an empty column (which cannot act as an intermediate transit space, i.e., `transit_empty_tableaus = max(0, empty_tableaus - 1)`).\n+\n+### B. Cascade Auto-Homing\n+- Automatically scans free cells and tableau column tops after each move to move eligible cards to their respective foundations.\n+- Implements **safe auto-homing**: A card of rank $R$ is only auto-homed if its rank does not exceed $N+1$, where $N$ is the length of the foundation pile of both **opposite color** suits. This prevents the user from accidentally locking/burying cards that are still needed for tableau building.\n+- Runs recursively until no more eligible cards can be safely auto-homed.\n+\n+### C. Win & Loss Detection\n+- **Win Detection (`check_win`):** Checks if all 52 cards are successfully stored in their foundations (13 cards in each of the 4 suit piles).\n+- **Loss Detection (`check_loss`):** Checks if there are absolutely no legal moves remaining. Evaluates:\n+  - Moving from any occupied freecell to any tableau column, empty freecell, or foundation pile.\n+  - Moving any valid-sized sequence of cards from any tableau column to any other tableau column, empty freecell, or foundation pile.\n+  - Returns `False` on start of game or if any move is possible, and correctly returns `True` when all moves are fully blocked.\n+\n+### D. Undo & Redo System\n+- Records moves using the `MoveRecord` model.\n+- **Nested Auto-Homing Rollback:** Captures all cascading auto-homing steps as nested records inside the primary player move.\n+- **Undo Operation:** Reverts the main player move and rolls back the cascading auto-homes in the **precise reverse order** of their execution to ensure absolute state consistency.\n+- **Redo Operation:** Correctly reapplies the undone player move followed by the exact nested auto-homing moves in their original forward order.\n+- **Stack Integrity:** Clears the redo stack whenever the player initiates a new manual move, following standard undo-redo history patterns.\n+\n+---\n+\n+## 3. Verified Scenarios and Test Coverage Matrix\n+\n+The following test suites in `tests/test_domain.py` verify these domains:\n+\n+| Test Name | Verifies | Status |\n+| :--- | :--- | :--- |\n+| `test_deck_deals_52_cards` | Deck creation has 52 cards | Pass |\n+| `test_game_state_initialization` | Tableau dealing heights (four of 7, four of 6) | Pass |\n+| `test_get_card_at` | Cards can be inspected accurately across tableaus, freecells, and foundations | Pass |\n+| `test_deck_deterministic_seeding` | Deterministic shuffle given a seed | Pass |\n+| `test_moves_to_free_cells` | Standard single-card moves and boundary conditions on free cells | Pass |\n+| `test_moves_to_foundations` | Ascending rank sequences and suit checks on foundations | Pass |\n+| `test_moves_to_tableau_single_card` | Alternating color and descending rank builds on tableau | Pass |\n+| `test_sequence_moves_tableau_to_tableau` | Moving sequences and standard capacity calculation checks | Pass |\n+| `test_sequence_moves_to_empty_tableau` | Capacity calculation adjustement when moving to an empty tableau column | Pass |\n+| `test_auto_homing_logic` | Cascade moves & safe auto-homing constraints relative to opposite suits | Pass |\n+| `test_undo_redo_system` | Basic rollback and forward operations on manual moves | Pass |\n+| `test_undo_with_auto_homing` | Rolling back complex cascade sequences in precise reverse order | Pass |\n+| `test_win_detection` | Accurate identification when all 52 cards are homed | Pass |\n+| `test_check_loss_not_lost` | Returns false when game is solvable/moves exist | Pass |\n+| `test_check_loss_won` | Returns false on won states | Pass |\n+| `test_check_loss_is_lost` | Returns true when game is completely locked with no moves | Pass |\n+\n+---\n+\n+## 4. Conclusion\n+The card game logic for FreeCell solitaire is highly robust, fully self-consistent, thoroughly tested, and perfectly correct. The model is complete and ready to power the text-based TUI.\ndiff --git a/.ai/verify_setup.md b/.ai/verify_setup.md\nnew file mode 100644\nindex 000000000..6b2f2d61e\n--- /dev/null\n+++ b/.ai/verify_setup.md\n@@ -0,0 +1,28 @@\n+# Setup Verification Findings\n+\n+All checks to verify the setup of the card game application have been completed successfully.\n+\n+## Verification Checklist\n+\n+1. **`card-game-app/pyproject.toml` exists:**\n+   - **Status:** Verified\n+   - **Details:** Found and validated package configuration for `card-game-tui`.\n+\n+2. **`card-game-app/main.py` exists:**\n+   - **Status:** Verified\n+   - **Details:** Found entry point. Successfully ran non-interactive smoke test using `python3 main.py --smoke`.\n+\n+3. **`card-game-app/src/card_game_tui` exists:**\n+   - **Status:** Verified\n+   - **Details:** Directory structure is correctly formed, containing:\n+     - `src/card_game_tui/__init__.py`\n+     - `src/card_game_tui/domain.py`\n+     - `src/card_game_tui/tui.py`\n+\n+4. **Python files compile:**\n+   - **Status:** Verified\n+   - **Details:** Successfully ran:\n+     ```bash\n+     cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py\n+     ```\n+     All files compiled without any syntax or compilation errors.\ndiff --git a/card-game-app/README.md b/card-game-app/README.md\nnew file mode 100644\nindex 000000000..e12418971\n--- /dev/null\n+++ b/card-game-app/README.md\n@@ -0,0 +1,32 @@\n+# FreeCell Solitaire TUI\n+\n+A terminal-based FreeCell Solitaire game built in Python using the `curses` standard library.\n+\n+## Project Structure\n+\n+- `main.py`: CLI entrypoint.\n+- `src/card_game_tui/`: Core package.\n+  - `domain.py`: Game rules, logic, state, and card representations (fully decoupled from UI).\n+  - `tui.py`: Curses-based TUI and interface logic.\n+- `tests/`: Automated unit and integration tests.\n+\n+## Installation & Running\n+\n+This project requires Python 3.10+ and no external dependencies for core play.\n+\n+To run:\n+```bash\n+python3 main.py\n+```\n+\n+For smoke-test mode:\n+```bash\n+python3 main.py --smoke\n+```\n+\n+## Running Tests\n+\n+To run tests:\n+```bash\n+pytest\n+```\ndiff --git a/card-game-app/main.py b/card-game-app/main.py\nnew file mode 100644\nindex 000000000..541502ad6\n--- /dev/null\n+++ b/card-game-app/main.py\n@@ -0,0 +1,53 @@\n+#!/usr/bin/env python3\n+import sys\n+import os\n+\n+# Add src to python path to make importing easier\n+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))\n+\n+from card_game_tui.domain import GameState, Position, LocationType\n+\n+def run_smoke_test() -> int:\n+    print(\"Running non-interactive smoke test probe...\")\n+    try:\n+        # 1. Initialize GameState with a deterministic seed\n+        seed = 42\n+        state = GameState(seed=seed)\n+        print(f\"Initialized GameState with seed {seed}\")\n+\n+        # 2. Basic assertions to verify components compile and behave as expected\n+        # Let's verify we have 8 tableau columns\n+        if len(state.tableaus) != 8:\n+            print(f\"Error: Expected 8 tableaus, found {len(state.tableaus)}\", file=sys.stderr)\n+            return 1\n+        \n+        # 3. Validate a mock move\n+        from_pos = Position(LocationType.TABLEAU, 0)\n+        to_pos = Position(LocationType.FREECELL, 0)\n+        \n+        is_valid = state.validate_move(from_pos, to_pos)\n+        print(f\"Validating move from Tableau 0 to FreeCell 0: {is_valid}\")\n+        \n+        success = state.execute_move(from_pos, to_pos)\n+        print(f\"Executed move from Tableau 0 to FreeCell 0: {success}\")\n+        \n+        # Check win state\n+        is_win = state.check_win()\n+        print(f\"Win checked: {is_win}\")\n+\n+        print(\"SMOKE TEST SUCCESSFUL\")\n+        return 0\n+    except Exception as e:\n+        print(f\"Smoke test failed with error: {e}\", file=sys.stderr)\n+        return 1\n+\n+def main():\n+    if \"--smoke\" in sys.argv:\n+        sys.exit(run_smoke_test())\n+    else:\n+        from card_game_tui.tui import TUIApp\n+        app = TUIApp()\n+        app.run()\n+\n+if __name__ == \"__main__\":\n+    main()\ndiff --git a/card-game-app/pyproject.toml b/card-game-app/pyproject.toml\nnew file mode 100644\nindex 000000000..132e2172b\n--- /dev/null\n+++ b/card-game-app/pyproject.toml\n@@ -0,0 +1,19 @@\n+[project]\n+name = \"card-game-tui\"\n+version = \"0.1.0\"\n+description = \"A terminal-based FreeCell solitaire game in Python\"\n+readme = \"README.md\"\n+requires-python = \">=3.10\"\n+dependencies = []\n+\n+[build-system]\n+requires = [\"hatchling\"]\n+build-backend = \"hatchling.build\"\n+\n+[tool.pytest.ini_options]\n+minversion = \"6.0\"\n+addopts = \"-ra -q\"\n+testpaths = [\n+    \"tests\",\n+]\n+pythonpath = [\"src\"]\ndiff --git a/card-game-app/src/card_game_tui/__init__.py b/card-game-app/src/card_game_tui/__init__.py\nnew file mode 100644\nindex 000000000..6b01371db\n--- /dev/null\n+++ b/card-game-app/src/card_game_tui/__init__.py\n@@ -0,0 +1 @@\n+# Card Game TUI Package\ndiff --git a/card-game-app/src/card_game_tui/domain.py b/card-game-app/src/card_game_tui/domain.py\nnew file mode 100644\nindex 000000000..f1dd717f2\n--- /dev/null\n+++ b/card-game-app/src/card_game_tui/domain.py\n@@ -0,0 +1,426 @@\n+import random\n+from dataclasses import dataclass, field\n+from enum import Enum, auto\n+from typing import List, Union, Dict\n+\n+class Suit(Enum):\n+    HEARTS = \"H\"\n+    DIAMONDS = \"D\"\n+    CLUBS = \"C\"\n+    SPADES = \"S\"\n+\n+    @property\n+    def color(self) -> str:\n+        return \"RED\" if self in (Suit.HEARTS, Suit.DIAMONDS) else \"BLACK\"\n+\n+    @property\n+    def symbol(self) -> str:\n+        return {\n+            Suit.HEARTS: \"♥\",\n+            Suit.DIAMONDS: \"♦\",\n+            Suit.CLUBS: \"♣\",\n+            Suit.SPADES: \"♠\"\n+        }[self]\n+\n+class Rank(Enum):\n+    ACE = 1\n+    TWO = 2\n+    THREE = 3\n+    FOUR = 4\n+    FIVE = 5\n+    SIX = 6\n+    SEVEN = 7\n+    EIGHT = 8\n+    NINE = 9\n+    TEN = 10\n+    JACK = 11\n+    QUEEN = 12\n+    KING = 13\n+\n+    @property\n+    def label(self) -> str:\n+        if self.value == 1: return \"A\"\n+        if self.value == 11: return \"J\"\n+        if self.value == 12: return \"Q\"\n+        if self.value == 13: return \"K\"\n+        return str(self.value)\n+\n+@dataclass(frozen=True)\n+class Card:\n+    suit: Suit\n+    rank: Rank\n+\n+    def __repr__(self) -> str:\n+        return f\"{self.rank.label}{self.suit.symbol}\"\n+\n+class Deck:\n+    def __init__(self, seed: int = None):\n+        self.cards = [Card(suit, rank) for suit in Suit for rank in Rank]\n+        if seed is not None:\n+            random.seed(seed)\n+        random.shuffle(self.cards)\n+\n+    def deal(self) -> List[List[Card]]:\n+        \"\"\"Deals 52 cards into 8 columns.\"\"\"\n+        tableaus: List[List[Card]] = [[] for _ in range(8)]\n+        for i, card in enumerate(self.cards):\n+            tableaus[i % 8].append(card)\n+        return tableaus\n+\n+class LocationType(Enum):\n+    TABLEAU = auto()\n+    FREECELL = auto()\n+    FOUNDATION = auto()\n+\n+@dataclass(frozen=True)\n+class Position:\n+    type: LocationType\n+    index: int  # 0-7 for Tableau, 0-3 for FreeCell, 0-3 for Foundation\n+\n+@dataclass\n+class MoveRecord:\n+    from_pos: Position\n+    to_pos: Position\n+    cards: List[Card]  # Captured for single or sequence moves\n+    auto_moves: List['MoveRecord'] = None  # Nested moves triggered by auto-homing\n+\n+    def __post_init__(self):\n+        if self.auto_moves is None:\n+            self.auto_moves = []\n+\n+class GameState:\n+    def __init__(self, seed: int = None):\n+        self.tableaus: List[List[Card]] = Deck(seed).deal()\n+        self.freecells: List[Union[Card, None]] = [None] * 4\n+        self.foundations: Dict[Suit, List[Card]] = {suit: [] for suit in Suit}\n+        self.undo_stack: List[MoveRecord] = []\n+        self.redo_stack: List[MoveRecord] = []\n+\n+    def get_card_at(self, position: Position) -> Union[Card, None]:\n+        if position.type == LocationType.FREECELL:\n+            return self.freecells[position.index]\n+        elif position.type == LocationType.FOUNDATION:\n+            pile = self.foundations[list(Suit)[position.index]]\n+            return pile[-1] if pile else None\n+        elif position.type == LocationType.TABLEAU:\n+            col = self.tableaus[position.index]\n+            return col[-1] if col else None\n+        return None\n+\n+    def validate_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:\n+        \"\"\"\n+        Calculates whether moving 'count' cards from from_pos to to_pos is legal.\n+        \"\"\"\n+        if count < 1:\n+            return False\n+\n+        if from_pos == to_pos:\n+            return False\n+\n+        # Validate index boundaries\n+        if from_pos.type == LocationType.TABLEAU:\n+            if not (0 <= from_pos.index < 8):\n+                return False\n+        elif from_pos.type == LocationType.FREECELL:\n+            if not (0 <= from_pos.index < 4):\n+                return False\n+            if count != 1:\n+                return False\n+        elif from_pos.type == LocationType.FOUNDATION:\n+            return False\n+        else:\n+            return False\n+\n+        if to_pos.type == LocationType.TABLEAU:\n+            if not (0 <= to_pos.index < 8):\n+                return False\n+        elif to_pos.type == LocationType.FREECELL:\n+            if not (0 <= to_pos.index < 4):\n+                return False\n+            if count != 1:\n+                return False\n+        elif to_pos.type == LocationType.FOUNDATION:\n+            if not (0 <= to_pos.index < 4):\n+                return False\n+            if count != 1:\n+                return False\n+        else:\n+            return False\n+\n+        # Extract moving cards\n+        if from_pos.type == LocationType.FREECELL:\n+            card = self.freecells[from_pos.index]\n+            if card is None:\n+                return False\n+            moving_cards = [card]\n+        elif from_pos.type == LocationType.TABLEAU:\n+            col = self.tableaus[from_pos.index]\n+            if len(col) < count:\n+                return False\n+            moving_cards = col[-count:]\n+        else:\n+            return False\n+\n+        # Validate sequence if moving multiple cards\n+        if count > 1:\n+            for i in range(count - 1):\n+                c1 = moving_cards[i]\n+                c2 = moving_cards[i+1]\n+                if c2.rank.value != c1.rank.value - 1:\n+                    return False\n+                if c2.suit.color == c1.suit.color:\n+                    return False\n+\n+        # Validate destination constraints\n+        if to_pos.type == LocationType.FREECELL:\n+            if self.freecells[to_pos.index] is not None:\n+                return False\n+\n+        elif to_pos.type == LocationType.FOUNDATION:\n+            target_suit = list(Suit)[to_pos.index]\n+            card = moving_cards[0]\n+            if card.suit != target_suit:\n+                return False\n+            \n+            foundation_pile = self.foundations[target_suit]\n+            if card.rank == Rank.ACE:\n+                if len(foundation_pile) != 0:\n+                    return False\n+            else:\n+                if len(foundation_pile) != card.rank.value - 1:\n+                    return False\n+\n+        elif to_pos.type == LocationType.TABLEAU:\n+            dest_col = self.tableaus[to_pos.index]\n+            first_moving_card = moving_cards[0]\n+            if len(dest_col) > 0:\n+                dest_top_card = dest_col[-1]\n+                if first_moving_card.rank.value != dest_top_card.rank.value - 1:\n+                    return False\n+                if first_moving_card.suit.color == dest_top_card.suit.color:\n+                    return False\n+\n+            # Capacity constraint\n+            empty_freecells = sum(1 for c in self.freecells if c is None)\n+            empty_tableaus = sum(1 for col in self.tableaus if len(col) == 0)\n+\n+            if len(dest_col) == 0:\n+                transit_empty_tableaus = max(0, empty_tableaus - 1)\n+            else:\n+                transit_empty_tableaus = empty_tableaus\n+\n+            max_cards = (1 + empty_freecells) * (2 ** transit_empty_tableaus)\n+            if count > max_cards:\n+                return False\n+\n+        return True\n+\n+    def execute_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:\n+        \"\"\"\n+        Executes a move, saves it to the undo stack, runs auto-homing, and clears the redo stack.\n+        \"\"\"\n+        if not self.validate_move(from_pos, to_pos, count):\n+            return False\n+\n+        # Extract moving cards\n+        if from_pos.type == LocationType.FREECELL:\n+            moving_cards = [self.freecells[from_pos.index]]\n+        elif from_pos.type == LocationType.TABLEAU:\n+            moving_cards = self.tableaus[from_pos.index][-count:]\n+        else:\n+            return False\n+\n+        move_record = MoveRecord(from_pos=from_pos, to_pos=to_pos, cards=moving_cards)\n+        \n+        # Apply the move\n+        self._apply_single_move(move_record)\n+        \n+        # Run auto-homing\n+        self._run_auto_homing(move_record)\n+        \n+        # Record on stacks\n+        self.undo_stack.append(move_record)\n+        self.redo_stack.clear()\n+        return True\n+\n+    def _apply_single_move(self, record: MoveRecord):\n+        # Remove from from_pos\n+        if record.from_pos.type == LocationType.FREECELL:\n+            self.freecells[record.from_pos.index] = None\n+        elif record.from_pos.type == LocationType.TABLEAU:\n+            count = len(record.cards)\n+            self.tableaus[record.from_pos.index] = self.tableaus[record.from_pos.index][:-count]\n+\n+        # Put to to_pos\n+        if record.to_pos.type == LocationType.FREECELL:\n+            self.freecells[record.to_pos.index] = record.cards[0]\n+        elif record.to_pos.type == LocationType.FOUNDATION:\n+            target_suit = list(Suit)[record.to_pos.index]\n+            self.foundations[target_suit].append(record.cards[0])\n+        elif record.to_pos.type == LocationType.TABLEAU:\n+            self.tableaus[record.to_pos.index].extend(record.cards)\n+\n+    def _revert_single_move(self, record: MoveRecord):\n+        # Remove from to_pos\n+        if record.to_pos.type == LocationType.FREECELL:\n+            self.freecells[record.to_pos.index] = None\n+        elif record.to_pos.type == LocationType.FOUNDATION:\n+            target_suit = list(Suit)[record.to_pos.index]\n+            self.foundations[target_suit].pop()\n+        elif record.to_pos.type == LocationType.TABLEAU:\n+            count = len(record.cards)\n+            self.tableaus[record.to_pos.index] = self.tableaus[record.to_pos.index][:-count]\n+\n+        # Put to from_pos\n+        if record.from_pos.type == LocationType.FREECELL:\n+            self.freecells[record.from_pos.index] = record.cards[0]\n+        elif record.from_pos.type == LocationType.TABLEAU:\n+            self.tableaus[record.from_pos.index].extend(record.cards)\n+\n+    def _should_auto_home(self, card: Card) -> bool:\n+        \"\"\"\n+        Checks if a card can be safely auto-homed to the foundations.\n+        \"\"\"\n+        target_foundation = self.foundations[card.suit]\n+        if card.rank.value != len(target_foundation) + 1:\n+            return False\n+\n+        # Opposite color suits must have all lower cards in the foundations\n+        if card.suit.color == \"RED\":\n+            opp_suits = [Suit.CLUBS, Suit.SPADES]\n+        else:\n+            opp_suits = [Suit.HEARTS, Suit.DIAMONDS]\n+\n+        for s_opp in opp_suits:\n+            if len(self.foundations[s_opp]) < card.rank.value - 1:\n+                return False\n+\n+        return True\n+\n+    def _run_auto_homing(self, move_record: MoveRecord):\n+        \"\"\"\n+        Scans freecells and tableau tops, moving eligible cards to foundations.\n+        Repeats until no more cards can be auto-homed.\n+        \"\"\"\n+        any_homed = True\n+        while any_homed:\n+            any_homed = False\n+            \n+            # Check free cells\n+            for i, card in enumerate(self.freecells):\n+                if card is not None and self._should_auto_home(card):\n+                    from_p = Position(LocationType.FREECELL, i)\n+                    suit_idx = list(Suit).index(card.suit)\n+                    to_p = Position(LocationType.FOUNDATION, suit_idx)\n+                    \n+                    auto_rec = MoveRecord(from_pos=from_p, to_pos=to_p, cards=[card])\n+                    self._apply_single_move(auto_rec)\n+                    move_record.auto_moves.append(auto_rec)\n+                    \n+                    any_homed = True\n+                    break\n+            \n+            if any_homed:\n+                continue\n+\n+            # Check tableaus\n+            for i, col in enumerate(self.tableaus):\n+                if col:\n+                    card = col[-1]\n+                    if self._should_auto_home(card):\n+                        from_p = Position(LocationType.TABLEAU, i)\n+                        suit_idx = list(Suit).index(card.suit)\n+                        to_p = Position(LocationType.FOUNDATION, suit_idx)\n+                        \n+                        auto_rec = MoveRecord(from_pos=from_p, to_pos=to_p, cards=[card])\n+                        self._apply_single_move(auto_rec)\n+                        move_record.auto_moves.append(auto_rec)\n+                        \n+                        any_homed = True\n+                        break\n+\n+    def undo(self) -> bool:\n+        \"\"\"Reverts the last move, including nested auto-homing steps.\"\"\"\n+        if not self.undo_stack:\n+            return False\n+        \n+        move_record = self.undo_stack.pop()\n+        \n+        # Revert auto moves in reverse order\n+        for auto_move in reversed(move_record.auto_moves):\n+            self._revert_single_move(auto_move)\n+            \n+        # Revert the main move\n+        self._revert_single_move(move_record)\n+        \n+        self.redo_stack.append(move_record)\n+        return True\n+\n+    def redo(self) -> bool:\n+        \"\"\"Reapplies the last undone move.\"\"\"\n+        if not self.redo_stack:\n+            return False\n+            \n+        move_record = self.redo_stack.pop()\n+        \n+        # Apply the main move\n+        self._apply_single_move(move_record)\n+        \n+        # Re-apply auto moves\n+        for auto_move in move_record.auto_moves:\n+            self._apply_single_move(auto_move)\n+            \n+        self.undo_stack.append(move_record)\n+        return True\n+\n+    def check_win(self) -> bool:\n+        \"\"\"Returns True if all 52 cards are in the Foundations.\"\"\"\n+        return all(len(self.foundations[suit]) == 13 for suit in Suit)\n+\n+    def check_loss(self) -> bool:\n+        \"\"\"\n+        Returns True if the game is lost (i.e. not won and no legal moves can be made).\n+        \"\"\"\n+        if self.check_win():\n+            return False\n+\n+        # Check all possible moves from freecells\n+        for i in range(4):\n+            if self.freecells[i] is not None:\n+                from_pos = Position(LocationType.FREECELL, i)\n+                # To tableau\n+                for j in range(8):\n+                    if self.validate_move(from_pos, Position(LocationType.TABLEAU, j), 1):\n+                        return False\n+                # To other freecells\n+                for j in range(4):\n+                    if i != j and self.validate_move(from_pos, Position(LocationType.FREECELL, j), 1):\n+                        return False\n+                # To foundations\n+                for j in range(4):\n+                    if self.validate_move(from_pos, Position(LocationType.FOUNDATION, j), 1):\n+                        return False\n+\n+        # Check all possible moves from tableaus\n+        for i in range(8):\n+            col_len = len(self.tableaus[i])\n+            if col_len > 0:\n+                from_pos = Position(LocationType.TABLEAU, i)\n+                # Check different move counts\n+                for count in range(1, col_len + 1):\n+                    # To other tableaus\n+                    for j in range(8):\n+                        if i != j and self.validate_move(from_pos, Position(LocationType.TABLEAU, j), count):\n+                            return False\n+                    # To freecells\n+                    if count == 1:\n+                        for j in range(4):\n+                            if self.validate_move(from_pos, Position(LocationType.FREECELL, j), 1):\n+                                return False\n+                    # To foundations\n+                    if count == 1:\n+                        for j in range(4):\n+                            if self.validate_move(from_pos, Position(LocationType.FOUNDATION, j), 1):\n+                                return False\n+\n+        return True\ndiff --git a/card-game-app/src/card_game_tui/render.py b/card-game-app/src/card_game_tui/render.py\nnew file mode 100644\nindex 000000000..025d35524\n--- /dev/null\n+++ b/card-game-app/src/card_game_tui/render.py\n@@ -0,0 +1,47 @@\n+from typing import Union\n+from card_game_tui.domain import Card, Suit\n+\n+def get_card_inner(card: Card) -> str:\n+    \"\"\"\n+    Returns the exact 3-character representation of a card's rank and suit symbol.\n+    \"\"\"\n+    label = card.rank.label\n+    symbol = card.suit.symbol\n+    return f\"{label:>2}{symbol}\"\n+\n+def get_empty_foundation_inner(suit_idx: int) -> str:\n+    \"\"\"\n+    Returns the suit symbol with padding for an empty foundation slot.\n+    \"\"\"\n+    suits = list(Suit)\n+    if 0 <= suit_idx < len(suits):\n+        return f\" {suits[suit_idx].symbol} \"\n+    return \"   \"\n+\n+def get_card_lines(card: Union[Card, None], is_empty: bool = False, empty_suit_idx: int = -1) -> list[str]:\n+    \"\"\"\n+    Returns 3 lines representing a card or empty cell.\n+    \"\"\"\n+    if is_empty:\n+        if empty_suit_idx >= 0:\n+            inner = get_empty_foundation_inner(empty_suit_idx)\n+        else:\n+            inner = \"   \"\n+        return [\n+            \"+---+\",\n+            f\"|{inner}|\",\n+            \"+---+\"\n+        ]\n+    else:\n+        if card is None:\n+            return [\n+                \"+---+\",\n+                \"|   |\",\n+                \"+---+\"\n+            ]\n+        inner = get_card_inner(card)\n+        return [\n+            \"+---+\",\n+            f\"|{inner}|\",\n+            \"+---+\"\n+        ]\ndiff --git a/card-game-app/src/card_game_tui/tui.py b/card-game-app/src/card_game_tui/tui.py\nnew file mode 100644\nindex 000000000..1119eaa6e\n--- /dev/null\n+++ b/card-game-app/src/card_game_tui/tui.py\n@@ -0,0 +1,427 @@\n+import curses\n+import random\n+import sys\n+from typing import Union, List, Optional\n+from card_game_tui.domain import GameState, Position, LocationType, Suit, Card\n+from card_game_tui.render import get_card_inner, get_empty_foundation_inner\n+\n+class TUIApp:\n+    def __init__(self):\n+        # We generate a random seed for the game to start with, e.g. 1 to 99999\n+        self.current_seed = random.randint(1, 99999)\n+        self.state = GameState(seed=self.current_seed)\n+        \n+        # Cursor and Selection State\n+        self.cursor_row = 1  # 0: Top row (Freecells/Foundations), 1: Tableau Columns\n+        self.cursor_col = 0  # 0 to 7\n+        \n+        self.selected_pos: Optional[Position] = None\n+        self.selected_count = 1\n+        \n+        self.message = \"Welcome to FreeCell! Select a card to begin.\"\n+        self.message_attr = 0  # Will be set to color pair\n+        \n+        self.quit_confirm = False\n+\n+    def reset_game(self, seed: int):\n+        self.current_seed = seed\n+        self.state = GameState(seed=seed)\n+        self.selected_pos = None\n+        self.selected_count = 1\n+        self.cursor_row = 1\n+        self.cursor_col = 0\n+        self.message = f\"Game started with seed: {self.current_seed}\"\n+        self.message_attr = 0\n+        self.quit_confirm = False\n+\n+    def get_current_pos(self) -> Position:\n+        if self.cursor_row == 0:\n+            if self.cursor_col < 4:\n+                return Position(LocationType.FREECELL, self.cursor_col)\n+            else:\n+                return Position(LocationType.FOUNDATION, self.cursor_col - 4)\n+        else:\n+            return Position(LocationType.TABLEAU, self.cursor_col)\n+\n+    def find_max_valid_count(self, from_pos: Position, to_pos: Position) -> int:\n+        if from_pos.type != LocationType.TABLEAU:\n+            return 1\n+        col = self.state.tableaus[from_pos.index]\n+        if not col:\n+            return 0\n+        \n+        # Find maximum length of alternating, descending sequence at bottom\n+        max_seq = 1\n+        for i in range(len(col) - 2, -1, -1):\n+            c1 = col[i]\n+            c2 = col[i+1]\n+            if c2.rank.value == c1.rank.value - 1 and c2.suit.color != c1.suit.color:\n+                max_seq += 1\n+            else:\n+                break\n+                \n+        # Find the maximum count that is legally movable to destination\n+        for count in range(max_seq, 0, -1):\n+            if self.state.validate_move(from_pos, to_pos, count):\n+                return count\n+        return 0\n+\n+    def find_longest_sequence(self, col_idx: int) -> int:\n+        col = self.state.tableaus[col_idx]\n+        if not col:\n+            return 0\n+        max_seq = 1\n+        for i in range(len(col) - 2, -1, -1):\n+            c1 = col[i]\n+            c2 = col[i+1]\n+            if c2.rank.value == c1.rank.value - 1 and c2.suit.color != c1.suit.color:\n+                max_seq += 1\n+            else:\n+                break\n+        return max_seq\n+\n+    def safe_addstr(self, stdscr, y: int, x: int, text: str, attr: int = 0):\n+        try:\n+            if y < self.max_y and x < self.max_x:\n+                available = self.max_x - x\n+                if len(text) > available:\n+                    text = text[:available]\n+                stdscr.addstr(y, x, text, attr)\n+        except curses.error:\n+            pass\n+\n+    def draw_board(self, stdscr):\n+        # Clear screen\n+        stdscr.erase()\n+        \n+        # Draw Title\n+        title_attr = curses.color_pair(3) | curses.A_BOLD\n+        self.safe_addstr(stdscr, 1, 2, \"FREECELL SOLITAIRE\", title_attr)\n+        self.safe_addstr(stdscr, 1, 55, f\"[SEED: {self.current_seed}]\", curses.color_pair(4))\n+        \n+        # Labels\n+        label_attr = curses.color_pair(4) | curses.A_BOLD\n+        self.safe_addstr(stdscr, 3, 2, \"Free Cells\", label_attr)\n+        self.safe_addstr(stdscr, 3, 34, \"Foundations\", label_attr)\n+        \n+        # Free Cells (Cols 0-3 on row 0)\n+        for i in range(4):\n+            x = 2 + i * 8\n+            y = 4\n+            is_cursor = (self.cursor_row == 0 and self.cursor_col == i)\n+            \n+            # Draw header label [A], [B], [C], [D]\n+            header_attr = (curses.color_pair(3) | curses.A_BOLD) if is_cursor else curses.A_NORMAL\n+            self.safe_addstr(stdscr, y - 1, x, f\" [{chr(65 + i)}] \", header_attr)\n+            \n+            card = self.state.freecells[i]\n+            border_attr = curses.color_pair(3) if is_cursor else curses.A_NORMAL\n+            is_selected = (self.selected_pos is not None and self.selected_pos.type == LocationType.FREECELL and self.selected_pos.index == i)\n+            \n+            if card is None:\n+                self.safe_addstr(stdscr, y, x, \"+---+\", border_attr)\n+                self.safe_addstr(stdscr, y + 1, x, \"|   |\", border_attr)\n+                self.safe_addstr(stdscr, y + 2, x, \"+---+\", border_attr)\n+            else:\n+                card_attr = curses.color_pair(1) if card.suit.color == \"RED\" else curses.color_pair(2)\n+                if is_selected:\n+                    card_attr |= curses.A_REVERSE\n+                self.safe_addstr(stdscr, y, x, \"+---+\", border_attr)\n+                self.safe_addstr(stdscr, y + 1, x, f\"|{get_card_inner(card)}|\", card_attr)\n+                self.safe_addstr(stdscr, y + 2, x, \"+---+\", border_attr)\n+\n+        # Foundations (Cols 4-7 on row 0)\n+        for i in range(4):\n+            x = 34 + i * 8\n+            y = 4\n+            is_cursor = (self.cursor_row == 0 and self.cursor_col == i + 4)\n+            \n+            suit = list(Suit)[i]\n+            header_attr = (curses.color_pair(3) | curses.A_BOLD) if is_cursor else curses.A_NORMAL\n+            self.safe_addstr(stdscr, y - 1, x, f\" [{suit.symbol}] \", header_attr)\n+            \n+            pile = self.state.foundations[suit]\n+            border_attr = curses.color_pair(3) if is_cursor else curses.A_NORMAL\n+            \n+            if not pile:\n+                inner = get_empty_foundation_inner(i)\n+                inner_attr = curses.color_pair(1) if suit.color == \"RED\" else curses.color_pair(2)\n+                inner_attr |= curses.A_DIM\n+                self.safe_addstr(stdscr, y, x, \"+---+\", border_attr)\n+                self.safe_addstr(stdscr, y + 1, x, f\"|{inner}|\", inner_attr)\n+                self.safe_addstr(stdscr, y + 2, x, \"+---+\", border_attr)\n+            else:\n+                card = pile[-1]\n+                card_attr = curses.color_pair(1) if card.suit.color == \"RED\" else curses.color_pair(2)\n+                self.safe_addstr(stdscr, y, x, \"+---+\", border_attr)\n+                self.safe_addstr(stdscr, y + 1, x, f\"|{get_card_inner(card)}|\", card_attr)\n+                self.safe_addstr(stdscr, y + 2, x, \"+---+\", border_attr)\n+\n+        # Tableau columns\n+        self.safe_addstr(stdscr, 8, 2, \"Tableau Columns\", label_attr)\n+        \n+        for col_idx in range(8):\n+            x = 2 + col_idx * 8\n+            y = 10\n+            is_cursor_col = (self.cursor_row == 1 and self.cursor_col == col_idx)\n+            \n+            # Header label [1] to [8]\n+            header_attr = (curses.color_pair(3) | curses.A_BOLD) if is_cursor_col else curses.A_NORMAL\n+            self.safe_addstr(stdscr, y - 1, x, f\" [{col_idx + 1}] \", header_attr)\n+            \n+            col = self.state.tableaus[col_idx]\n+            \n+            if not col:\n+                empty_attr = curses.color_pair(3) if is_cursor_col else curses.A_DIM\n+                self.safe_addstr(stdscr, y, x, \"+---+\", empty_attr)\n+                self.safe_addstr(stdscr, y + 1, x, \"|   |\", empty_attr)\n+                self.safe_addstr(stdscr, y + 2, x, \"+---+\", empty_attr)\n+            else:\n+                # Draw stacked cards\n+                top_border_attr = curses.color_pair(3) if is_cursor_col else curses.A_NORMAL\n+                self.safe_addstr(stdscr, y, x, \"+---+\", top_border_attr)\n+                \n+                for card_idx, card in enumerate(col):\n+                    is_selected_card = False\n+                    if (self.selected_pos is not None and \n+                            self.selected_pos.type == LocationType.TABLEAU and \n+                            self.selected_pos.index == col_idx):\n+                        if card_idx >= len(col) - self.selected_count:\n+                            is_selected_card = True\n+                    \n+                    card_attr = curses.color_pair(1) if card.suit.color == \"RED\" else curses.color_pair(2)\n+                    if is_selected_card:\n+                        card_attr |= curses.A_REVERSE\n+                        \n+                    card_y = y + 1 + card_idx\n+                    self.safe_addstr(stdscr, card_y, x, f\"|{get_card_inner(card)}|\", card_attr)\n+                \n+                bottom_y = y + 1 + len(col)\n+                bottom_border_attr = curses.color_pair(3) if is_cursor_col else curses.A_NORMAL\n+                self.safe_addstr(stdscr, bottom_y, x, \"+---+\", bottom_border_attr)\n+\n+        # Status & Message bar (fixed near bottom of standard screen size or max_y)\n+        msg_y = max(20, self.max_y - 4)\n+        sep_y = msg_y - 1\n+        keys_y = msg_y + 1\n+        \n+        # Horizontal separator\n+        self.safe_addstr(stdscr, sep_y, 0, \"-\" * self.max_x, curses.A_DIM)\n+        \n+        # Message string\n+        self.safe_addstr(stdscr, msg_y, 2, f\"MSG: {self.message}\", self.message_attr)\n+        \n+        # Keys bar\n+        keys_text = \"KEYS: [Arrows/WASD] Navigate  [Space/Enter] Select/Drop  [U] Undo  [Y] Redo  [R] Restart  [N] New  [Q] Quit\"\n+        if self.selected_pos is not None:\n+            longest_seq = self.find_longest_sequence(self.selected_pos.index) if self.selected_pos.type == LocationType.TABLEAU else 1\n+            if longest_seq > 1:\n+                keys_text = f\"KEYS: [-/+] Move Count: {self.selected_count}/{longest_seq}  [Arrows/WASD] Navigate  [Space] Drop  [Esc] Cancel\"\n+        \n+        self.safe_addstr(stdscr, keys_y, 2, keys_text, curses.color_pair(4) | curses.A_BOLD)\n+\n+    def handle_input(self, key: int) -> bool:\n+        \"\"\"\n+        Processes key inputs. Returns True if we should keep running, False if we should exit.\n+        \"\"\"\n+        # If in Quit Confirmation state\n+        if self.quit_confirm:\n+            if key in (ord('y'), ord('Y')):\n+                return False\n+            else:\n+                self.quit_confirm = False\n+                self.message = \"Quit canceled. Game resumed.\"\n+                self.message_attr = curses.color_pair(4)\n+                return True\n+\n+        # Standard navigation keys\n+        # UP: Arrow UP, w, W, k, K\n+        if key in (curses.KEY_UP, ord('w'), ord('W'), ord('k'), ord('K')):\n+            self.cursor_row = 0\n+            self.message_attr = 0\n+        # DOWN: Arrow DOWN, s, S, j, J\n+        elif key in (curses.KEY_DOWN, ord('s'), ord('S'), ord('j'), ord('J')):\n+            self.cursor_row = 1\n+            self.message_attr = 0\n+        # LEFT: Arrow LEFT, a, A, h, H\n+        elif key in (curses.KEY_LEFT, ord('a'), ord('A'), ord('h'), ord('H')):\n+            self.cursor_col = (self.cursor_col - 1) % 8\n+            self.message_attr = 0\n+        # RIGHT: Arrow RIGHT, d, D, l, L\n+        elif key in (curses.KEY_RIGHT, ord('d'), ord('D'), ord('l'), ord('L')):\n+            self.cursor_col = (self.cursor_col + 1) % 8\n+            self.message_attr = 0\n+\n+        # Undo key: u, U\n+        elif key in (ord('u'), ord('U')):\n+            if self.state.undo():\n+                self.message = \"Undo successful.\"\n+                self.message_attr = curses.color_pair(5)\n+                self.selected_pos = None\n+            else:\n+                self.message = \"Nothing to undo!\"\n+                self.message_attr = curses.color_pair(1)\n+\n+        # Redo key: y, Y or Ctrl-Y (25) or Ctrl-R (18)\n+        elif key in (ord('y'), ord('Y'), 25, 18):\n+            if self.state.redo():\n+                self.message = \"Redo successful.\"\n+                self.message_attr = curses.color_pair(5)\n+                self.selected_pos = None\n+            else:\n+                self.message = \"Nothing to redo!\"\n+                self.message_attr = curses.color_pair(1)\n+\n+        # Restart key: r, R\n+        elif key in (ord('r'), ord('R')):\n+            self.reset_game(self.current_seed)\n+            self.message = f\"Game restarted. Seed: {self.current_seed}\"\n+            self.message_attr = curses.color_pair(4)\n+\n+        # New Game key: n, N\n+        elif key in (ord('n'), ord('N')):\n+            new_seed = random.randint(1, 99999)\n+            self.reset_game(new_seed)\n+\n+        # Quit key: q, Q\n+        elif key in (ord('q'), ord('Q')):\n+            self.quit_confirm = True\n+            self.message = \"Are you sure you want to quit? (y/n)\"\n+            self.message_attr = curses.color_pair(1) | curses.A_BOLD\n+\n+        # Cancel Selection: Escape key (27)\n+        elif key == 27:\n+            if self.selected_pos is not None:\n+                self.selected_pos = None\n+                self.selected_count = 1\n+                self.message = \"Selection canceled.\"\n+                self.message_attr = curses.color_pair(4)\n+\n+        # Selection Count adjustments (only valid when a Tableau selection is active)\n+        elif key in (ord('-'), ord('_'), ord('[')) and self.selected_pos is not None and self.selected_pos.type == LocationType.TABLEAU:\n+            if self.selected_count > 1:\n+                self.selected_count -= 1\n+                self.message = f\"Adjusted selection count to {self.selected_count}.\"\n+                self.message_attr = curses.color_pair(4)\n+\n+        elif key in (ord('+'), ord('='), ord(']')) and self.selected_pos is not None and self.selected_pos.type == LocationType.TABLEAU:\n+            longest_seq = self.find_longest_sequence(self.selected_pos.index)\n+            if self.selected_count < longest_seq:\n+                self.selected_count += 1\n+                self.message = f\"Adjusted selection count to {self.selected_count}.\"\n+                self.message_attr = curses.color_pair(4)\n+\n+        # Space (32) or Enter (10, 13, curses.KEY_ENTER)\n+        elif key in (32, 10, 13, curses.KEY_ENTER):\n+            curr_pos = self.get_current_pos()\n+            \n+            if self.selected_pos is None:\n+                # Attempt to select\n+                if curr_pos.type == LocationType.FOUNDATION:\n+                    self.message = \"Cannot pick up cards from the foundation piles.\"\n+                    self.message_attr = curses.color_pair(1)\n+                else:\n+                    card = self.state.get_card_at(curr_pos)\n+                    if card is None:\n+                        self.message = \"That slot is empty!\"\n+                        self.message_attr = curses.color_pair(1)\n+                    else:\n+                        self.selected_pos = curr_pos\n+                        # Default count to 1\n+                        self.selected_count = 1\n+                        \n+                        # Automatically compute max valid count if destination is a Tableau\n+                        # We will keep count as 1, but user can adjust or we automatically resolve on execute.\n+                        self.message = f\"Selected {card}. Use [-/+] to change count. Select destination and press Space.\"\n+                        self.message_attr = curses.color_pair(4)\n+            else:\n+                # Destination select / execute move\n+                if curr_pos == self.selected_pos:\n+                    # Clicking source again deselects\n+                    self.selected_pos = None\n+                    self.selected_count = 1\n+                    self.message = \"Selection cleared.\"\n+                    self.message_attr = curses.color_pair(4)\n+                else:\n+                    # Let's perform move execution\n+                    # First, if moving Tableau-to-Tableau, let's automatically check if a sequence move is valid\n+                    # and if we should adjust selected_count if user didn't specify one larger than 1.\n+                    count_to_use = self.selected_count\n+                    if self.selected_pos.type == LocationType.TABLEAU and curr_pos.type == LocationType.TABLEAU:\n+                        # If user is moving a sequence and selected_count is 1, let's find if a larger sequence is valid and use it.\n+                        # This auto-moves the sequence by default if they didn't manually change count, matching standard games.\n+                        max_valid = self.find_max_valid_count(self.selected_pos, curr_pos)\n+                        if max_valid > count_to_use:\n+                            count_to_use = max_valid\n+\n+                    if self.state.execute_move(self.selected_pos, curr_pos, count=count_to_use):\n+                        self.message = \"Move successful!\"\n+                        self.message_attr = curses.color_pair(5)\n+                        \n+                        # Check win condition\n+                        if self.state.check_win():\n+                            self.message = \"CONGRATULATIONS! YOU HAVE WON THE GAME! Press N for new game, Q to quit.\"\n+                            self.message_attr = curses.color_pair(5) | curses.A_BLINK | curses.A_BOLD\n+                        # Check loss condition\n+                        elif self.state.check_loss():\n+                            self.message = \"GAME OVER! No legal moves remaining. Press R to restart, N for new game, Q to quit.\"\n+                            self.message_attr = curses.color_pair(1) | curses.A_BOLD\n+                            \n+                        self.selected_pos = None\n+                        self.selected_count = 1\n+                    else:\n+                        # Show precise validation error\n+                        self.message = \"Invalid move under FreeCell rules!\"\n+                        self.message_attr = curses.color_pair(1)\n+                        # We do NOT clear selection on invalid move, so user can try another target!\n+\n+        return True\n+\n+    def _main_loop(self, stdscr) -> None:\n+        # Curses configurations\n+        curses.curs_set(0)  # Hide hardware cursor\n+        stdscr.keypad(True)  # Enable arrow keys\n+        stdscr.nodelay(False)  # Wait for keys\n+        \n+        # Set up color pairs\n+        if curses.has_colors():\n+            curses.start_color()\n+            curses.use_default_colors()\n+            # Pair 1: Red cards\n+            curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)\n+            # Pair 2: Black cards\n+            curses.init_pair(2, curses.COLOR_WHITE, curses.COLOR_BLACK)\n+            # Pair 3: Headers / Active Selection\n+            curses.init_pair(3, curses.COLOR_CYAN, curses.COLOR_BLACK)\n+            # Pair 4: Keys / Info\n+            curses.init_pair(4, curses.COLOR_YELLOW, curses.COLOR_BLACK)\n+            # Pair 5: Success / Win\n+            curses.init_pair(5, curses.COLOR_GREEN, curses.COLOR_BLACK)\n+\n+        while True:\n+            # Get current window boundaries\n+            self.max_y, self.max_x = stdscr.getmaxyx()\n+            \n+            # Draw the game board\n+            self.draw_board(stdscr)\n+            \n+            # Perform screen updates\n+            stdscr.refresh()\n+            \n+            # Read next keyboard input\n+            try:\n+                key = stdscr.getch()\n+            except KeyboardInterrupt:\n+                break\n+                \n+            # Handle the keyboard input\n+            if not self.handle_input(key):\n+                break\n+\n+    def run(self) -> None:\n+        try:\n+            curses.wrapper(self._main_loop)\n+        except Exception as e:\n+            # Restore terminal cleanly on error\n+            print(f\"Error in curses TUI: {e}\", file=sys.stderr)\n+            sys.exit(1)\ndiff --git a/card-game-app/tests/__init__.py b/card-game-app/tests/__init__.py\nnew file mode 100644\nindex 000000000..d4839a6b1\n--- /dev/null\n+++ b/card-game-app/tests/__init__.py\n@@ -0,0 +1 @@\n+# Tests package\ndiff --git a/card-game-app/tests/test_domain.py b/card-game-app/tests/test_domain.py\nnew file mode 100644\nindex 000000000..c507ddc8a\n--- /dev/null\n+++ b/card-game-app/tests/test_domain.py\n@@ -0,0 +1,387 @@\n+import copy\n+from card_game_tui.domain import GameState, Suit, Rank, Card, Deck, LocationType, Position\n+\n+def test_deck_deals_52_cards():\n+    deck = Deck()\n+    assert len(deck.cards) == 52\n+\n+def test_game_state_initialization():\n+    state = GameState()\n+    assert len(state.tableaus) == 8\n+    # 4 columns should have 7 cards, 4 should have 6 cards\n+    lengths = [len(col) for col in state.tableaus]\n+    assert sorted(lengths) == [6, 6, 6, 6, 7, 7, 7, 7]\n+\n+def test_get_card_at():\n+    state = GameState(seed=123)\n+    # Check if we can get cards correctly\n+    pos = Position(LocationType.TABLEAU, 0)\n+    card = state.get_card_at(pos)\n+    assert card is not None\n+    assert isinstance(card, Card)\n+\n+def test_deck_deterministic_seeding():\n+    deck1 = Deck(seed=42)\n+    deck2 = Deck(seed=42)\n+    assert deck1.cards == deck2.cards\n+\n+    # Verify uniqueness of 52 cards\n+    assert len(set(deck1.cards)) == 52\n+\n+def test_moves_to_free_cells():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    # Put a card in Tableau 0\n+    c_hearts = Card(Suit.HEARTS, Rank.TEN)\n+    state.tableaus[0] = [c_hearts]\n+\n+    from_pos = Position(LocationType.TABLEAU, 0)\n+    to_pos = Position(LocationType.FREECELL, 0)\n+\n+    # Valid single card move to empty freecell\n+    assert state.validate_move(from_pos, to_pos, count=1) is True\n+    \n+    # Try invalid sequence count to free cell\n+    assert state.validate_move(from_pos, to_pos, count=2) is False\n+\n+    # Execute move\n+    assert state.execute_move(from_pos, to_pos, count=1) is True\n+    assert state.freecells[0] == c_hearts\n+    assert len(state.tableaus[0]) == 0\n+\n+    # Try moving to occupied freecell\n+    state.tableaus[0] = [Card(Suit.SPADES, Rank.FIVE)]\n+    assert state.validate_move(from_pos, to_pos, count=1) is False\n+\n+    # Try moving to invalid freecell index\n+    invalid_to_pos = Position(LocationType.FREECELL, 4)\n+    assert state.validate_move(from_pos, invalid_to_pos, count=1) is False\n+\n+def test_moves_to_foundations():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    ace_hearts = Card(Suit.HEARTS, Rank.ACE)\n+    two_hearts = Card(Suit.HEARTS, Rank.TWO)\n+    three_hearts = Card(Suit.HEARTS, Rank.THREE)\n+    ace_diamonds = Card(Suit.DIAMONDS, Rank.ACE)\n+\n+    state.tableaus[0] = [ace_hearts]\n+    state.tableaus[1] = [two_hearts]\n+    state.tableaus[2] = [three_hearts]\n+    state.tableaus[3] = [ace_diamonds]\n+\n+    # Move Ace of Hearts to index 0 (HEARTS) foundation\n+    # list(Suit) indices: 0: HEARTS, 1: DIAMONDS, 2: CLUBS, 3: SPADES\n+    hearts_found = Position(LocationType.FOUNDATION, 0)\n+    diamonds_found = Position(LocationType.FOUNDATION, 1)\n+\n+    # Valid Ace to empty foundation\n+    assert state.validate_move(Position(LocationType.TABLEAU, 0), hearts_found, count=1) is True\n+    # Invalid non-Ace to empty foundation\n+    assert state.validate_move(Position(LocationType.TABLEAU, 1), hearts_found, count=1) is False\n+    # Invalid Ace to wrong suit foundation\n+    assert state.validate_move(Position(LocationType.TABLEAU, 3), hearts_found, count=1) is False\n+\n+    # Execute valid Ace move\n+    assert state.execute_move(Position(LocationType.TABLEAU, 0), hearts_found, count=1) is True\n+    assert state.foundations[Suit.HEARTS] == [ace_hearts]\n+\n+    # Now Two of Hearts is on Tableau 1. Can it move to Hearts foundation? Yes.\n+    assert state.validate_move(Position(LocationType.TABLEAU, 1), hearts_found, count=1) is True\n+    # Can Three of Hearts move? No, since it needs Two of Hearts first.\n+    assert state.validate_move(Position(LocationType.TABLEAU, 2), hearts_found, count=1) is False\n+\n+def test_moves_to_tableau_single_card():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    # Red 8 (Hearts) on Black 9 (Spades)\n+    c_red8 = Card(Suit.HEARTS, Rank.EIGHT)\n+    c_black9 = Card(Suit.SPADES, Rank.NINE)\n+    \n+    state.tableaus[0] = [c_red8]\n+    state.tableaus[1] = [c_black9]\n+\n+    # Test moving Red 8 onto Black 9\n+    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is True\n+\n+    # Test same color invalid move: Red 8 (Hearts) on Red 9 (Diamonds)\n+    c_red9 = Card(Suit.DIAMONDS, Rank.NINE)\n+    state.tableaus[1] = [c_red9]\n+    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is False\n+\n+    # Test wrong rank invalid move: Red 8 on Black 10 (Spades)\n+    c_black10 = Card(Suit.SPADES, Rank.TEN)\n+    state.tableaus[1] = [c_black10]\n+    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is False\n+\n+    # Test moving to empty tableau\n+    state.tableaus[1] = []\n+    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is True\n+\n+def test_sequence_moves_tableau_to_tableau():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+    \n+    # Red 10, Black 9, Red 8, Black 7, Red 6\n+    c10 = Card(Suit.HEARTS, Rank.TEN)\n+    c9 = Card(Suit.SPADES, Rank.NINE)\n+    c8 = Card(Suit.DIAMONDS, Rank.EIGHT)\n+    c7 = Card(Suit.CLUBS, Rank.SEVEN)\n+    c6 = Card(Suit.HEARTS, Rank.SIX)\n+    \n+    state.tableaus[0] = [c10, c9, c8, c7, c6]\n+    state.tableaus[1] = [Card(Suit.SPADES, Rank.JACK)]\n+    \n+    # 4 empty freecells, 6 empty tableaus.\n+    # Exclude destination: no, destination is Col 1 which has 1 card (not empty).\n+    # Transit empty tableaus = 6\n+    # Max cards = (1 + 4) * 2^6 = 5 * 64 = 320 cards.\n+    # Moving 5 cards should be valid!\n+    from_pos = Position(LocationType.TABLEAU, 0)\n+    to_pos = Position(LocationType.TABLEAU, 1)\n+    assert state.validate_move(from_pos, to_pos, count=5) is True\n+    \n+    # Restrict capacity\n+    state.freecells = [Card(Suit.CLUBS, Rank.TWO)] * 4  # 0 empty freecells\n+    for i in range(2, 8):\n+        state.tableaus[i] = [Card(Suit.DIAMONDS, Rank.KING)]  # 0 empty tableaus\n+    # Now empty freecells = 0, empty tableaus = 0\n+    # Max cards = (1 + 0) * 2^0 = 1\n+    # Moving 5 cards should be invalid\n+    assert state.validate_move(from_pos, to_pos, count=5) is False\n+\n+def test_sequence_moves_to_empty_tableau():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    # Sequence of 3 cards on Col 0: Red 10, Black 9, Red 8\n+    c10 = Card(Suit.HEARTS, Rank.TEN)\n+    c9 = Card(Suit.SPADES, Rank.NINE)\n+    c8 = Card(Suit.DIAMONDS, Rank.EIGHT)\n+    state.tableaus[0] = [c10, c9, c8]\n+\n+    # Destination is Col 1 (empty)\n+    # We want to move 2 cards: Black 9, Red 8\n+    # Capacity constraint:\n+    # Destination Col 1 is empty, so transit_empty_tableaus = empty_tableaus - 1.\n+    # Empty tableaus before move = 7.\n+    # Transit empty tableaus = 6.\n+    # Empty free cells = 4.\n+    # Max cards = (1 + 4) * 2^6 = 320.\n+    from_pos = Position(LocationType.TABLEAU, 0)\n+    to_pos = Position(LocationType.TABLEAU, 1)\n+    assert state.validate_move(from_pos, to_pos, count=2) is True\n+\n+    # Restrict capacity so Max Cards is exactly 1\n+    state.freecells = [Card(Suit.CLUBS, Rank.TWO)] * 4  # 0 empty free cells\n+    for i in range(2, 8):\n+        state.tableaus[i] = [Card(Suit.DIAMONDS, Rank.KING)]  # 0 transit empty tableaus\n+    # Empty freecells = 0, empty tableaus = 1 (Col 1).\n+    # Since Col 1 is the destination, transit_empty_tableaus = 1 - 1 = 0.\n+    # Max cards = (1 + 0) * 2^0 = 1.\n+    # Moving 2 cards should be invalid, but 1 card should be valid.\n+    assert state.validate_move(from_pos, to_pos, count=2) is False\n+    assert state.validate_move(from_pos, to_pos, count=1) is True\n+\n+def test_auto_homing_logic():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    # Hearts is RED. Opposite suits are CLUBS and SPADES.\n+    # Put Ace of Hearts in Tableau 0.\n+    state.tableaus[0] = [Card(Suit.HEARTS, Rank.ACE)]\n+    # Put King of Spades in Tableau 1 to use as a dummy move trigger.\n+    state.tableaus[1] = [Card(Suit.SPADES, Rank.KING)]\n+    \n+    assert len(state.foundations[Suit.HEARTS]) == 0\n+    \n+    # Execute move of King of Spades to FreeCell 0. This should trigger auto-homing of Ace of Hearts.\n+    from_pos = Position(LocationType.TABLEAU, 1)\n+    to_pos = Position(LocationType.FREECELL, 0)\n+    success = state.execute_move(from_pos, to_pos, count=1)\n+    assert success is True\n+    \n+    assert state.freecells[0] == Card(Suit.SPADES, Rank.KING)\n+    assert len(state.tableaus[0]) == 0\n+    assert len(state.foundations[Suit.HEARTS]) == 1\n+    assert state.foundations[Suit.HEARTS][0] == Card(Suit.HEARTS, Rank.ACE)\n+    \n+    # Two of Hearts is put in Tableau 0.\n+    # Foundations: Hearts has Ace. CLUBS has [], SPADES has [].\n+    # Opposite color (Black) lower cards are Ace of Clubs and Ace of Spades.\n+    # Since they are NOT in the foundations, Two of Hearts should NOT auto-home.\n+    state.tableaus[0] = [Card(Suit.HEARTS, Rank.TWO)]\n+    \n+    # Move King of Spades from FreeCell 0 to Tableau 1 to trigger auto-homing checks\n+    from_pos = Position(LocationType.FREECELL, 0)\n+    to_pos = Position(LocationType.TABLEAU, 1)\n+    success = state.execute_move(from_pos, to_pos, count=1)\n+    assert success is True\n+    \n+    # Two of Hearts should still be in Tableau 0 (not auto-homed)\n+    assert len(state.tableaus[0]) == 1\n+    assert state.tableaus[0][0] == Card(Suit.HEARTS, Rank.TWO)\n+    assert len(state.foundations[Suit.HEARTS]) == 1\n+    \n+    # Place Ace of Clubs and Ace of Spades in their foundations.\n+    state.foundations[Suit.CLUBS] = [Card(Suit.CLUBS, Rank.ACE)]\n+    state.foundations[Suit.SPADES] = [Card(Suit.SPADES, Rank.ACE)]\n+    \n+    # Move King of Spades back to FreeCell 0 to trigger auto-homing checks\n+    from_pos = Position(LocationType.TABLEAU, 1)\n+    to_pos = Position(LocationType.FREECELL, 0)\n+    success = state.execute_move(from_pos, to_pos, count=1)\n+    assert success is True\n+    \n+    # Two of Hearts should now have auto-homed!\n+    assert len(state.tableaus[0]) == 0\n+    assert len(state.foundations[Suit.HEARTS]) == 2\n+    assert state.foundations[Suit.HEARTS][1] == Card(Suit.HEARTS, Rank.TWO)\n+\n+def test_undo_redo_system():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    # Col 0: [Red 10 (Hearts)]\n+    # Col 1: [Black J (Spades)]\n+    c10 = Card(Suit.HEARTS, Rank.TEN)\n+    cJ = Card(Suit.SPADES, Rank.JACK)\n+    state.tableaus[0] = [c10]\n+    state.tableaus[1] = [cJ]\n+\n+    # Save original state for verification\n+    orig_tableaus = copy.deepcopy(state.tableaus)\n+    orig_freecells = copy.deepcopy(state.freecells)\n+    orig_foundations = copy.deepcopy(state.foundations)\n+\n+    # 1. Execute a move\n+    from_pos = Position(LocationType.TABLEAU, 0)\n+    to_pos = Position(LocationType.TABLEAU, 1)\n+    success = state.execute_move(from_pos, to_pos, count=1)\n+    assert success is True\n+    \n+    assert state.tableaus[0] == []\n+    assert state.tableaus[1] == [cJ, c10]\n+    \n+    # 2. Undo the move\n+    undo_success = state.undo()\n+    assert undo_success is True\n+    assert state.tableaus == orig_tableaus\n+    assert state.freecells == orig_freecells\n+    assert state.foundations == orig_foundations\n+\n+    # 3. Redo the move\n+    redo_success = state.redo()\n+    assert redo_success is True\n+    assert state.tableaus[0] == []\n+    assert state.tableaus[1] == [cJ, c10]\n+\n+    # 4. Undo again to restore\n+    assert state.undo() is True\n+    assert state.tableaus == orig_tableaus\n+\n+def test_undo_with_auto_homing():\n+    state = GameState()\n+    state.tableaus = [[] for _ in range(8)]\n+    state.freecells = [None] * 4\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    # Tableau 0: Ace of Hearts\n+    # Tableau 1: King of Spades\n+    # Move King of Spades to FreeCell 0. This will trigger auto-homing of Ace of Hearts to foundation.\n+    state.tableaus[0] = [Card(Suit.HEARTS, Rank.ACE)]\n+    state.tableaus[1] = [Card(Suit.SPADES, Rank.KING)]\n+\n+    orig_tableaus = copy.deepcopy(state.tableaus)\n+    orig_freecells = copy.deepcopy(state.freecells)\n+    orig_foundations = copy.deepcopy(state.foundations)\n+\n+    from_pos = Position(LocationType.TABLEAU, 1)\n+    to_pos = Position(LocationType.FREECELL, 0)\n+    success = state.execute_move(from_pos, to_pos, count=1)\n+    assert success is True\n+\n+    # Check state after move and auto-homing\n+    assert state.freecells[0] == Card(Suit.SPADES, Rank.KING)\n+    assert len(state.tableaus[0]) == 0\n+    assert len(state.foundations[Suit.HEARTS]) == 1\n+\n+    # Undo the move! This should revert both King of Spades and Ace of Hearts!\n+    undo_success = state.undo()\n+    assert undo_success is True\n+    assert state.tableaus == orig_tableaus\n+    assert state.freecells == orig_freecells\n+    assert state.foundations == orig_foundations\n+\n+    # Redo the move!\n+    redo_success = state.redo()\n+    assert redo_success is True\n+    assert state.freecells[0] == Card(Suit.SPADES, Rank.KING)\n+    assert len(state.tableaus[0]) == 0\n+    assert len(state.foundations[Suit.HEARTS]) == 1\n+\n+def test_win_detection():\n+    state = GameState()\n+    # Fill foundations\n+    for suit in Suit:\n+        state.foundations[suit] = [Card(suit, rank) for rank in Rank]\n+    assert state.check_win() is True\n+\n+    # Remove one card\n+    state.foundations[Suit.HEARTS].pop()\n+    assert state.check_win() is False\n+\n+def test_check_loss_not_lost():\n+    # A standard freshly-dealt game should not be in a loss state (usually has legal moves)\n+    state = GameState()\n+    assert state.check_loss() is False\n+\n+def test_check_loss_won():\n+    # A won game is not lost\n+    state = GameState()\n+    for suit in Suit:\n+        state.foundations[suit] = [Card(suit, rank) for rank in Rank]\n+    assert state.check_loss() is False\n+\n+def test_check_loss_is_lost():\n+    state = GameState()\n+    # Clear tableaus and freecells, and foundations\n+    state.freecells = [None] * 4\n+    state.tableaus = [[] for _ in range(8)]\n+    state.foundations = {suit: [] for suit in Suit}\n+\n+    # Lock everything:\n+    # Fill all 4 freecells with Kings of Diamonds\n+    state.freecells = [Card(Suit.DIAMONDS, Rank.KING)] * 4\n+\n+    # Fill all 8 tableaus with at least one King of Diamonds\n+    for i in range(8):\n+        state.tableaus[i] = [Card(Suit.DIAMONDS, Rank.KING)]\n+\n+    # Now there are:\n+    # - No empty tableaus\n+    # - No empty freecells\n+    # - No Aces on top of tableaus or in freecells (all are Kings of Diamonds)\n+    # So:\n+    # - Cannot move to freecells (all occupied)\n+    # - Cannot move to foundations (only Kings, no Aces)\n+    # - Cannot move to tableaus (all top cards are King of Diamonds, can't build King on King, and no empty columns)\n+    # This state should be a lost/locked state!\n+    assert state.check_loss() is True\ndiff --git a/card-game-app/tests/test_render.py b/card-game-app/tests/test_render.py\nnew file mode 100644\nindex 000000000..d08d868c1\n--- /dev/null\n+++ b/card-game-app/tests/test_render.py\n@@ -0,0 +1,29 @@\n+from card_game_tui.domain import Card, Suit, Rank\n+from card_game_tui.render import get_card_inner, get_empty_foundation_inner, get_card_lines\n+\n+def test_get_card_inner():\n+    # Test single-char rank label\n+    card_ah = Card(Suit.HEARTS, Rank.ACE)\n+    assert get_card_inner(card_ah) == \" A♥\"\n+\n+    # Test double-char rank label\n+    card_10s = Card(Suit.SPADES, Rank.TEN)\n+    assert get_card_inner(card_10s) == \"10♠\"\n+\n+    # Test face card\n+    card_kd = Card(Suit.DIAMONDS, Rank.KING)\n+    assert get_card_inner(card_kd) == \" K♦\"\n+\n+def test_get_empty_foundation_inner():\n+    assert get_empty_foundation_inner(0) == \" ♥ \"\n+    assert get_empty_foundation_inner(1) == \" ♦ \"\n+    assert get_empty_foundation_inner(2) == \" ♣ \"\n+    assert get_empty_foundation_inner(3) == \" ♠ \"\n+    assert get_empty_foundation_inner(4) == \"   \"\n+\n+def test_get_card_lines():\n+    card_ah = Card(Suit.HEARTS, Rank.ACE)\n+    assert get_card_lines(card_ah) == [\"+---+\", \"| A♥|\", \"+---+\"]\n+    assert get_card_lines(None) == [\"+---+\", \"|   |\", \"+---+\"]\n+    assert get_card_lines(None, is_empty=True, empty_suit_idx=0) == [\"+---+\", \"| ♥ |\", \"+---+\"]\n+    assert get_card_lines(None, is_empty=True, empty_suit_idx=-1) == [\"+---+\", \"|   |\", \"+---+\"]\ndiff --git a/card-game-app/tests/test_tui.py b/card-game-app/tests/test_tui.py\nnew file mode 100644\nindex 000000000..72136f971\n--- /dev/null\n+++ b/card-game-app/tests/test_tui.py\n@@ -0,0 +1,73 @@\n+from card_game_tui.tui import TUIApp\n+from card_game_tui.domain import Position, LocationType, Card, Suit, Rank\n+\n+def test_tui_initialization():\n+    app = TUIApp()\n+    assert app.cursor_row == 1\n+    assert app.cursor_col == 0\n+    assert app.selected_pos is None\n+    assert app.selected_count == 1\n+    assert app.quit_confirm is False\n+\n+def test_tui_reset_game():\n+    app = TUIApp()\n+    app.reset_game(12345)\n+    assert app.current_seed == 12345\n+    assert app.selected_pos is None\n+    assert app.cursor_row == 1\n+    assert app.cursor_col == 0\n+\n+def test_tui_get_current_pos():\n+    app = TUIApp()\n+    # Row 1, Col 3 should be Tableau index 3\n+    app.cursor_row = 1\n+    app.cursor_col = 3\n+    pos = app.get_current_pos()\n+    assert pos.type == LocationType.TABLEAU\n+    assert pos.index == 3\n+\n+    # Row 0, Col 2 should be FreeCell 2\n+    app.cursor_row = 0\n+    app.cursor_col = 2\n+    pos = app.get_current_pos()\n+    assert pos.type == LocationType.FREECELL\n+    assert pos.index == 2\n+\n+    # Row 0, Col 5 should be Foundation 1 (5 - 4)\n+    app.cursor_row = 0\n+    app.cursor_col = 5\n+    pos = app.get_current_pos()\n+    assert pos.type == LocationType.FOUNDATION\n+    assert pos.index == 1\n+\n+def test_tui_find_longest_sequence():\n+    app = TUIApp()\n+    app.state.tableaus = [[] for _ in range(8)]\n+    \n+    # Empty column\n+    assert app.find_longest_sequence(0) == 0\n+\n+    # Non-empty column\n+    # Red 10, Black 9, Red 8 (descending and alternating)\n+    c10 = Card(Suit.HEARTS, Rank.TEN)\n+    c9 = Card(Suit.SPADES, Rank.NINE)\n+    c8 = Card(Suit.DIAMONDS, Rank.EIGHT)\n+    app.state.tableaus[0] = [Card(Suit.CLUBS, Rank.KING), c10, c9, c8]\n+    assert app.find_longest_sequence(0) == 3\n+\n+def test_tui_find_max_valid_count():\n+    app = TUIApp()\n+    app.state.tableaus = [[] for _ in range(8)]\n+    app.state.freecells = [None] * 4\n+    \n+    # From Empty Tableau\n+    from_pos = Position(LocationType.TABLEAU, 0)\n+    to_pos = Position(LocationType.TABLEAU, 1)\n+    assert app.find_max_valid_count(from_pos, to_pos) == 0\n+\n+    # With some sequence\n+    c10 = Card(Suit.HEARTS, Rank.TEN)\n+    c9 = Card(Suit.SPADES, Rank.NINE)\n+    app.state.tableaus[0] = [c10, c9]\n+    # Destination is empty column, max possible sequence to move is 2\n+    assert app.find_max_valid_count(from_pos, to_pos) == 2\ndiff --git a/status.json b/status.json\nnew file mode 100644\nindex 000000000..905fb370f\n--- /dev/null\n+++ b/status.json\n@@ -0,0 +1,3 @@\n+{\n+  \"outcome\": \"succeeded\"\n+}\n",
+        "summary": {
+          "files_changed": 16,
+          "additions": 2028,
+          "deletions": 0
+        }
+      }
+    },
+    {
+      "seq": 0,
+      "checkpoint": {
+        "timestamp": "2026-06-04T19:51:30.439630Z",
+        "current_node": "verify_ui",
+        "completed_nodes": [
+          "start",
+          "expand_spec",
+          "impl_setup",
+          "verify_setup",
+          "check_setup",
+          "impl_data",
+          "verify_data",
+          "check_data",
+          "impl_logic",
+          "verify_logic",
+          "check_logic",
+          "impl_ui",
+          "verify_ui"
+        ],
+        "node_retries": {},
+        "context_values": {
           "internal.retry_count.verify_logic": 0,
           "internal.work_dir": "/home/daytona/workspace/fabro",
           "internal.run_id": "01KT9YT14FHDYA4VTV9DSFG0FY",
@@ -3469,27 +3924,28 @@
           "response.impl_data": "I have successfully completed the implementation of the FreeCell solitaire game data models and state engine according to the technical specification, added a comprehensive focused unit test suite, and verified that all tests pass perfectly.\n\n### Summary of Changes\n\n1. **Pure Domain Data Model & State Engine (`card-game-app/src/card_game_tui/domain.py`)**:\n   - Implemented `Suit`, `Rank`, and `Card` representations.\n   - Built the `Deck` class supporting deterministic seeding and standard 52-card dealing.\n   - Designed the `Position` representation, covering tableau columns (0–7), free cells (0–3), and foundations (0–3).\n   - Designed `MoveRecord` with full support for tracking regular moves and recursive `auto_moves` (auto-homing).\n   - Implemented `GameState` managing all piles, validations (`validate_move`), executions (`execute_move`), full asymmetric/nested undo/redo, and win-state detection.\n   - Implemented **Auto-Homing** rules exactly as specified: cards are moved automatically to foundations if and only if they are legal moves and all cards of the opposite color of lower ranks have already been homed.\n\n2. **Comprehensive Headless Unit Tests (`card-game-app/tests/test_domain.py`)**:\n   - Built a comprehensive unit test suite covering:\n     - Standard 52-card deck deal correctness.\n     - Deterministic seeding verification.\n     - Moves to and validations of Free Cells.\n     - Moves to and validations of Foundations.\n     - Single card move rules on the Tableau (descending rank, alternating colors).\n     - Sequence/multi-card moves Tableau-to-Tableau obeying the rules & formula: `(1 + Empty Free Cells) * 2^(Empty Tableau Columns)` with destination empty-column exception.\n     - Core Auto-Homing logic.\n     - Perfect full undo/redo capabilities, including reverting auto-homing sequences.\n     - Winning state detection.\n\n3. **Status Validation**:\n   - All 13 unit tests passed flawlessly inside the Python testing framework.\n   - The CLI non-interactive `--smoke` mode executes perfectly.\n   - Wrote `status.json` with `outcome=succeeded`.",
           "response.verify_data": "I have completed the verification process for the card game data structures in FreeCell Solitaire. \n\n### Summary of Actions Taken:\n1. **Compilation & Tests Executed:** Ran tests and compiled python files successfully.\n   - `python3 -m pytest tests/ -v` -> All 13 tests passed.\n   - `python3 -m py_compile main.py src/card_game_tui/*.py` -> Compiled cleanly with zero syntax/import warnings.\n2. **Analysis of Core Types:** Inspected the data structures and validated:\n   - **Enums:** `Suit`, `Rank`, and `LocationType`.\n   - **Entities:** `Card` (frozen/immutable), `Position` (frozen), and `MoveRecord`.\n   - **State Manager:** `GameState` containing Tableaus, FreeCells, Foundations, and full validation/execution of standard FreeCell logic.\n3. **Advanced Mechanics Verified:**\n   - Alternate-color and descending-rank move validations.\n   - Multi-card sequential moves with correct capacity limits based on empty free cells and empty tableaus.\n   - Smart, cascading auto-homing that avoids locking cards required for lower ranks of opposing colors.\n   - Linear undo/redo stack managing primary moves alongside automatic cascades.\n4. **Output Generation:**\n   - Detailed findings recorded in `.ai/verify_data.md`.\n   - `status.json` updated with `\"outcome\": \"succeeded\"`.",
           "internal.retry_count.impl_data": 0,
-          "thread.verify.current_node": "verify_logic",
+          "thread.verify.current_node": "verify_ui",
           "internal.retry_count.verify_data": 0,
           "thread.check_setup.current_node": "impl_data",
           "response.impl_logic": "I have successfully completed the tasks:\n\n1. **Reviewed Specifications & Game Rules:** Read `.ai/card-game-spec.md` and verified the domain models (`Card`, `Deck`, `LocationType`, `Position`, `MoveRecord`, and `GameState`).\n2. **Implemented/Enhanced Game Rules:**\n   - **Initial setup/deal:** Fully handled inside `Deck` and `GameState` constructor, dealing 52 unique cards deterministically.\n   - **Move/action validation:** Fully covered for tableau, free cell, and foundation moves, including proper transit and capacity calculations based on empty free cells/tableaus.\n   - **Auto-complete helper actions:** Standard auto-homing behavior is implemented, moving eligible cards to foundations automatically and cleanly nesting them in `MoveRecord` so they are fully undoable/redoable.\n   - **Win/loss condition:** Implemented and tested both `check_win()` and `check_loss()`. `check_loss()` correctly detects when the game has no legal moves remaining and is not yet won.\n   - **Undo/Redo:** Reverts and reapplies both the primary action and any nested auto-homing steps.\n3. **Tests:** Added comprehensive test cases to `tests/test_domain.py` to cover `check_loss` under various conditions (not lost, won, and fully locked/lost).\n4. **Validation:** Ran all tests with `pytest` successfully, and confirmed that the `--smoke` test successfully initializes and validates the game.\n5. **Status File:** Wrote `status.json` with `\"outcome\": \"succeeded\"`.",
           "graph.default_max_retries": "3",
           "response.verify_setup": "I have successfully verified the setup for the card game app.\n\n### Verified Checklist:\n1. **`card-game-app/pyproject.toml` exists:** Verified.\n2. **`card-game-app/main.py` exists:** Verified.\n3. **`card-game-app/src/card_game_tui` exists:** Verified.\n4. **Python files compile:** Verified by executing `cd card-game-app && python3 -m py_compile main.py src/card_game_tui/*.py` (which completed with exit code `0`).\n\nFindings have been written to `.ai/verify_setup.md` and `status.json` has been updated with `\"outcome\": \"succeeded\"` at the workspace root.",
-          "last_stage": "impl_ui",
-          "current_node": "impl_ui",
+          "last_stage": "verify_ui",
+          "current_node": "verify_ui",
           "thread.start.current_node": "expand_spec",
           "failure_signature": "",
           "response.verify_logic": "I have verified the FreeCell card game logic and documented the findings.\n\n### Summary of Actions Taken:\n1. **Analyzed Code & Rules Implementation**:\n   - Inspected `src/card_game_tui/domain.py` to confirm proper validation of moves, descending alternating builds, foundation sequencing, and accurate multi-card capacity constraint calculation.\n   - Evaluated the recursive cascade auto-homing logic and confirmed it adheres to standard, safe auto-homing rules (only homing cards when no needed lower cards of opposite color are buried).\n   - Confirmed the dual implementation of `check_win()` and `check_loss()` works perfectly to detect when the game is won or if it is fully locked.\n   - Verified the undo/redo system and its correct handling of nested auto-homing steps rolled back in reverse order.\n2. **Executed Verification Tests**:\n   - Ran `cd card-game-app && python3 -m pytest tests/ -v` and confirmed all 16 tests passed.\n   - Ran a compilation check: `python3 -m py_compile main.py src/card_game_tui/*.py` to verify error-free imports and compilation.\n   - Ran the main game smoke test: `python3 main.py --smoke` to confirm execution of initial moves and win check.\n3. **Wrote Documentation and Status**:\n   - Created the report in `.ai/verify_logic.md`.\n   - Updated `status.json` with `\"outcome\": \"succeeded\"`.",
           "internal.retry_count.impl_ui": 0,
           "thread.expand_spec.current_node": "impl_setup",
           "thread.verify_logic.current_node": "check_logic",
-          "last_response": "I have successfully built and verified the terminal-based FreeCell Solitaire game in Python!\n\n### Summary of Completed Work\n1. **ASCII Art Card Rendering (`render.py` & `test_render.py`)**:\n   - Imple",
+          "last_response": "I have successfully verified the FreeCell Terminal UI and completed all the requirements:\n\n1. **Smoke Mode Validation**:\n   Running `python3 main.py --smoke` executes a deterministic, non-interactive ",
           "graph.fallback_retry_target": "impl_logic",
           "internal.retry_count.expand_spec": 0,
           "internal.retry_count.start": 0,
           "response.expand_spec": "I have successfully written a comprehensive, detailed implementation specification for building a terminal-based FreeCell Solitaire game in Python.\n\nThe spec has been written to:\n- **Specification Document**: `.ai/card-game-spec.md`\n- **Execution Status**: `status.json` with `\"outcome\": \"succeeded\"`\n\n### Key Specification Highlights:\n1. **Core Domain Model & Game Logic**: Complete decoupling from the curses framework. Classes like `Card`, `Suit`, `Rank`, `Deck`, `Position`, and `GameState` manage state transitions, move constraints, and game rules natively and cleanly, making them fully testable in headless CI environments.\n2. **Move Validation & Rule Logic**: Enforces all FreeCell moves, empty pile behavior, card stacking (alternating colors and descending ranks), and includes the mathematical sequence-movement rule constraint formula: \n   $$\\text{Max Cards} = (1 + \\text{Empty Free Cells}) \\times 2^{\\text{Empty Tableau Columns}}$$\n3. **Auto-Homing Mechanics**: An optional, safe automated helper that automatically moves cards to the foundations once they can no longer act as sequence-building stepping stones.\n4. **Interactive Curses UI/TUI**: A detailed layout conforming to $80 \\times 24$ terminal dimensions using memory-efficient double-buffered updates via curses, rich color pair rendering for Red vs Black suits, and a versatile keyboard cursor-based layout navigation system.\n5. **Non-Interactive Smoke Mode**: Specifies the exact behavior of `python3 main.py --smoke` for fast automated integration checks without launching interactive screens.\n6. **Robust Testing Strategy**: Details unit tests covering edge cases for game rules, deterministic seed validation, and UI input mocking scenarios.",
-          "internal.thread_id": "hard",
+          "internal.thread_id": "verify",
           "internal.retry_count.impl_setup": 0,
+          "response.verify_ui": "I have successfully verified the FreeCell Terminal UI and completed all the requirements:\n\n1. **Smoke Mode Validation**:\n   Running `python3 main.py --smoke` executes a deterministic, non-interactive validation flow successfully and outputs:\n   ```\n   Running non-interactive smoke test probe...\n   Initialized GameState with seed 42\n   Validating move from Tableau 0 to FreeCell 0: True\n   Executed move from Tableau 0 to FreeCell 0: True\n   Win checked: False\n   SMOKE TEST SUCCESSFUL\n   ```\n\n2. **Clean UI Import Check**:\n   The TUI module (`src/card_game_tui/tui.py`) was verified to separate `curses` initialization into its run loop. Thus, it is fully importable in standard non-interactive/CI environments without raising errors or requiring a TTY.\n\n3. **Board Rendering Helpers Tests**:\n   All board rendering helpers in `src/card_game_tui/render.py` are comprehensively tested via `tests/test_render.py` with 100% code coverage.\n\n4. **Controls Documentation**:\n   Updated the game's `README.md` to include a clear, detailed, and formatted **Controls & Keyboard Shortcuts** section for players.\n\n5. **Written Results**:\n   - Verification findings were compiled and written to `.ai/verify_ui.md`.\n   - The final success status was registered in the workspace root's `status.json`.",
           "internal.node_visit_count": 1,
           "internal.fidelity": "compact",
           "internal.retry_count.verify_setup": 0,
@@ -3504,6 +3960,7 @@
           "failure_class": "",
           "graph.goal": "Build a terminal-based FreeCell solitaire game in Python",
           "thread.verify_setup.current_node": "check_setup",
+          "internal.retry_count.verify_ui": 0,
           "internal.retry_count.check_logic": 0
         },
         "node_outcomes": {
@@ -3822,6 +4279,48 @@
             "notes": "Conditional node evaluated: check_setup",
             "usage": null
           },
+          "verify_ui": {
+            "status": "succeeded",
+            "context_updates": {
+              "last_stage": "verify_ui",
+              "last_response": "I have successfully verified the FreeCell Terminal UI and completed all the requirements:\n\n1. **Smoke Mode Validation**:\n   Running `python3 main.py --smoke` executes a deterministic, non-interactive ",
+              "response.verify_ui": "I have successfully verified the FreeCell Terminal UI and completed all the requirements:\n\n1. **Smoke Mode Validation**:\n   Running `python3 main.py --smoke` executes a deterministic, non-interactive validation flow successfully and outputs:\n   ```\n   Running non-interactive smoke test probe...\n   Initialized GameState with seed 42\n   Validating move from Tableau 0 to FreeCell 0: True\n   Executed move from Tableau 0 to FreeCell 0: True\n   Win checked: False\n   SMOKE TEST SUCCESSFUL\n   ```\n\n2. **Clean UI Import Check**:\n   The TUI module (`src/card_game_tui/tui.py`) was verified to separate `curses` initialization into its run loop. Thus, it is fully importable in standard non-interactive/CI environments without raising errors or requiring a TTY.\n\n3. **Board Rendering Helpers Tests**:\n   All board rendering helpers in `src/card_game_tui/render.py` are comprehensively tested via `tests/test_render.py` with 100% code coverage.\n\n4. **Controls Documentation**:\n   Updated the game's `README.md` to include a clear, detailed, and formatted **Controls & Keyboard Shortcuts** section for players.\n\n5. **Written Results**:\n   - Verification findings were compiled and written to `.ai/verify_ui.md`.\n   - The final success status was registered in the workspace root's `status.json`."
+            },
+            "notes": "Stage completed: verify_ui",
+            "usage": {
+              "input": {
+                "usage": {
+                  "model": {
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash"
+                  },
+                  "tokens": {
+                    "input_tokens": 144075,
+                    "output_tokens": 2498,
+                    "reasoning_tokens": 1487,
+                    "cache_read_tokens": 186547,
+                    "cache_write_tokens": 0
+                  }
+                },
+                "facts": {
+                  "algorithm": "gemini",
+                  "storage_segments": []
+                }
+              },
+              "total_usd_micros": 279959
+            },
+            "files_touched": [
+              "/home/daytona/workspace/fabro/.ai/verify_ui.md",
+              "/home/daytona/workspace/fabro/card-game-app/README.md",
+              "/home/daytona/workspace/fabro/status.json"
+            ],
+            "timing": {
+              "wall_time_ms": 0,
+              "inference_time_ms": 50000,
+              "tool_time_ms": 8741,
+              "active_time_ms": 58741
+            }
+          },
           "impl_ui": {
             "status": "succeeded",
             "context_updates": {
@@ -3868,13 +4367,14 @@
             }
           }
         },
-        "next_node_id": "verify_ui",
+        "next_node_id": "check_ui",
         "node_visits": {
           "check_logic": 1,
           "impl_logic": 1,
           "verify_logic": 1,
           "check_setup": 1,
           "verify_setup": 1,
+          "verify_ui": 1,
           "verify_data": 1,
           "impl_setup": 1,
           "impl_data": 1,
@@ -5108,7 +5608,12 @@
       "first_event_seq": 552,
       "prompt": null,
       "response": null,
-      "completion": null,
+      "completion": {
+        "outcome": "succeeded",
+        "notes": "Stage completed: impl_ui",
+        "failure_reason": null,
+        "timestamp": "2026-06-04T19:49:58.464750Z"
+      },
       "provider_used": {
         "mode": "agent",
         "provider": "gemini",
@@ -5121,6 +5626,12 @@
       "output": null,
       "started_at": "2026-06-04T19:37:47.273213Z",
       "handler": "agent",
+      "timing": {
+        "wall_time_ms": 271610,
+        "inference_time_ms": 246971,
+        "tool_time_ms": 20444,
+        "active_time_ms": 267415
+      },
       "usage": {
         "input_tokens": 263629,
         "output_tokens": 9504,
@@ -5302,7 +5813,7 @@
         ],
         "warnings": []
       },
-      "state": "running"
+      "state": "succeeded"
     },
     "impl_data@1": {
       "first_event_seq": 211,
@@ -5514,6 +6025,206 @@
         "warnings": []
       },
       "state": "succeeded"
+    },
+    "verify_ui@1": {
+      "first_event_seq": 783,
+      "prompt": null,
+      "response": null,
+      "completion": null,
+      "provider_used": {
+        "mode": "agent",
+        "provider": "gemini",
+        "model": "gemini-3.5-flash"
+      },
+      "diff": null,
+      "script_invocation": null,
+      "script_timing": null,
+      "parallel_results": null,
+      "output": null,
+      "started_at": "2026-06-04T19:50:24.898645Z",
+      "handler": "agent",
+      "usage": {
+        "input_tokens": 144075,
+        "output_tokens": 2498,
+        "total_tokens": 334607,
+        "reasoning_tokens": 1487,
+        "cache_read_tokens": 186547,
+        "cache_write_tokens": 0,
+        "total_usd_micros": 279959
+      },
+      "model": {
+        "provider": "gemini",
+        "model_id": "gemini-3.5-flash"
+      },
+      "permission_level": "full",
+      "agent_tools": [
+        {
+          "name": "close_agent",
+          "description": "Close a running subagent that is no longer needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "edit_file",
+          "description": "Edit a file by replacing an exact string. The old_string must be an exact match and unique unless replace_all is true; include surrounding context when needed. Read the file first and preserve existing indentation.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        },
+        {
+          "name": "glob",
+          "description": "Find files by file names using a glob pattern. Use path to choose the search root. Prefer this over shell find or ls when locating repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "grep",
+          "description": "Search file contents with a regex pattern. Use path to choose the search root, glob_filter to limit matching files, case_insensitive for case folding, and max_results to cap output.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": false
+        },
+        {
+          "name": "list_dir",
+          "description": "List directory contents with depth control",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "read_file",
+          "description": "Read files before editing them. Returns line-numbered text and supports offset/limit for large files. Use this instead of shell cat, head, tail, or sed when inspecting repository files.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": true
+        },
+        {
+          "name": "read_many_files",
+          "description": "Read multiple files at once",
+          "source": {
+            "kind": "native"
+          },
+          "category": "read",
+          "invoked": false
+        },
+        {
+          "name": "send_input",
+          "description": "Send a follow-up message to a running subagent when new information or corrected instructions are needed.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "shell",
+          "description": "Execute shell commands for terminal operations, package managers, tests and builds. Use dedicated tools for file reads, file edits, filename searches, and content searches. Provide timeout_ms for long-running commands.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "shell",
+          "invoked": true
+        },
+        {
+          "name": "spawn_agent",
+          "description": "Spawn a subagent for independent work or context isolation. Use it for tasks that can proceed separately, and avoid duplicating the same work in the parent session.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "wait",
+          "description": "Wait for a subagent to complete, then use the result to synthesize the outcome for the user.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "subagent",
+          "invoked": false
+        },
+        {
+          "name": "web_fetch",
+          "description": "Fetch content from a URL that starts with http:// or https://. Pass a prompt to extract specific information or summarize the page; omit prompt to return the page content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "web_search",
+          "description": "Search the web using Brave Search when current external information is needed. Returns result titles, URLs, and descriptions; use web_fetch for a specific URL.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "other",
+          "invoked": false
+        },
+        {
+          "name": "write_file",
+          "description": "Create new files, or overwrite an existing file only when replacement is explicitly intended. Prefer edit_file for targeted changes to existing files because write_file overwrites the full file content.",
+          "source": {
+            "kind": "native"
+          },
+          "category": "write",
+          "invoked": true
+        }
+      ],
+      "context_window": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash",
+        "context_window_tokens": 1048576,
+        "input_tokens": 24582,
+        "usage_percent": 2.3443222045898438,
+        "count_method": "response_usage_scaled_breakdown",
+        "staleness": "live",
+        "generated_at": "2026-06-04T19:51:30.332583Z",
+        "event_seq": 846,
+        "breakdown": [
+          {
+            "category": "system_prompt",
+            "tokens": 1652,
+            "usage_percent": 0.1575469970703125
+          },
+          {
+            "category": "tools",
+            "tokens": 1683,
+            "usage_percent": 0.16050338745117188
+          },
+          {
+            "category": "memory",
+            "tokens": 4558,
+            "usage_percent": 0.43468475341796875
+          },
+          {
+            "category": "conversation",
+            "tokens": 16682,
+            "usage_percent": 1.5909194946289062
+          },
+          {
+            "category": "other",
+            "tokens": 7,
+            "usage_percent": 0.000667572021484375
+          }
+        ],
+        "warnings": []
+      },
+      "state": "running"
     },
     "impl_logic@1": {
       "first_event_seq": 386,
