@@ -190,6 +190,15 @@ class GameState:
         if not moving_card.is_face_up:
             return False
 
+        # Validate that the entire stack from card_idx to the end is face-up, alternating, and descending
+        for i in range(card_idx, len(src_pile) - 1):
+            c1 = src_pile[i]
+            c2 = src_pile[i+1]
+            if not c1.is_face_up or not c2.is_face_up:
+                return False
+            if (c1.is_red == c2.is_red) or (c1.rank != c2.rank + 1):
+                return False
+
         # If dest is empty, moving card must be a King (rank 13)
         dest_pile = self.tableau[dest_col]
         if not dest_pile:
@@ -215,6 +224,8 @@ class GameState:
             return moving_card.rank == 13
 
         dest_card = dest_pile[-1]
+        if not dest_card.is_face_up:
+            return False
         return (moving_card.is_red != dest_card.is_red) and (moving_card.rank == dest_card.rank - 1)
 
     def can_move_waste_to_foundation(self, dest_found: int) -> bool:
@@ -241,6 +252,9 @@ class GameState:
             return False
 
         moving_card = src_pile[-1]
+        if not moving_card.is_face_up:
+            return False
+
         found_pile = self.foundations[dest_found]
 
         if not found_pile:
@@ -264,6 +278,8 @@ class GameState:
             return moving_card.rank == 13
 
         dest_card = dest_pile[-1]
+        if not dest_card.is_face_up:
+            return False
         return (moving_card.is_red != dest_card.is_red) and (moving_card.rank == dest_card.rank - 1)
 
     def auto_reveal(self, col_idx: int) -> None:

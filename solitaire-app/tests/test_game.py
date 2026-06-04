@@ -182,5 +182,151 @@ class TestSolitaireGame(unittest.TestCase):
         self.assertIsInstance(self.game.foundations[0], FoundationPile)
         self.assertIsInstance(self.game.tableau[0], TableauPile)
 
+    def test_waste_to_tableau_moves(self):
+        # 1. Clear waste and test cannot move when waste is empty
+        self.game.waste.clear()
+        self.assertFalse(self.game.can_move_waste_to_tableau(dest_col=0))
+
+        # 2. Setup waste top card with a Red 5
+        self.game.waste.append(Card(suit='H', rank=5, is_face_up=True))
+
+        # 3. Setup tableau target with Black 6 (face up) -> Legal move
+        self.game.tableau[0] = [Card(suit='S', rank=6, is_face_up=True)]
+        self.assertTrue(self.game.can_move_waste_to_tableau(dest_col=0))
+
+        # Perform the move
+        success = self.game.move_waste_to_tableau(dest_col=0)
+        self.assertTrue(success)
+        self.assertEqual(len(self.game.waste), 0)
+        self.assertEqual(len(self.game.tableau[0]), 2)
+        self.assertEqual(self.game.tableau[0][-1], Card(suit='H', rank=5, is_face_up=True))
+
+        # 4. Setup waste with Red 5 again, but tableau has Black 5 -> Illegal move (same rank)
+        self.game.waste.append(Card(suit='D', rank=5, is_face_up=True))
+        self.game.tableau[1] = [Card(suit='C', rank=5, is_face_up=True)]
+        self.assertFalse(self.game.can_move_waste_to_tableau(dest_col=1))
+
+        # 5. Setup tableau with Red 6 -> Illegal move (same color)
+        self.game.tableau[2] = [Card(suit='H', rank=6, is_face_up=True)]
+        self.assertFalse(self.game.can_move_waste_to_tableau(dest_col=2))
+
+        # 6. Target is empty -> Illegal move because Red 5 is not King (rank 13)
+        self.game.tableau[3] = []
+        self.assertFalse(self.game.can_move_waste_to_tableau(dest_col=3))
+
+        # 7. Setup waste with King -> Legal to move to empty tableau
+        self.game.waste.clear()
+        self.game.waste.append(Card(suit='S', rank=13, is_face_up=True))
+        self.assertTrue(self.game.can_move_waste_to_tableau(dest_col=3))
+        success = self.game.move_waste_to_tableau(dest_col=3)
+        self.assertTrue(success)
+        self.assertEqual(len(self.game.tableau[3]), 1)
+        self.assertEqual(self.game.tableau[3][0].rank, 13)
+
+    def test_waste_to_foundation_moves(self):
+        # 1. Setup empty foundation, test cannot move waste when empty
+        self.game.foundations[0] = []
+        self.game.waste.clear()
+        self.assertFalse(self.game.can_move_waste_to_foundation(dest_found=0))
+
+        # 2. Setup waste with Ace of Hearts -> Legal
+        self.game.waste.append(Card(suit='H', rank=1, is_face_up=True))
+        self.assertTrue(self.game.can_move_waste_to_foundation(dest_found=0))
+        
+        # Perform move
+        success = self.game.move_waste_to_foundation(dest_found=0)
+        self.assertTrue(success)
+        self.assertEqual(len(self.game.foundations[0]), 1)
+        self.assertEqual(self.game.foundations[0][-1], Card(suit='H', rank=1, is_face_up=True))
+
+        # 3. Setup waste with 2 of Hearts -> Legal (same suit, rank+1)
+        self.game.waste.append(Card(suit='H', rank=2, is_face_up=True))
+        self.assertTrue(self.game.can_move_waste_to_foundation(dest_found=0))
+        success = self.game.move_waste_to_foundation(dest_found=0)
+        self.assertTrue(success)
+
+        # 4. Setup waste with 4 of Hearts -> Illegal (rank not +1)
+        self.game.waste.append(Card(suit='H', rank=4, is_face_up=True))
+        self.assertFalse(self.game.can_move_waste_to_foundation(dest_found=0))
+
+        # 5. Setup waste with 3 of Diamonds -> Illegal (wrong suit)
+        self.game.waste.clear()
+        self.game.waste.append(Card(suit='D', rank=3, is_face_up=True))
+        self.assertFalse(self.game.can_move_waste_to_foundation(dest_found=0))
+
+    def test_tableau_to_foundation_moves(self):
+        # 1. Setup tableau with Ace of Clubs, foundation empty -> Legal
+        self.game.tableau[0] = [Card(suit='C', rank=1, is_face_up=True)]
+        self.game.foundations[1] = []
+        self.assertTrue(self.game.can_move_tableau_to_foundation(src_col=0, dest_found=1))
+
+        # Perform move
+        success = self.game.move_tableau_to_foundation(src_col=0, dest_found=1)
+        self.assertTrue(success)
+        self.assertEqual(len(self.game.tableau[0]), 0)
+        self.assertEqual(len(self.game.foundations[1]), 1)
+        self.assertEqual(self.game.foundations[1][-1].rank, 1)
+
+        # 2. Test tableau top card is face-down -> Illegal
+        self.game.tableau[1] = [Card(suit='C', rank=2, is_face_up=False)]
+        self.assertFalse(self.game.can_move_tableau_to_foundation(src_col=1, dest_found=1))
+
+    def test_foundation_to_tableau_moves(self):
+        # 1. Setup foundation with Ace and 2 of Spades, tableau with Red 3 -> Legal
+        self.game.foundations[0] = [
+            Card(suit='S', rank=1, is_face_up=True),
+            Card(suit='S', rank=2, is_face_up=True)
+        ]
+        self.game.tableau[0] = [Card(suit='H', rank=3, is_face_up=True)]
+        self.assertTrue(self.game.can_move_foundation_to_tableau(src_found=0, dest_col=0))
+
+        # Perform move
+        success = self.game.move_foundation_to_tableau(src_found=0, dest_col=0)
+        self.assertTrue(success)
+        self.assertEqual(len(self.game.foundations[0]), 1)
+        self.assertEqual(len(self.game.tableau[0]), 2)
+        self.assertEqual(self.game.tableau[0][-1], Card(suit='S', rank=2, is_face_up=True))
+
+        # 2. Setup foundation with 2 of Spades, tableau with Black 3 -> Illegal (same color)
+        self.game.foundations[0].append(Card(suit='S', rank=2, is_face_up=True))
+        self.game.tableau[1] = [Card(suit='C', rank=3, is_face_up=True)]
+        self.assertFalse(self.game.can_move_foundation_to_tableau(src_found=0, dest_col=1))
+
+    def test_moving_face_up_tableau_runs(self):
+        # Setup tableau with face-down card, then a run of Red 10, Black 9, Red 8 (all face-up)
+        self.game.tableau[0] = [
+            Card(suit='C', rank=12, is_face_up=False), # Face down King
+            Card(suit='D', rank=10, is_face_up=True),
+            Card(suit='S', rank=9, is_face_up=True),
+            Card(suit='H', rank=8, is_face_up=True)
+        ]
+        # Target has Black Jack (11)
+        self.game.tableau[1] = [Card(suit='C', rank=11, is_face_up=True)]
+
+        # Move the entire run starting at Red 10 (card_idx = 1) -> Legal
+        self.assertTrue(self.game.can_move_tableau_to_tableau(src_col=0, dest_col=1, card_idx=1))
+        
+        # Perform move
+        success = self.game.move_tableau_to_tableau(src_col=0, dest_col=1, card_idx=1)
+        self.assertTrue(success)
+
+        # Check source pile has only 1 card left and it got automatically flipped face up!
+        self.assertEqual(len(self.game.tableau[0]), 1)
+        self.assertTrue(self.game.tableau[0][0].is_face_up)
+
+        # Check dest pile has 4 cards (Jack, 10, 9, 8) and their order and attributes are correct
+        self.assertEqual(len(self.game.tableau[1]), 4)
+        self.assertEqual(self.game.tableau[1][1], Card(suit='D', rank=10, is_face_up=True))
+        self.assertEqual(self.game.tableau[1][2], Card(suit='S', rank=9, is_face_up=True))
+        self.assertEqual(self.game.tableau[1][3], Card(suit='H', rank=8, is_face_up=True))
+
+        # Check moving an invalid run (e.g. non-alternating or face-down card) is prevented
+        self.game.tableau[2] = [
+            Card(suit='D', rank=5, is_face_up=True),
+            Card(suit='H', rank=4, is_face_up=True)  # same color! invalid run
+        ]
+        self.game.tableau[3] = [Card(suit='C', rank=6, is_face_up=True)]
+        self.assertFalse(self.game.can_move_tableau_to_tableau(src_col=2, dest_col=3, card_idx=0))
+
 if __name__ == '__main__':
     unittest.main()
