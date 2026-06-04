@@ -1,0 +1,630 @@
+diff --git a/card-game-app/src/card_game_tui/domain.py b/card-game-app/src/card_game_tui/domain.py
+index db4a2fa8f..fe733cef3 100644
+--- a/card-game-app/src/card_game_tui/domain.py
++++ b/card-game-app/src/card_game_tui/domain.py
+@@ -1,5 +1,5 @@
+ import random
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from enum import Enum, auto
+ from typing import List, Union, Dict
+ 
+@@ -84,6 +84,10 @@ class MoveRecord:
+     cards: List[Card]  # Captured for single or sequence moves
+     auto_moves: List['MoveRecord'] = None  # Nested moves triggered by auto-homing
+ 
++    def __post_init__(self):
++        if self.auto_moves is None:
++            self.auto_moves = []
++
+ class GameState:
+     def __init__(self, seed: int = None):
+         self.tableaus: List[List[Card]] = Deck(seed).deal()
+@@ -107,7 +111,108 @@ class GameState:
+         """
+         Calculates whether moving 'count' cards from from_pos to to_pos is legal.
+         """
+-        # Placeholder for validation
++        if count < 1:
++            return False
++
++        if from_pos == to_pos:
++            return False
++
++        # Validate index boundaries
++        if from_pos.type == LocationType.TABLEAU:
++            if not (0 <= from_pos.index < 8):
++                return False
++        elif from_pos.type == LocationType.FREECELL:
++            if not (0 <= from_pos.index < 4):
++                return False
++            if count != 1:
++                return False
++        elif from_pos.type == LocationType.FOUNDATION:
++            return False
++        else:
++            return False
++
++        if to_pos.type == LocationType.TABLEAU:
++            if not (0 <= to_pos.index < 8):
++                return False
++        elif to_pos.type == LocationType.FREECELL:
++            if not (0 <= to_pos.index < 4):
++                return False
++            if count != 1:
++                return False
++        elif to_pos.type == LocationType.FOUNDATION:
++            if not (0 <= to_pos.index < 4):
++                return False
++            if count != 1:
++                return False
++        else:
++            return False
++
++        # Extract moving cards
++        if from_pos.type == LocationType.FREECELL:
++            card = self.freecells[from_pos.index]
++            if card is None:
++                return False
++            moving_cards = [card]
++        elif from_pos.type == LocationType.TABLEAU:
++            col = self.tableaus[from_pos.index]
++            if len(col) < count:
++                return False
++            moving_cards = col[-count:]
++        else:
++            return False
++
++        # Validate sequence if moving multiple cards
++        if count > 1:
++            for i in range(count - 1):
++                c1 = moving_cards[i]
++                c2 = moving_cards[i+1]
++                if c2.rank.value != c1.rank.value - 1:
++                    return False
++                if c2.suit.color == c1.suit.color:
++                    return False
++
++        # Validate destination constraints
++        if to_pos.type == LocationType.FREECELL:
++            if self.freecells[to_pos.index] is not None:
++                return False
++
++        elif to_pos.type == LocationType.FOUNDATION:
++            target_suit = list(Suit)[to_pos.index]
++            card = moving_cards[0]
++            if card.suit != target_suit:
++                return False
++            
++            foundation_pile = self.foundations[target_suit]
++            if card.rank == Rank.ACE:
++                if len(foundation_pile) != 0:
++                    return False
++            else:
++                if len(foundation_pile) != card.rank.value - 1:
++                    return False
++
++        elif to_pos.type == LocationType.TABLEAU:
++            dest_col = self.tableaus[to_pos.index]
++            first_moving_card = moving_cards[0]
++            if len(dest_col) > 0:
++                dest_top_card = dest_col[-1]
++                if first_moving_card.rank.value != dest_top_card.rank.value - 1:
++                    return False
++                if first_moving_card.suit.color == dest_top_card.suit.color:
++                    return False
++
++            # Capacity constraint
++            empty_freecells = sum(1 for c in self.freecells if c is None)
++            empty_tableaus = sum(1 for col in self.tableaus if len(col) == 0)
++
++            if len(dest_col) == 0:
++                transit_empty_tableaus = max(0, empty_tableaus - 1)
++            else:
++                transit_empty_tableaus = empty_tableaus
++
++            max_cards = (1 + empty_freecells) * (2 ** transit_empty_tableaus)
++            if count > max_cards:
++                return False
++
+         return True
+ 
+     def execute_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:
+@@ -116,12 +221,156 @@ class GameState:
+         """
+         if not self.validate_move(from_pos, to_pos, count):
+             return False
++
++        # Extract moving cards
++        if from_pos.type == LocationType.FREECELL:
++            moving_cards = [self.freecells[from_pos.index]]
++        elif from_pos.type == LocationType.TABLEAU:
++            moving_cards = self.tableaus[from_pos.index][-count:]
++        else:
++            return False
++
++        move_record = MoveRecord(from_pos=from_pos, to_pos=to_pos, cards=moving_cards)
++        
++        # Apply the move
++        self._apply_single_move(move_record)
++        
++        # Run auto-homing
++        self._run_auto_homing(move_record)
++        
++        # Record on stacks
++        self.undo_stack.append(move_record)
++        self.redo_stack.clear()
++        return True
++
++    def _apply_single_move(self, record: MoveRecord):
++        # Remove from from_pos
++        if record.from_pos.type == LocationType.FREECELL:
++            self.freecells[record.from_pos.index] = None
++        elif record.from_pos.type == LocationType.TABLEAU:
++            count = len(record.cards)
++            self.tableaus[record.from_pos.index] = self.tableaus[record.from_pos.index][:-count]
++
++        # Put to to_pos
++        if record.to_pos.type == LocationType.FREECELL:
++            self.freecells[record.to_pos.index] = record.cards[0]
++        elif record.to_pos.type == LocationType.FOUNDATION:
++            target_suit = list(Suit)[record.to_pos.index]
++            self.foundations[target_suit].append(record.cards[0])
++        elif record.to_pos.type == LocationType.TABLEAU:
++            self.tableaus[record.to_pos.index].extend(record.cards)
++
++    def _revert_single_move(self, record: MoveRecord):
++        # Remove from to_pos
++        if record.to_pos.type == LocationType.FREECELL:
++            self.freecells[record.to_pos.index] = None
++        elif record.to_pos.type == LocationType.FOUNDATION:
++            target_suit = list(Suit)[record.to_pos.index]
++            self.foundations[target_suit].pop()
++        elif record.to_pos.type == LocationType.TABLEAU:
++            count = len(record.cards)
++            self.tableaus[record.to_pos.index] = self.tableaus[record.to_pos.index][:-count]
++
++        # Put to from_pos
++        if record.from_pos.type == LocationType.FREECELL:
++            self.freecells[record.from_pos.index] = record.cards[0]
++        elif record.from_pos.type == LocationType.TABLEAU:
++            self.tableaus[record.from_pos.index].extend(record.cards)
++
++    def _should_auto_home(self, card: Card) -> bool:
++        """
++        Checks if a card can be safely auto-homed to the foundations.
++        """
++        target_foundation = self.foundations[card.suit]
++        if card.rank.value != len(target_foundation) + 1:
++            return False
++
++        # Opposite color suits must have all lower cards in the foundations
++        if card.suit.color == "RED":
++            opp_suits = [Suit.CLUBS, Suit.SPADES]
++        else:
++            opp_suits = [Suit.HEARTS, Suit.DIAMONDS]
++
++        for s_opp in opp_suits:
++            if len(self.foundations[s_opp]) < card.rank.value - 1:
++                return False
++
+         return True
+ 
++    def _run_auto_homing(self, move_record: MoveRecord):
++        """
++        Scans freecells and tableau tops, moving eligible cards to foundations.
++        Repeats until no more cards can be auto-homed.
++        """
++        any_homed = True
++        while any_homed:
++            any_homed = False
++            
++            # Check free cells
++            for i, card in enumerate(self.freecells):
++                if card is not None and self._should_auto_home(card):
++                    from_p = Position(LocationType.FREECELL, i)
++                    suit_idx = list(Suit).index(card.suit)
++                    to_p = Position(LocationType.FOUNDATION, suit_idx)
++                    
++                    auto_rec = MoveRecord(from_pos=from_p, to_pos=to_p, cards=[card])
++                    self._apply_single_move(auto_rec)
++                    move_record.auto_moves.append(auto_rec)
++                    
++                    any_homed = True
++                    break
++            
++            if any_homed:
++                continue
++
++            # Check tableaus
++            for i, col in enumerate(self.tableaus):
++                if col:
++                    card = col[-1]
++                    if self._should_auto_home(card):
++                        from_p = Position(LocationType.TABLEAU, i)
++                        suit_idx = list(Suit).index(card.suit)
++                        to_p = Position(LocationType.FOUNDATION, suit_idx)
++                        
++                        auto_rec = MoveRecord(from_pos=from_p, to_pos=to_p, cards=[card])
++                        self._apply_single_move(auto_rec)
++                        move_record.auto_moves.append(auto_rec)
++                        
++                        any_homed = True
++                        break
++
+     def undo(self) -> bool:
+         """Reverts the last move, including nested auto-homing steps."""
+         if not self.undo_stack:
+             return False
++        
++        move_record = self.undo_stack.pop()
++        
++        # Revert auto moves in reverse order
++        for auto_move in reversed(move_record.auto_moves):
++            self._revert_single_move(auto_move)
++            
++        # Revert the main move
++        self._revert_single_move(move_record)
++        
++        self.redo_stack.append(move_record)
++        return True
++
++    def redo(self) -> bool:
++        """Reapplies the last undone move."""
++        if not self.redo_stack:
++            return False
++            
++        move_record = self.redo_stack.pop()
++        
++        # Apply the main move
++        self._apply_single_move(move_record)
++        
++        # Re-apply auto moves
++        for auto_move in move_record.auto_moves:
++            self._apply_single_move(auto_move)
++            
++        self.undo_stack.append(move_record)
+         return True
+ 
+     def check_win(self) -> bool:
+diff --git a/card-game-app/tests/test_domain.py b/card-game-app/tests/test_domain.py
+index 3ddb4344b..0fa4360ed 100644
+--- a/card-game-app/tests/test_domain.py
++++ b/card-game-app/tests/test_domain.py
+@@ -1,3 +1,4 @@
++import copy
+ from card_game_tui.domain import GameState, Suit, Rank, Card, Deck, LocationType, Position
+ 
+ def test_deck_deals_52_cards():
+@@ -18,3 +19,331 @@ def test_get_card_at():
+     card = state.get_card_at(pos)
+     assert card is not None
+     assert isinstance(card, Card)
++
++def test_deck_deterministic_seeding():
++    deck1 = Deck(seed=42)
++    deck2 = Deck(seed=42)
++    assert deck1.cards == deck2.cards
++
++    # Verify uniqueness of 52 cards
++    assert len(set(deck1.cards)) == 52
++
++def test_moves_to_free_cells():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++
++    # Put a card in Tableau 0
++    c_hearts = Card(Suit.HEARTS, Rank.TEN)
++    state.tableaus[0] = [c_hearts]
++
++    from_pos = Position(LocationType.TABLEAU, 0)
++    to_pos = Position(LocationType.FREECELL, 0)
++
++    # Valid single card move to empty freecell
++    assert state.validate_move(from_pos, to_pos, count=1) is True
++    
++    # Try invalid sequence count to free cell
++    assert state.validate_move(from_pos, to_pos, count=2) is False
++
++    # Execute move
++    assert state.execute_move(from_pos, to_pos, count=1) is True
++    assert state.freecells[0] == c_hearts
++    assert len(state.tableaus[0]) == 0
++
++    # Try moving to occupied freecell
++    state.tableaus[0] = [Card(Suit.SPADES, Rank.FIVE)]
++    assert state.validate_move(from_pos, to_pos, count=1) is False
++
++    # Try moving to invalid freecell index
++    invalid_to_pos = Position(LocationType.FREECELL, 4)
++    assert state.validate_move(from_pos, invalid_to_pos, count=1) is False
++
++def test_moves_to_foundations():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++
++    ace_hearts = Card(Suit.HEARTS, Rank.ACE)
++    two_hearts = Card(Suit.HEARTS, Rank.TWO)
++    three_hearts = Card(Suit.HEARTS, Rank.THREE)
++    ace_diamonds = Card(Suit.DIAMONDS, Rank.ACE)
++
++    state.tableaus[0] = [ace_hearts]
++    state.tableaus[1] = [two_hearts]
++    state.tableaus[2] = [three_hearts]
++    state.tableaus[3] = [ace_diamonds]
++
++    # Move Ace of Hearts to index 0 (HEARTS) foundation
++    # list(Suit) indices: 0: HEARTS, 1: DIAMONDS, 2: CLUBS, 3: SPADES
++    hearts_found = Position(LocationType.FOUNDATION, 0)
++    diamonds_found = Position(LocationType.FOUNDATION, 1)
++
++    # Valid Ace to empty foundation
++    assert state.validate_move(Position(LocationType.TABLEAU, 0), hearts_found, count=1) is True
++    # Invalid non-Ace to empty foundation
++    assert state.validate_move(Position(LocationType.TABLEAU, 1), hearts_found, count=1) is False
++    # Invalid Ace to wrong suit foundation
++    assert state.validate_move(Position(LocationType.TABLEAU, 3), hearts_found, count=1) is False
++
++    # Execute valid Ace move
++    assert state.execute_move(Position(LocationType.TABLEAU, 0), hearts_found, count=1) is True
++    assert state.foundations[Suit.HEARTS] == [ace_hearts]
++
++    # Now Two of Hearts is on Tableau 1. Can it move to Hearts foundation? Yes.
++    assert state.validate_move(Position(LocationType.TABLEAU, 1), hearts_found, count=1) is True
++    # Can Three of Hearts move? No, since it needs Two of Hearts first.
++    assert state.validate_move(Position(LocationType.TABLEAU, 2), hearts_found, count=1) is False
++
++def test_moves_to_tableau_single_card():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++
++    # Red 8 (Hearts) on Black 9 (Spades)
++    c_red8 = Card(Suit.HEARTS, Rank.EIGHT)
++    c_black9 = Card(Suit.SPADES, Rank.NINE)
++    
++    state.tableaus[0] = [c_red8]
++    state.tableaus[1] = [c_black9]
++
++    # Test moving Red 8 onto Black 9
++    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is True
++
++    # Test same color invalid move: Red 8 (Hearts) on Red 9 (Diamonds)
++    c_red9 = Card(Suit.DIAMONDS, Rank.NINE)
++    state.tableaus[1] = [c_red9]
++    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is False
++
++    # Test wrong rank invalid move: Red 8 on Black 10 (Spades)
++    c_black10 = Card(Suit.SPADES, Rank.TEN)
++    state.tableaus[1] = [c_black10]
++    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is False
++
++    # Test moving to empty tableau
++    state.tableaus[1] = []
++    assert state.validate_move(Position(LocationType.TABLEAU, 0), Position(LocationType.TABLEAU, 1), count=1) is True
++
++def test_sequence_moves_tableau_to_tableau():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++    
++    # Red 10, Black 9, Red 8, Black 7, Red 6
++    c10 = Card(Suit.HEARTS, Rank.TEN)
++    c9 = Card(Suit.SPADES, Rank.NINE)
++    c8 = Card(Suit.DIAMONDS, Rank.EIGHT)
++    c7 = Card(Suit.CLUBS, Rank.SEVEN)
++    c6 = Card(Suit.HEARTS, Rank.SIX)
++    
++    state.tableaus[0] = [c10, c9, c8, c7, c6]
++    state.tableaus[1] = [Card(Suit.SPADES, Rank.JACK)]
++    
++    # 4 empty freecells, 6 empty tableaus.
++    # Exclude destination: no, destination is Col 1 which has 1 card (not empty).
++    # Transit empty tableaus = 6
++    # Max cards = (1 + 4) * 2^6 = 5 * 64 = 320 cards.
++    # Moving 5 cards should be valid!
++    from_pos = Position(LocationType.TABLEAU, 0)
++    to_pos = Position(LocationType.TABLEAU, 1)
++    assert state.validate_move(from_pos, to_pos, count=5) is True
++    
++    # Restrict capacity
++    state.freecells = [Card(Suit.CLUBS, Rank.TWO)] * 4  # 0 empty freecells
++    for i in range(2, 8):
++        state.tableaus[i] = [Card(Suit.DIAMONDS, Rank.KING)]  # 0 empty tableaus
++    # Now empty freecells = 0, empty tableaus = 0
++    # Max cards = (1 + 0) * 2^0 = 1
++    # Moving 5 cards should be invalid
++    assert state.validate_move(from_pos, to_pos, count=5) is False
++
++def test_sequence_moves_to_empty_tableau():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++
++    # Sequence of 3 cards on Col 0: Red 10, Black 9, Red 8
++    c10 = Card(Suit.HEARTS, Rank.TEN)
++    c9 = Card(Suit.SPADES, Rank.NINE)
++    c8 = Card(Suit.DIAMONDS, Rank.EIGHT)
++    state.tableaus[0] = [c10, c9, c8]
++
++    # Destination is Col 1 (empty)
++    # We want to move 2 cards: Black 9, Red 8
++    # Capacity constraint:
++    # Destination Col 1 is empty, so transit_empty_tableaus = empty_tableaus - 1.
++    # Empty tableaus before move = 7.
++    # Transit empty tableaus = 6.
++    # Empty free cells = 4.
++    # Max cards = (1 + 4) * 2^6 = 320.
++    from_pos = Position(LocationType.TABLEAU, 0)
++    to_pos = Position(LocationType.TABLEAU, 1)
++    assert state.validate_move(from_pos, to_pos, count=2) is True
++
++    # Restrict capacity so Max Cards is exactly 1
++    state.freecells = [Card(Suit.CLUBS, Rank.TWO)] * 4  # 0 empty free cells
++    for i in range(2, 8):
++        state.tableaus[i] = [Card(Suit.DIAMONDS, Rank.KING)]  # 0 transit empty tableaus
++    # Empty freecells = 0, empty tableaus = 1 (Col 1).
++    # Since Col 1 is the destination, transit_empty_tableaus = 1 - 1 = 0.
++    # Max cards = (1 + 0) * 2^0 = 1.
++    # Moving 2 cards should be invalid, but 1 card should be valid.
++    assert state.validate_move(from_pos, to_pos, count=2) is False
++    assert state.validate_move(from_pos, to_pos, count=1) is True
++
++def test_auto_homing_logic():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++
++    # Hearts is RED. Opposite suits are CLUBS and SPADES.
++    # Put Ace of Hearts in Tableau 0.
++    state.tableaus[0] = [Card(Suit.HEARTS, Rank.ACE)]
++    # Put King of Spades in Tableau 1 to use as a dummy move trigger.
++    state.tableaus[1] = [Card(Suit.SPADES, Rank.KING)]
++    
++    assert len(state.foundations[Suit.HEARTS]) == 0
++    
++    # Execute move of King of Spades to FreeCell 0. This should trigger auto-homing of Ace of Hearts.
++    from_pos = Position(LocationType.TABLEAU, 1)
++    to_pos = Position(LocationType.FREECELL, 0)
++    success = state.execute_move(from_pos, to_pos, count=1)
++    assert success is True
++    
++    assert state.freecells[0] == Card(Suit.SPADES, Rank.KING)
++    assert len(state.tableaus[0]) == 0
++    assert len(state.foundations[Suit.HEARTS]) == 1
++    assert state.foundations[Suit.HEARTS][0] == Card(Suit.HEARTS, Rank.ACE)
++    
++    # Two of Hearts is put in Tableau 0.
++    # Foundations: Hearts has Ace. CLUBS has [], SPADES has [].
++    # Opposite color (Black) lower cards are Ace of Clubs and Ace of Spades.
++    # Since they are NOT in the foundations, Two of Hearts should NOT auto-home.
++    state.tableaus[0] = [Card(Suit.HEARTS, Rank.TWO)]
++    
++    # Move King of Spades from FreeCell 0 to Tableau 1 to trigger auto-homing checks
++    from_pos = Position(LocationType.FREECELL, 0)
++    to_pos = Position(LocationType.TABLEAU, 1)
++    success = state.execute_move(from_pos, to_pos, count=1)
++    assert success is True
++    
++    # Two of Hearts should still be in Tableau 0 (not auto-homed)
++    assert len(state.tableaus[0]) == 1
++    assert state.tableaus[0][0] == Card(Suit.HEARTS, Rank.TWO)
++    assert len(state.foundations[Suit.HEARTS]) == 1
++    
++    # Place Ace of Clubs and Ace of Spades in their foundations.
++    state.foundations[Suit.CLUBS] = [Card(Suit.CLUBS, Rank.ACE)]
++    state.foundations[Suit.SPADES] = [Card(Suit.SPADES, Rank.ACE)]
++    
++    # Move King of Spades back to FreeCell 0 to trigger auto-homing checks
++    from_pos = Position(LocationType.TABLEAU, 1)
++    to_pos = Position(LocationType.FREECELL, 0)
++    success = state.execute_move(from_pos, to_pos, count=1)
++    assert success is True
++    
++    # Two of Hearts should now have auto-homed!
++    assert len(state.tableaus[0]) == 0
++    assert len(state.foundations[Suit.HEARTS]) == 2
++    assert state.foundations[Suit.HEARTS][1] == Card(Suit.HEARTS, Rank.TWO)
++
++def test_undo_redo_system():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++
++    # Col 0: [Red 10 (Hearts)]
++    # Col 1: [Black J (Spades)]
++    c10 = Card(Suit.HEARTS, Rank.TEN)
++    cJ = Card(Suit.SPADES, Rank.JACK)
++    state.tableaus[0] = [c10]
++    state.tableaus[1] = [cJ]
++
++    # Save original state for verification
++    orig_tableaus = copy.deepcopy(state.tableaus)
++    orig_freecells = copy.deepcopy(state.freecells)
++    orig_foundations = copy.deepcopy(state.foundations)
++
++    # 1. Execute a move
++    from_pos = Position(LocationType.TABLEAU, 0)
++    to_pos = Position(LocationType.TABLEAU, 1)
++    success = state.execute_move(from_pos, to_pos, count=1)
++    assert success is True
++    
++    assert state.tableaus[0] == []
++    assert state.tableaus[1] == [cJ, c10]
++    
++    # 2. Undo the move
++    undo_success = state.undo()
++    assert undo_success is True
++    assert state.tableaus == orig_tableaus
++    assert state.freecells == orig_freecells
++    assert state.foundations == orig_foundations
++
++    # 3. Redo the move
++    redo_success = state.redo()
++    assert redo_success is True
++    assert state.tableaus[0] == []
++    assert state.tableaus[1] == [cJ, c10]
++
++    # 4. Undo again to restore
++    assert state.undo() is True
++    assert state.tableaus == orig_tableaus
++
++def test_undo_with_auto_homing():
++    state = GameState()
++    state.tableaus = [[] for _ in range(8)]
++    state.freecells = [None] * 4
++    state.foundations = {suit: [] for suit in Suit}
++
++    # Tableau 0: Ace of Hearts
++    # Tableau 1: King of Spades
++    # Move King of Spades to FreeCell 0. This will trigger auto-homing of Ace of Hearts to foundation.
++    state.tableaus[0] = [Card(Suit.HEARTS, Rank.ACE)]
++    state.tableaus[1] = [Card(Suit.SPADES, Rank.KING)]
++
++    orig_tableaus = copy.deepcopy(state.tableaus)
++    orig_freecells = copy.deepcopy(state.freecells)
++    orig_foundations = copy.deepcopy(state.foundations)
++
++    from_pos = Position(LocationType.TABLEAU, 1)
++    to_pos = Position(LocationType.FREECELL, 0)
++    success = state.execute_move(from_pos, to_pos, count=1)
++    assert success is True
++
++    # Check state after move and auto-homing
++    assert state.freecells[0] == Card(Suit.SPADES, Rank.KING)
++    assert len(state.tableaus[0]) == 0
++    assert len(state.foundations[Suit.HEARTS]) == 1
++
++    # Undo the move! This should revert both King of Spades and Ace of Hearts!
++    undo_success = state.undo()
++    assert undo_success is True
++    assert state.tableaus == orig_tableaus
++    assert state.freecells == orig_freecells
++    assert state.foundations == orig_foundations
++
++    # Redo the move!
++    redo_success = state.redo()
++    assert redo_success is True
++    assert state.freecells[0] == Card(Suit.SPADES, Rank.KING)
++    assert len(state.tableaus[0]) == 0
++    assert len(state.foundations[Suit.HEARTS]) == 1
++
++def test_win_detection():
++    state = GameState()
++    # Fill foundations
++    for suit in Suit:
++        state.foundations[suit] = [Card(suit, rank) for rank in Rank]
++    assert state.check_win() is True
++
++    # Remove one card
++    state.foundations[Suit.HEARTS].pop()
++    assert state.check_win() is False
