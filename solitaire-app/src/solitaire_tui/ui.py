@@ -1,5 +1,5 @@
 import curses
-from game import GameState, Card
+from .game import GameState, Card
 from typing import Optional, Tuple
 
 class SolitaireTUI:

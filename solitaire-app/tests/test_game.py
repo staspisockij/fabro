@@ -1,5 +1,5 @@
 import unittest
-from game import GameState, Card
+from solitaire_tui.game import GameState, Card
 
 class TestSolitaireGame(unittest.TestCase):
     def setUp(self):

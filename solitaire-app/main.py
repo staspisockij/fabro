@@ -1,6 +1,15 @@
 import sys
+import os
 import argparse
 import unittest
+
+# Ensure the "src" directory and current directory are on sys.path so imports work seamlessly
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_dir = os.path.join(current_dir, "src")
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+if current_dir not in sys.path:
+    sys.path.insert(1, current_dir)
 
 def run_smoke_test() -> None:
     """Proves imports work, instantiates core classes, and runs self-tests."""
@@ -8,8 +17,8 @@ def run_smoke_test() -> None:
     
     # 1. Test Imports
     try:
-        from game import Card, GameState
-        from ui import SolitaireTUI
+        from solitaire_tui.game import Card, GameState
+        from solitaire_tui.ui import SolitaireTUI
         print("✓ Successfully imported core modules (game, ui).")
     except Exception as e:
         print(f"✗ Failed to import core modules: {e}")
@@ -29,9 +38,14 @@ def run_smoke_test() -> None:
     # 3. Run full unit tests to confirm rule-engine validity
     print("Running automated unit tests...")
     loader = unittest.TestLoader()
-    # Discover and run tests in the solitaire-app folder
-    from test_game import TestSolitaireGame
-    suite = loader.loadTestsFromTestCase(TestSolitaireGame)
+    # Discover and run tests
+    try:
+        from tests.test_game import TestSolitaireGame
+        suite = loader.loadTestsFromTestCase(TestSolitaireGame)
+    except Exception as e:
+        print(f"✗ Failed to import tests: {e}")
+        sys.exit(1)
+        
     runner = unittest.TextTestRunner(verbosity=1)
     result = runner.run(suite)
     
@@ -58,8 +72,8 @@ def main() -> None:
 
     # Normal execution starts curses-based TUI
     import curses
-    from game import GameState
-    from ui import SolitaireTUI
+    from solitaire_tui.game import GameState
+    from solitaire_tui.ui import SolitaireTUI
 
     game = GameState()
     tui = SolitaireTUI(game)
