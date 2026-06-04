@@ -1,0 +1,378 @@
+diff --git a/.ai/card-game-spec.md b/.ai/card-game-spec.md
+new file mode 100644
+index 000000000..ccc4bc1b0
+--- /dev/null
++++ b/.ai/card-game-spec.md
+@@ -0,0 +1,362 @@
++# Technical Specification: Terminal-Based FreeCell Solitaire in Python
++
++This document specifies the architecture, domain logic, user interface, and testing strategy for a terminal-based FreeCell Solitaire game built with Python. 
++
++The application is split into two completely decoupled layers:
++1. **Core Domain Model / Game Engine**: Fully testable, framework-independent, pure-Python representations of cards, piles, moves, validation, and game state.
++2. **Curses-based Terminal UI (TUI)**: A visual presentation layer built on the standard-library `curses` module, handling input polling, terminal events (like resizing), and colorized rendering.
++
++---
++
++## 1. Game Rules & Mechanics
++
++FreeCell is a solitaire card game played with a single standard 52-card deck. All cards are dealt face-up at the start.
++
++### 1.1 Table Layout
++The game screen consists of three main areas:
++- **Free Cells (4 cells)**: Temporary holding spaces. Each cell can hold at most one card of any suit and rank.
++- **Foundations (4 piles)**: Destination piles built up by suit from Ace (rank 1) through King (rank 13). Winning the game requires placing all 52 cards here.
++- **Tableau (8 columns)**: The main play area. Columns 1–4 are dealt 7 cards each; columns 5–8 are dealt 6 cards each.
++
++### 1.2 Movement Rules
++- **Moving to a Free Cell**: Any single card can be moved to an empty Free Cell.
++- **Moving to a Foundation**:
++  - An **Ace** can be moved to an empty Foundation pile.
++  - A card of rank $R$ and suit $S$ can be placed on a Foundation pile if the current top card of that pile is of suit $S$ and rank $R - 1$.
++- **Moving to a Tableau Column**:
++  - A single card of rank $R$ and color $C$ can be placed on top of a tableau card of rank $R+1$ and the *opposite* color (e.g., a Black 7 on a Red 8).
++  - An empty tableau column can accept any single card.
++- **Sequence Moves (Multiple Cards)**:
++  - A sequence of cards that is properly ordered (descending ranks and alternating colors) can be moved together from one tableau column to another.
++  - The maximum size of a sequence that can be moved depends on the number of empty Free Cells and empty Tableau columns available as temporary landing zones.
++  - **Formula for Max Move Size**:
++    $$\text{Max Cards} = (1 + \text{Empty Free Cells}) \times 2^{\text{Empty Tableau Columns}}$$
++    *Exception*: If the destination column is an empty tableau column, that empty column does not count as "empty" in the exponent of the formula (as it is the final destination, not a temporary transit zone).
++
++### 1.3 Automatic Moves ("Auto-Homing")
++To reduce tedious manual moves, the engine should automatically move cards to the Foundations if they can no longer be used as transition cards for lower-ranked cards. A card of rank $R$ and suit $S$ can safely be "auto-homed" to its Foundation if:
++1. It is a legal move (it is on top of a tableau/freecell and matches $R-1$ of its foundation).
++2. All cards of the *opposite color* with rank $R-1$ or lower have already been placed in the foundations. This ensures that no card still needs to be built on top of this card in the tableaus.
++
++---
++
++## 2. Core Domain Architecture (Non-UI)
++
++All domain logic must reside in classes that do not import or assume a `curses` environment. This ensures unit tests can run in headless CI environments.
++
++```
+++-------------------------------------------------------------+
++|                        Domain Model                         |
++|                                                             |
++|   +----------------+     +---------------+                  |
++|   |      Card      |---> |     Deck      |                  |
++|   +----------------+     +---------------+                  |
++|            |                                                |
++|            v                                                |
++|   +----------------+                                        |
++|   |   GameState    | <--- Handles validation, moves, undo   |
++|   +----------------+                                        |
+++-------------------------------------------------------------+
++```
++
++### 2.1 Domain Types & Data Structures
++
++#### Card Representation
++```python
++from dataclasses import dataclass
++from enum import Enum, auto
++
++class Suit(Enum):
++    HEARTS = "H"
++    DIAMONDS = "D"
++    CLUBS = "C"
++    SPADES = "S"
++
++    @property
++    def color(self) -> str:
++        return "RED" if self in (Suit.HEARTS, Suit.DIAMONDS) else "BLACK"
++
++    @property
++    def symbol(self) -> str:
++        # Unicode symbols for attractive rendering
++        return {
++            Suit.HEARTS: "♥",
++            Suit.DIAMONDS: "♦",
++            Suit.CLUBS: "♣",
++            Suit.SPADES: "♠"
++        }[self]
++
++class Rank(Enum):
++    ACE = 1
++    TWO = 2
++    THREE = 3
++    FOUR = 4
++    FIVE = 5
++    SIX = 6
++    SEVEN = 7
++    EIGHT = 8
++    NINE = 9
++    TEN = 10
++    JACK = 11
++    QUEEN = 12
++    KING = 13
++
++    @property
++    def label(self) -> str:
++        if self.value == 1: return "A"
++        if self.value == 11: return "J"
++        if self.value == 12: return "Q"
++        if self.value == 13: return "K"
++        return str(self.value)
++
++@dataclass(frozen=True)
++class Card:
++    suit: Suit
++    rank: Rank
++
++    def __repr__(self) -> str:
++        return f"{self.rank.label}{self.suit.symbol}"
++```
++
++#### Deck & Setup
++```python
++import random
++from typing import List
++
++class Deck:
++    def __init__(self, seed: int = None):
++        self.cards = [Card(suit, rank) for suit in Suit for rank in Rank]
++        if seed is not None:
++            random.seed(seed)
++        random.shuffle(self.cards)
++
++    def deal(self) -> List[List[Card]]:
++        """Deals 52 cards into 8 columns."""
++        tableaus: List[List[Card]] = [[] for _ in range(8)]
++        for i, card in enumerate(self.cards):
++            tableaus[i % 8].append(card)
++        return tableaus
++```
++
++#### Move Representation
++To support an robust Undo/Redo stack, each move is captured as a detailed state transition:
++```python
++from typing import Union
++
++class LocationType(Enum):
++    TABLEAU = auto()
++    FREECELL = auto()
++    FOUNDATION = auto()
++
++@dataclass(frozen=True)
++class Position:
++    type: LocationType
++    index: int  # 0-7 for Tableau, 0-3 for FreeCell, 0-3 for Foundation
++
++@dataclass
++class MoveRecord:
++    from_pos: Position
++    to_pos: Position
++    cards: List[Card]  # Captured for single or sequence moves
++    auto_moves: List['MoveRecord'] = None  # Nested moves triggered by auto-homing
++```
++
++### 2.2 Core Engine (`GameState`)
++The state engine encapsulates all state, mutations, validation, and history.
++
++```python
++class GameState:
++    def __init__(self, seed: int = None):
++        self.tableaus: List[List[Card]] = Deck(seed).deal()
++        self.freecells: List[Union[Card, None]] = [None] * 4
++        self.foundations: dict[Suit, List[Card]] = {suit: [] for suit in Suit}
++        self.undo_stack: List[MoveRecord] = []
++        self.redo_stack: List[MoveRecord] = []
++
++    def get_card_at(self, position: Position) -> Union[Card, None]:
++        if position.type == LocationType.FREECELL:
++            return self.freecells[position.index]
++        elif position.type == LocationType.FOUNDATION:
++            pile = self.foundations[list(Suit)[position.index]]
++            return pile[-1] if pile else None
++        elif position.type == LocationType.TABLEAU:
++            col = self.tableaus[position.index]
++            return col[-1] if col else None
++        return None
++
++    def validate_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:
++        """
++        Calculates whether moving 'count' cards from from_pos to to_pos is legal.
++        """
++        # 1. Basic boundary and type validations...
++        # 2. Extract card(s) to be moved...
++        # 3. Check target constraints (descending rank, alternate color for tableaus; suit-match ascending for foundation)
++        # 4. Check capacity constraints if sequence move (using the formula)
++        pass
++
++    def execute_move(self, from_pos: Position, to_pos: Position, count: int = 1) -> bool:
++        """
++        Executes a move, saves it to the undo stack, runs auto-homing, and clears the redo stack.
++        """
++        if not self.validate_move(from_pos, to_pos, count):
++            return False
++        # Perform move logic, handle nested auto-moves, append to undo_stack...
++        return True
++
++    def undo(self) -> bool:
++        """Reverts the last move, including nested auto-homing steps."""
++        if not self.undo_stack:
++            return False
++        # Revert changes using move records and push to redo stack...
++        return True
++
++    def check_win(self) -> bool:
++        """Returns True if all 52 cards are in the Foundations."""
++        return all(len(self.foundations[suit]) == 13 for suit in Suit)
++```
++
++---
++
++## 3. UI Layout & Visual Design
++
++The UI will be formatted to fit standard $80 \times 24$ terminal windows, but will dynamically adapt if larger screen space is available.
++
++### 3.1 Terminal ASCII / Unicode Grid Layout
++
++```
+++-----------------------------------------------------------------------------+
++| FREECELL SOLITAIRE                                           [SEED: 49281]  |
++|                                                                             |
++| Free Cells                      Foundations                                 |
++| [A]  [B]  [C]  [D]              [♥]     [♦]     [♣]     [♠]                 |
++| +---+ +---+ +---+ +---+         +---+   +---+   +---+   +---+               |
++| | 5♣| |   | |   | |   |         | A♥|   |   |   |   |   |   |               |
++| +---+ +---+ +---+ +---+         +---+   +---+   +---+   +---+               |
++|                                                                             |
++| Tableau Columns                                                             |
++|  [1]     [2]     [3]     [4]     [5]     [6]     [7]     [8]                |
++| +---+   +---+   +---+   +---+   +---+   +---+   +---+   +---+               |
++| | K♠|   | J♦|   | Q♣|   | 9♦|   | 8♣|   | 6♥|   | 10♦|  | A♠|               |
++| | Q♦|   | 10♣|  | 3♦|   | 8♥|   | 7♦|   | 5♦|   | 9♠|   |   |               |
++| | J♣|   |   |   | 2♠|   |   |   | 6♠|   |   |   |   |   |   |               |
++| | 10♦|  |   |   |   |   |   |   | 5♥|   |   |   |   |   |   |               |
++| +---+   +---+   +---+   +---+   +---+   +---+   +---+   +---+               |
++|                                                                             |
++|-----------------------------------------------------------------------------|
++| MSG: Selected [1] K♠. Choose destination column or cell.                    |
++| KEYS: [Arrows] Navigate  [Space] Select/Drop  [U] Undo  [R] Restart  [Q] Quit|
+++-----------------------------------------------------------------------------+
++```
++
++### 3.2 Visual Components and Curses Rendering Strategy
++
++1. **Card Rendering**:
++   - Empty slots (cells, tableaus, foundations) are rendered with dashed borders `· · ·` or generic outlines `[ ]`.
++   - Cards are rendered with a white background/colored foreground using curses color pairs:
++     - **Red Cards (Hearts, Diamonds)**: Red text on a white or black background.
++     - **Black Cards (Clubs, Spades)**: Bold white or cyan text on a black background (or black text on a white background).
++2. **Double-Buffered Screen**:
++   - Use `curses.newwin()` for distinct sub-regions (Top panel, Main game table, Status bar) to organize layout.
++   - Run calculations and render elements using memory-efficient double-buffering via `stdscr.noutrefresh()` and a final `curses.doupdate()`.
++3. **Cursor Navigation & Selection**:
++   - **Keyboard Cursor**: An active selection box/cursor highlighting a single pile/cell is moved via the **Arrow Keys** (or WASD).
++   - **Selection State**: 
++     - First press of `Space` or `Enter` on a non-empty slot highlights the card(s) to move (visual "lift" state).
++     - Moving the cursor to another column and pressing `Space` / `Enter` attempts the move.
++     - Pressing `Escape` cancels the active selection.
++
++---
++
++## 4. Input Handling & UI Interaction
++
++### 4.1 Curses Main Loop & Input States
++
++```
++                 +----------------------+
++                 |      Game Loop       |
++                 +----------------------+
++                            |
++                            v
++                     [ Wait for Key ]
++                            |
++             +--------------+--------------+
++             |                             |
++             v                             v
++     [ Action Key ]                [ Navigation Key ]
++   (Q, U, R, ESC, etc.)             (Arrows, Tab, WASD)
++             |                             |
++             v                             v
++      Handle Command               Move Cursor Highlight
++             |                             |
++             +--------------+--------------+
++                            |
++                            v
++                     [ Update State ]
++                            |
++                            v
++                      [ Redraw UI ]
++```
++
++### 4.2 Keybindings Map
++
++| Key | Action |
++| --- | --- |
++| `Left / Right / Up / Down` | Navigate cursor across cells, foundations, and tableaus |
++| `Space / Enter` | Select card at cursor / Move selected card to cursor target |
++| `Escape` | Clear active card selection |
++| `u / U` | Undo last move (supports infinite undo back to the start) |
++| `r / R` | Restart current game (with same seed/shuffling) |
++| `n / N` | Start a completely new game with a random seed |
++| `q / Q` | Exit the game gracefully (presents confirm dialog) |
++
++---
++
++## 5. Non-Interactive Smoke Mode
++
++To ensure the CLI can be verified programmatically without invoking an interactive full-screen curses environment, the application must support a non-interactive setup probe via `--smoke`:
++
++```bash
++python3 main.py --smoke
++```
++
++### 5.1 Smoke Mode Requirements:
++- Must not call `curses.initscr()`, `curses.wrapper()`, or perform terminal modifications.
++- Must initialize the domain engine (`GameState`) with a deterministic test seed.
++- Must execute a tiny mock transaction sequence (e.g., attempt 2 valid moves and 1 invalid move, validating assertion outcomes).
++- Must print a plain-text confirmation of the test result to stdout.
++- Must exit with status code `0` on success, or a non-zero exit code if an import or validation error occurs.
++
++---
++
++## 6. Testing Strategy
++
++Maintaining 100% testability on rules guarantees that bugs are never hidden behind UI refresh issues.
++
++### 6.1 Unit Tests (Headless)
++All game rule constraints must be tested inside a robust suite of unit tests (e.g. using `unittest` or `pytest`):
++
++- **Deck Verification**: Ensure 52 unique cards are present; verify that deterministic seeding generates identical layouts.
++- **Move Validations**:
++  - Valid and invalid moves to empty and occupied free cells.
++  - Valid sequence building on Tableau (alternating color, consecutive ranks).
++  - Multi-card tableau-to-tableau sequence validation obeying the formula: $(1 + \text{empty cells}) \times 2^{\text{empty tableaus}}$.
++  - Valid and invalid foundation building (Aces first, ordered ascending by suit).
++- **Auto-Homing Logic**: Verify that cards are only auto-homed when all cards of the opposite color of smaller rank have already been homed.
++- **Undo/Redo System**: Run a multi-step sequence, trigger undo, verify state completely matches initial configuration.
++- **Win Detection**: Construct a state where all but 1 card is homed, verify final homing triggers winning state flag.
++
++### 6.2 Curses Integration Tests
++For the UI layer, tests can mock the terminal dimensions and standard input keys using Python's `unittest.mock`:
++- Mock `curses.getch` and verify the cursor coordinates state shifts correctly.
++- Verify screen boundary logic prevents cursor overflow out of valid coordinates (e.g. going left of FreeCell column 0 or below the lowest card in a Tableau).
++
++---
++
++## 7. Implementation Milestones
++
++1. **Milestone 1**: Implement pure-domain `Card`, `Deck`, `Position`, and `GameState` engines.
++2. **Milestone 2**: Write unit tests proving full game validation logic and automated auto-homing.
++3. **Milestone 3**: Implement `--smoke` mode in CLI entrypoint and verify CI execution.
++4. **Milestone 4**: Setup curses framework window structure, color palettes, and draw static cards.
++5. **Milestone 5**: Implement interactive keyboard cursor, card selection mechanics, and execution hook.
++6. **Milestone 6**: Complete Undo-stack integration and terminal resize layout adjustment handler.
+diff --git a/status.json b/status.json
+new file mode 100644
+index 000000000..ee6907d7f
+--- /dev/null
++++ b/status.json
+@@ -0,0 +1,3 @@
++{
++  "outcome": "succeeded"
++}
+\ No newline at end of file
