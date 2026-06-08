@@ -237,6 +237,17 @@ impl Handler for ParallelHandler {
                 keys::INTERNAL_PARALLEL_BRANCH_ID,
                 serde_json::Value::String(parallel_branch_id.to_string()),
             );
+            // Seed target node as CURRENT_NODE so each branch gets a distinct
+            // StageId for SteeringHub lease (inherited parent node id causes
+            // single-lease contention across all parallel agent branches).
+            branch_context.set(
+                keys::CURRENT_NODE,
+                serde_json::Value::String(target_id.clone()),
+            );
+            branch_context.set(
+                keys::INTERNAL_NODE_VISIT_COUNT,
+                serde_json::json!(1),
+            );
 
             let (branch_sandbox, worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = if let (
                 Some(ref gs),
