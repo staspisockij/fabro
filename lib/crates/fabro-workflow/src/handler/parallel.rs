@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_hooks::{HookContext, HookEvent};
-use fabro_types::{ParallelBranchId, RunId, StageId};
+use fabro_types::{ParallelBranchId, RunId, StageId, StageTiming};
 use tokio::sync::Semaphore;
 
 use super::{EngineServices, Handler};
@@ -469,6 +469,36 @@ impl Handler for ParallelHandler {
                         duration_ms:        millis_u64(branch_start.elapsed()),
                         status:             outcome.status.to_string(),
                         head_sha:           head_sha.clone(),
+                    },
+                    &branch_scope,
+                );
+
+                let duration_ms = millis_u64(branch_start.elapsed());
+                let files_touched = outcome.files_touched.clone();
+                let failure = outcome.failure.clone();
+                let notes = outcome.notes.clone();
+                parent_run.emitter.emit_scoped(
+                    &Event::StageCompleted {
+                        node_id: setup.target_id.clone(),
+                        name: setup.target_id.clone(),
+                        index: setup.branch_index,
+                        timing: StageTiming::wall_only(duration_ms),
+                        status: outcome.status.to_string(),
+                        preferred_label: None,
+                        suggested_next_ids: outcome.suggested_next_ids.clone(),
+                        billing: None,
+                        failure,
+                        notes,
+                        files_touched,
+                        context_updates: None,
+                        jump_to_node: outcome.jump_to_node.clone(),
+                        context_values: None,
+                        node_visits: None,
+                        loop_failure_signatures: None,
+                        restart_failure_signatures: None,
+                        response: None,
+                        attempt: 1,
+                        max_attempts: 1,
                     },
                     &branch_scope,
                 );
