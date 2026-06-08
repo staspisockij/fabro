@@ -237,6 +237,17 @@ impl Handler for ParallelHandler {
                 keys::INTERNAL_PARALLEL_BRANCH_ID,
                 serde_json::Value::String(parallel_branch_id.to_string()),
             );
+            // Seed target node as CURRENT_NODE so each branch gets a distinct
+            // StageId for SteeringHub lease (inherited parent node id causes
+            // single-lease contention across all parallel agent branches).
+            branch_context.set(
+                keys::CURRENT_NODE,
+                serde_json::Value::String(target_id.clone()),
+            );
+            branch_context.set(
+                keys::INTERNAL_NODE_VISIT_COUNT,
+                serde_json::json!(1),
+            );
 
             let (branch_sandbox, worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = if let (
                 Some(ref gs),
@@ -979,5 +990,66 @@ mod tests {
             "expected no --no-verify when skip_git_hooks=false; got {cmd:?}"
         );
         assert!(cmd.contains("commit --allow-empty"));
+    }
+
+    #[test]
+    fn branch_context_overrides_current_node_from_parallel_parent() {
+        // Regression: parallel handler leaked parent CURRENT_NODE into
+        // branch contexts, causing all agent branches to compete for the
+        // same SteeringHub activation lease.
+        let parent = Context::new();
+        parent.set(
+            crate::context::keys::CURRENT_NODE,
+            serde_json::json!("fork"),
+        );
+        parent.set(
+            crate::context::keys::INTERNAL_NODE_VISIT_COUNT,
+            serde_json::json!(1),
+        );
+
+        let branch = parent.fork();
+        // Simulate the fix: seed target node into branch context
+        branch.set(
+            crate::context::keys::CURRENT_NODE,
+            serde_json::json!("branch_a"),
+        );
+        branch.set(
+            crate::context::keys::INTERNAL_NODE_VISIT_COUNT,
+            serde_json::json!(1),
+        );
+
+        let scope = StageScope::for_handler(&branch, "branch_a");
+        assert_eq!(
+            scope.stage_id(),
+            StageId::new("branch_a", 1),
+            "branch context must resolve to target node StageId, not parent fork StageId"
+        );
+    }
+
+    #[test]
+    fn branch_context_without_fix_inherits_parent_current_node() {
+        // Without seeding CURRENT_NODE, the branch inherits the parent's
+        // node id — this is the pre-fix buggy behavior captured as a
+        // regression test.
+        let parent = Context::new();
+        parent.set(
+            crate::context::keys::CURRENT_NODE,
+            serde_json::json!("fork"),
+        );
+        parent.set(
+            crate::context::keys::INTERNAL_NODE_VISIT_COUNT,
+            serde_json::json!(2),
+        );
+
+        let branch = parent.fork();
+        // Do NOT seed CURRENT_NODE — simulate pre-fix behavior
+
+        let scope = StageScope::for_handler(&branch, "branch_a");
+        // Without the fix, current_stage_scope() returns parent's node id
+        assert_eq!(
+            scope.stage_id(),
+            StageId::new("fork", 2),
+            "without fix, branch inherits parent node id causing SteeringHub lease collision"
+        );
     }
 }
